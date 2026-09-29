@@ -102,43 +102,33 @@ sessions across its projects. GLM entries created here need the local GLM index 
 remain available. Antigravity entries created here likewise need the local
 Antigravity index to remain available.
 
-Use **Conversations → New conversation in directory…** or type `new` to start
-a chat. Enter a directory path or choose one with **Browse…**. The **Create
-chat** button is available only when that directory exists. Each chat has one
-working directory, and files under that directory are available subject to the
-selected agent's permissions.
+Use the **New chat…** button, **Conversations → New conversation in
+directory…**, or type `new` to start a chat. In the dialog, choose the agent,
+then enter a directory path or choose one with **Browse…**. The **Create chat**
+button is available only when that directory exists. Each chat has one working
+directory, and files under that directory are available subject to the
+selected agent's permissions. Double-click a chat in the conversation tree to
+continue it with its agent and working directory.
 
 Type `help` (or `/help`) in the command field to see the available commands.
 With Codex selected, it shows the complete output of `codex app-server --help`
 and explains that the client uses direct stdio mode. CLI subcommands shown in
 that output are reference information and are not chat messages.
 With Claude or GLM selected, it explains the SDK workflow
-and shows `claude --help` when the Claude CLI is installed. Use the Add directory
-button to give that agent access to an additional folder in the current session.
-The directory is passed to the SDK using `add_dirs`; it is not saved as a global
-Claude Code trust setting. CLI options are shown for reference; this window
+and shows `claude --help` when the Claude CLI is installed. CLI options are shown for reference; this window
 communicates through the SDK. Claude Code's interactive slash commands are
 listed in the [Claude Code commands reference](https://code.claude.com/docs/en/commands).
 See [Z.AI's Claude Code setup](https://docs.z.ai/devpack/tool/claude) for GLM.
 
-With Gemini selected, `help` shows `gemini --help`. Add directory passes
-`--include-directories` on future turns. Gemini CLI supports up to five extra
-directories. If [folder trust](https://geminicli.com/docs/cli/trusted-folders/)
+With Gemini selected, `help` shows `gemini --help`. If [folder trust](https://geminicli.com/docs/cli/trusted-folders/)
 is enabled, trust the working folder in Gemini CLI before starting a headless
 conversation. Headless tool approvals follow Gemini CLI's configured policy;
 they are not shown as Qt approval dialogs.
 
 With Antigravity selected, `help` shows `agy --help`. The selected working
-directory is passed as the CLI process directory. The CLI does not document an
-extra directory flag, so the Add directory button is disabled for Antigravity.
-Headless mode uses the CLI's cached authentication and its configured permission
+directory is passed as the CLI process directory. Headless mode uses the CLI's cached authentication and its configured permission
 policy; approval prompts are not shown as Qt dialogs.
 
-For Codex, Add writable directory adds a root to `sandboxPolicy.workspaceWrite.writableRoots`
-on future turns. The working directory remains included. Added directories
-include ordinary subdirectories; other permission rules and
-protected paths may still apply. Additional directories are kept only while
-this application is open.
 The client also supports `new`, `clear`, `stop`, and `quit`. Any other text is
 sent to the selected agent as a message. Messages entered while a response is
 in progress are queued. Requests to approve an action or answer a question

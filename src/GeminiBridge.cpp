@@ -55,7 +55,6 @@ void GeminiBridge::prompt(const QString &text)
     if (!sessionId_.isEmpty()) {
         arguments << "--resume" << (sessionId_.startsWith("index:") ? sessionId_.mid(6) : sessionId_);
     }
-    for (const QString &directory : directories_) arguments << "--include-directories" << directory;
     arguments << "--prompt" << text;
     process_->setWorkingDirectory(workingDirectory_);
     process_->start(program_, arguments);
@@ -87,16 +86,6 @@ void GeminiBridge::resumeConversation(const QString &sessionId, const QString &w
 }
 
 QString GeminiBridge::sessionId() const { return sessionId_; }
-
-bool GeminiBridge::addDirectory(const QString &path)
-{
-    if (directories_.contains(path)) return true;
-    if (directories_.size() >= 5) return false;
-    directories_.append(path);
-    return true;
-}
-
-QStringList GeminiBridge::directories() const { return directories_; }
 
 void GeminiBridge::handleLine(const QByteArray &line)
 {

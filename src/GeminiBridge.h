@@ -20,8 +20,6 @@ public:
     void resetConversation(const QString &workingDirectory);
     void resumeConversation(const QString &sessionId, const QString &workingDirectory);
     QString sessionId() const;
-    bool addDirectory(const QString &path);
-    QStringList directories() const;
 
 signals:
     void textDelta(const QString &text);
@@ -39,7 +37,6 @@ private:
     QProcess *process_;
     QByteArray buffer_;
     QString sessionId_;
-    QStringList directories_;
     QString errorDetails_;
     bool interrupted_ = false;
     bool resultSeen_ = false;

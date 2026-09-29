@@ -8,7 +8,6 @@
 #include <QStringList>
 
 class QLabel;
-class QComboBox;
 class QLineEdit;
 class QPlainTextEdit;
 class QProcess;
@@ -56,10 +55,9 @@ private:
     void refreshConversationTree();
     Q_INVOKABLE void newCodexConversation(const QString &path);
     Q_INVOKABLE void resumeCodexConversation(const QString &id, const QString &path);
-    Q_INVOKABLE void addClaudeDirectory(const QString &path);
-    Q_INVOKABLE void addGlmDirectory(const QString &path);
-    Q_INVOKABLE void addCodexDirectory(const QString &path);
-    Q_INVOKABLE void addGeminiDirectory(const QString &path);
+    static QString providerName(int index);
+    QString providerWorkingDirectory(int index) const;
+    void selectProvider(int index);
     void requestStop();
     void sendStopIfPossible();
     qint64 sendRequest(const QString &method, const QJsonObject &params);
@@ -97,17 +95,12 @@ private:
     ClaudeBridge *glm_;
     GeminiBridge *gemini_;
     AntigravityBridge *antigravity_;
-    QComboBox *provider_;
     QPlainTextEdit *output_;
     QLineEdit *input_;
     QPushButton *sendButton_;
     QPushButton *stopButton_;
-    QPushButton *addDirButton_;
+    QPushButton *newChatButton_;
     QLabel *status_;
-    QLabel *claudeDirsLabel_;
-    QLabel *glmDirsLabel_;
-    QLabel *geminiDirsLabel_;
-    QLabel *codexDirsLabel_;
     QTreeWidget *conversationTree_;
     QByteArray readBuffer_;
     QHash<qint64, QString> pendingRequests_;
@@ -118,9 +111,6 @@ private:
     QStringList glmQueuedPrompts_;
     QStringList geminiQueuedPrompts_;
     QStringList antigravityQueuedPrompts_;
-    QStringList claudeDirectories_;
-    QStringList glmDirectories_;
-    QStringList codexDirectories_;
     QString threadId_;
     QString activeTurnId_;
     QString codexWorkingDirectory_;
@@ -132,6 +122,7 @@ private:
     QSet<QString> newCodexConversationIds_;
     QSet<QString> expandedProviders_;
     qint64 activeConversationWatermark_ = 0;
+    int currentProvider_ = 0;
     int syncPages_ = 0;
     qint64 nextRequestId_ = 1;
     bool initialized_ = false;

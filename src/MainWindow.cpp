@@ -125,26 +125,8 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
 
     auto *central = new QWidget(this);
     auto *layout = new QVBoxLayout(central);
-    provider_ = new QComboBox(central);
-    provider_->setObjectName("providerSelect");
-    provider_->addItems({"Codex", "Claude", "GLM", "Gemini", "Antigravity"});
-    addDirButton_ = new QPushButton("Add directory…", central);
-    addDirButton_->setObjectName("addDirectoryButton");
-    claudeDirsLabel_ = new QLabel("Additional Claude directories: none", central);
-    claudeDirsLabel_->setObjectName("claudeDirectories");
-    claudeDirsLabel_->setWordWrap(true);
-    claudeDirsLabel_->setVisible(false);
-    glmDirsLabel_ = new QLabel("Additional GLM directories: none", central);
-    glmDirsLabel_->setObjectName("glmDirectories");
-    glmDirsLabel_->setWordWrap(true);
-    glmDirsLabel_->setVisible(false);
-    geminiDirsLabel_ = new QLabel("Additional Gemini directories: none", central);
-    geminiDirsLabel_->setObjectName("geminiDirectories");
-    geminiDirsLabel_->setWordWrap(true);
-    geminiDirsLabel_->setVisible(false);
-    codexDirsLabel_ = new QLabel("Additional writable Codex directories: none", central);
-    codexDirsLabel_->setObjectName("codexDirectories");
-    codexDirsLabel_->setWordWrap(true);
+    newChatButton_ = new QPushButton("New chat…", central);
+    newChatButton_->setObjectName("newChatButton");
     status_ = new QLabel(central);
     output_ = new QPlainTextEdit(central);
     output_->setObjectName("output");
@@ -164,17 +146,10 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     inputRow->addWidget(input_, 1);
     inputRow->addWidget(sendButton_);
     inputRow->addWidget(stopButton_);
-    auto *providerRow = new QHBoxLayout;
-    providerRow->addWidget(new QLabel("Agent:", central));
-    providerRow->addWidget(provider_);
-    providerRow->addWidget(addDirButton_);
-    providerRow->addStretch();
-    layout->addLayout(providerRow);
-    layout->addWidget(claudeDirsLabel_);
-    layout->addWidget(glmDirsLabel_);
-    layout->addWidget(geminiDirsLabel_);
-    layout->addWidget(codexDirsLabel_);
-    layout->addWidget(status_);
+    auto *statusRow = new QHBoxLayout;
+    statusRow->addWidget(status_, 1);
+    statusRow->addWidget(newChatButton_);
+    layout->addLayout(statusRow);
     layout->addWidget(output_, 1);
     layout->addLayout(inputRow);
     auto *splitter = new QSplitter(Qt::Horizontal, this);
@@ -214,30 +189,7 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     connect(input_, &QLineEdit::returnPressed, this, &MainWindow::submitCommand);
     connect(sendButton_, &QPushButton::clicked, this, &MainWindow::submitCommand);
     connect(stopButton_, &QPushButton::clicked, this, &MainWindow::requestStop);
-    connect(addDirButton_, &QPushButton::clicked, this, [this] {
-        const int index = provider_->currentIndex();
-        if (index == 4) return;
-        const QString path = QFileDialog::getExistingDirectory(
-            this, index == 0 ? "Add writable directory for Codex"
-                             : (index == 1 ? "Add directory for Claude" : (index == 2 ? "Add directory for GLM" : "Add directory for Gemini")),
-            workingDirectory_);
-        if (!path.isEmpty()) {
-            if (index == 0) addCodexDirectory(path);
-            else if (index == 1) addClaudeDirectory(path);
-            else if (index == 2) addGlmDirectory(path);
-            else addGeminiDirectory(path);
-        }
-    });
-    connect(provider_, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int index) {
-        appendLine("[" + provider_->itemText(index) + " selected]");
-        if (index == 1 && !claudeReady_) claude_->start(claudeWorkingDirectory_);
-        if (index == 2 && !glmReady_) glm_->start(glmWorkingDirectory_);
-        claudeDirsLabel_->setVisible(index == 1);
-        glmDirsLabel_->setVisible(index == 2);
-        geminiDirsLabel_->setVisible(index == 3);
-        codexDirsLabel_->setVisible(index == 0);
-        updateStatus();
-    });
+    connect(newChatButton_, &QPushButton::clicked, this, &MainWindow::showNewConversationDialog);
     connect(claude_, &ClaudeBridge::ready, this, [this] {
         claudeReady_ = true;
         if (!pendingClaudeResumeId_.isEmpty()) {
@@ -304,16 +256,6 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
         }
         claude_->answerQuestions(id, answers, allAccepted);
     });
-    connect(claude_, &ClaudeBridge::directoryAdded, this, [this](const QString &path) {
-        if (!claudeDirectories_.contains(path) && QDir::cleanPath(path) != QDir::cleanPath(workingDirectory_)) {
-            claudeDirectories_.append(path);
-        }
-        claudeDirsLabel_->setText("Additional Claude directories: "
-                                  + (claudeDirectories_.isEmpty() ? "none" : claudeDirectories_.join(", ")));
-        appendLine("[Claude directory available: " + path + "]");
-        claudeReady_ = true;
-        updateStatus();
-    });
     connect(claude_, &ClaudeBridge::error, this, [this](const QString &message) {
         appendLine("[Claude] " + message);
     });
@@ -321,8 +263,6 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
         claudeReady_ = false;
         claudeBusy_ = false;
         claudeStopRequested_ = false;
-        claudeDirectories_.clear();
-        claudeDirsLabel_->setText("Additional Claude directories: none");
         updateStatus();
     });
     connect(glm_, &ClaudeBridge::ready, this, [this] {
@@ -388,23 +328,11 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
         }
         glm_->answerQuestions(id, answers, allAccepted);
     });
-    connect(glm_, &ClaudeBridge::directoryAdded, this, [this](const QString &path) {
-        if (!glmDirectories_.contains(path) && QDir::cleanPath(path) != QDir::cleanPath(workingDirectory_)) {
-            glmDirectories_.append(path);
-        }
-        glmDirsLabel_->setText("Additional GLM directories: "
-                               + (glmDirectories_.isEmpty() ? "none" : glmDirectories_.join(", ")));
-        appendLine("[GLM directory available: " + path + "]");
-        glmReady_ = true;
-        updateStatus();
-    });
     connect(glm_, &ClaudeBridge::error, this, [this](const QString &message) { appendLine("[GLM] " + message); });
     connect(glm_, &ClaudeBridge::disconnected, this, [this] {
         glmReady_ = false;
         glmBusy_ = false;
         glmStopRequested_ = false;
-        glmDirectories_.clear();
-        glmDirsLabel_->setText("Additional GLM directories: none");
         updateStatus();
     });
     connect(gemini_, &GeminiBridge::textDelta, this, [this](const QString &text) {
@@ -570,21 +498,21 @@ void MainWindow::submitCommand()
     } else if (local == "quit" || local == "/quit" || local == "exit") {
         close();
     } else {
-        if (provider_->currentIndex() == 4) {
+        if (currentProvider_ == 4) {
             if (antigravity_->conversationId().isEmpty() && antigravityFirstPrompt_.isEmpty()) antigravityFirstPrompt_ = command;
             appendLine("You (Antigravity): " + command);
             antigravityQueuedPrompts_.append(command);
             sendNextAntigravityPrompt();
             return;
         }
-        if (provider_->currentIndex() == 3) {
+        if (currentProvider_ == 3) {
             if (gemini_->sessionId().isEmpty() && geminiFirstPrompt_.isEmpty()) geminiFirstPrompt_ = command;
             appendLine("You (Gemini): " + command);
             geminiQueuedPrompts_.append(command);
             sendNextGeminiPrompt();
             return;
         }
-        if (provider_->currentIndex() == 2) {
+        if (currentProvider_ == 2) {
             if (glmSessionId_.isEmpty() && glmFirstPrompt_.isEmpty()) glmFirstPrompt_ = command;
             appendLine("You (GLM): " + command);
             glmQueuedPrompts_.append(command);
@@ -592,7 +520,7 @@ void MainWindow::submitCommand()
             sendNextGlmPrompt();
             return;
         }
-        if (provider_->currentIndex() == 1) {
+        if (currentProvider_ == 1) {
             if (claudeSessionId_.isEmpty() && claudeFirstPrompt_.isEmpty()) claudeFirstPrompt_ = command;
             appendLine("You (Claude): " + command);
             claudeQueuedPrompts_.append(command);
@@ -613,10 +541,10 @@ void MainWindow::submitCommand()
 
 void MainWindow::showHelp()
 {
-    const bool claudeSelected = provider_->currentIndex() == 1;
-    const bool glmSelected = provider_->currentIndex() == 2;
-    const bool geminiSelected = provider_->currentIndex() == 3;
-    const bool antigravitySelected = provider_->currentIndex() == 4;
+    const bool claudeSelected = currentProvider_ == 1;
+    const bool glmSelected = currentProvider_ == 2;
+    const bool geminiSelected = currentProvider_ == 3;
+    const bool antigravitySelected = currentProvider_ == 4;
     appendLine("Commands:");
     appendLine("  help       show this help and installed agent options");
     appendLine("  new        start a new conversation");
@@ -641,7 +569,6 @@ void MainWindow::showHelp()
         appendLine("Gemini CLI headless mode:");
         appendLine("  Send messages with Enter or Send to Gemini.");
         appendLine("  Each response streams JSON events; later messages resume the same session.");
-        appendLine("  Use Add directory to include a folder and its subfolders for future turns (maximum five).");
         appendLine("  Authenticate Gemini CLI before using this window.");
         appendLine("  If folder trust is enabled, trust the working folder in Gemini CLI first.");
         appendLine("  Headless mode: https://geminicli.com/docs/cli/headless/");
@@ -652,7 +579,6 @@ void MainWindow::showHelp()
     } else if (glmSelected) {
         appendLine("GLM via Z.AI and Claude Agent SDK:");
         appendLine("  Send messages with Enter or Send to GLM.");
-        appendLine("  Use Add directory to include a folder and its subfolders for this session.");
         appendLine("  Tool approvals and questions appear in dialogs.");
         appendLine("  Requires claude-agent-sdk and ZAI_API_KEY; GLM_MODEL is optional.");
         appendLine("  GLM setup: https://docs.z.ai/devpack/tool/claude");
@@ -668,7 +594,6 @@ void MainWindow::showHelp()
     } else if (claudeSelected) {
         appendLine("Claude Agent SDK:");
         appendLine("  Send a message with Enter or the Send to Claude button.");
-        appendLine("  Use Add directory to give Claude access to a folder and its subfolders for this session.");
         appendLine("  Responses are streamed into this window.");
         appendLine("  Tool approvals and questions appear in dialogs.");
         appendLine("  Messages entered during a response are queued.");
@@ -684,7 +609,6 @@ void MainWindow::showHelp()
         }
     } else {
         appendLine("Codex connection: codex app-server --stdio (direct JSONL).");
-        appendLine("Use Add writable directory to grant Codex write access to a folder and its subfolders for future turns.");
         appendLine("Installed Codex App Server commands and options (reference; CLI subcommands are not chat messages):");
         helpProgram = codexProgram_;
         helpArguments = {"app-server", "--help"};
@@ -707,76 +631,25 @@ void MainWindow::showHelp()
     helpProcess->start(helpProgram, helpArguments);
 }
 
-void MainWindow::addClaudeDirectory(const QString &path)
+QString MainWindow::providerName(int index)
 {
-    if (path.isEmpty()) return;
-    const QFileInfo directory(QDir(claudeWorkingDirectory_).absoluteFilePath(path));
-    if (!directory.isDir()) {
-        appendLine("[Directory does not exist: " + directory.absoluteFilePath() + "]");
-        return;
-    }
-    if (!claudeReady_ || claudeBusy_) {
-        appendLine("[Wait for Claude to be ready before adding a directory.]");
-        return;
-    }
-    claudeReady_ = false;
-    claude_->addDirectory(directory.canonicalFilePath());
-    appendLine("[Adding Claude directory: " + directory.canonicalFilePath() + "]");
+    static const QStringList names{"Codex", "Claude", "GLM", "Gemini", "Antigravity"};
+    return names.value(index);
+}
+
+QString MainWindow::providerWorkingDirectory(int index) const
+{
+    return index == 0 ? codexWorkingDirectory_
+        : (index == 1 ? claudeWorkingDirectory_ : (index == 2 ? glmWorkingDirectory_
+           : (index == 3 ? geminiWorkingDirectory_ : antigravityWorkingDirectory_)));
+}
+
+void MainWindow::selectProvider(int index)
+{
+    if (index == currentProvider_) return;
+    currentProvider_ = index;
+    appendLine("[" + providerName(index) + " selected]");
     updateStatus();
-}
-
-void MainWindow::addGlmDirectory(const QString &path)
-{
-    if (path.isEmpty()) return;
-    const QFileInfo directory(QDir(glmWorkingDirectory_).absoluteFilePath(path));
-    if (!directory.isDir()) {
-        appendLine("[Directory does not exist: " + directory.absoluteFilePath() + "]");
-        return;
-    }
-    if (!glmReady_ || glmBusy_) {
-        appendLine("[Wait for GLM to be ready before adding a directory.]");
-        return;
-    }
-    glmReady_ = false;
-    glm_->addDirectory(directory.canonicalFilePath());
-    appendLine("[Adding GLM directory: " + directory.canonicalFilePath() + "]");
-    updateStatus();
-}
-
-void MainWindow::addGeminiDirectory(const QString &path)
-{
-    if (path.isEmpty()) return;
-    const QFileInfo directory(QDir(geminiWorkingDirectory_).absoluteFilePath(path));
-    if (!directory.isDir()) {
-        appendLine("[Directory does not exist: " + directory.absoluteFilePath() + "]");
-        return;
-    }
-    const QString canonicalPath = directory.canonicalFilePath();
-    if (canonicalPath != QDir(geminiWorkingDirectory_).canonicalPath() && !gemini_->addDirectory(canonicalPath)) {
-        appendLine("[Gemini CLI supports up to five additional directories.]");
-        return;
-    }
-    const QStringList directories = gemini_->directories();
-    geminiDirsLabel_->setText("Additional Gemini directories: "
-                               + (directories.isEmpty() ? "none" : directories.join(", ")));
-    appendLine("[Gemini directory available for future turns: " + canonicalPath + "]");
-}
-
-void MainWindow::addCodexDirectory(const QString &path)
-{
-    if (path.isEmpty()) return;
-    const QFileInfo directory(QDir(codexWorkingDirectory_).absoluteFilePath(path));
-    if (!directory.isDir()) {
-        appendLine("[Directory does not exist: " + directory.absoluteFilePath() + "]");
-        return;
-    }
-    const QString canonicalPath = directory.canonicalFilePath();
-    if (!codexDirectories_.contains(canonicalPath) && canonicalPath != QDir(codexWorkingDirectory_).canonicalPath()) {
-        codexDirectories_.append(canonicalPath);
-    }
-    codexDirsLabel_->setText("Additional writable Codex directories: "
-                             + (codexDirectories_.isEmpty() ? "none" : codexDirectories_.join(", ")));
-    appendLine("[Codex writable directory available for future turns: " + canonicalPath + "]");
 }
 
 void MainWindow::newCodexConversation(const QString &path)
@@ -798,7 +671,7 @@ void MainWindow::newCodexConversation(const QString &path)
     queuedPrompts_.clear();
     threadId_.clear();
     activeTurnId_.clear();
-    provider_->setCurrentIndex(0);
+    selectProvider(0);
     startThread();
     refreshConversationTree();
 }
@@ -815,7 +688,7 @@ void MainWindow::resumeCodexConversation(const QString &id, const QString &path)
     activeTurnId_.clear();
     threadId_.clear();
     codexThreadOpening_ = true;
-    provider_->setCurrentIndex(0);
+    selectProvider(0);
     appendLine("[Resuming Codex conversation: " + id + "]");
     sendRequest("thread/resume", {{"threadId", id}});
     updateStatus();
@@ -1199,21 +1072,24 @@ void MainWindow::newProviderConversation(int providerIndex, const QString &path)
         antigravityQueuedPrompts_.clear();
         antigravity_->resetConversation(canonicalPath);
     }
-    provider_->setCurrentIndex(providerIndex);
-    appendLine("[Starting a new " + provider_->itemText(providerIndex) + " conversation in " + canonicalPath + "]");
+    selectProvider(providerIndex);
+    appendLine("[Starting a new " + providerName(providerIndex) + " conversation in " + canonicalPath + "]");
     refreshConversationTree();
     updateStatus();
 }
 
 void MainWindow::showNewConversationDialog()
 {
-    const int index = provider_->currentIndex();
-    const QString currentPath = index == 0 ? codexWorkingDirectory_
-        : (index == 1 ? claudeWorkingDirectory_ : (index == 2 ? glmWorkingDirectory_
-           : (index == 3 ? geminiWorkingDirectory_ : antigravityWorkingDirectory_)));
+    const QString currentPath = providerWorkingDirectory(currentProvider_);
     QDialog dialog(this);
-    dialog.setWindowTitle("New " + provider_->itemText(index) + " conversation");
+    dialog.setWindowTitle("New conversation");
     auto *layout = new QVBoxLayout(&dialog);
+    layout->addWidget(new QLabel("Agent:", &dialog));
+    auto *providerInput = new QComboBox(&dialog);
+    providerInput->setObjectName("newConversationProvider");
+    for (int i = 0; i < 5; ++i) providerInput->addItem(providerName(i));
+    providerInput->setCurrentIndex(currentProvider_);
+    layout->addWidget(providerInput);
     layout->addWidget(new QLabel("Working directory:", &dialog));
     auto *pathRow = new QHBoxLayout;
     auto *pathInput = new QLineEdit(currentPath, &dialog);
@@ -1241,7 +1117,9 @@ void MainWindow::showNewConversationDialog()
     connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
     validatePath(currentPath);
     dialog.resize(560, dialog.sizeHint().height());
-    if (dialog.exec() == QDialog::Accepted) newProviderConversation(index, pathInput->text().trimmed());
+    if (dialog.exec() == QDialog::Accepted) {
+        newProviderConversation(providerInput->currentIndex(), pathInput->text().trimmed());
+    }
 }
 
 void MainWindow::resumeProviderConversation(const QString &provider, const QString &id, const QString &path)
@@ -1256,7 +1134,7 @@ void MainWindow::resumeProviderConversation(const QString &provider, const QStri
         claudeReady_ = false;
         if (claude_->isRunning()) claude_->resumeConversation(id, path);
         else { pendingClaudeResumeId_ = id; claude_->start(path); }
-        provider_->setCurrentIndex(1);
+        selectProvider(1);
     } else if (provider == "GLM") {
         if (glmBusy_) { appendLine("[Wait for GLM to finish.]"); return; }
         glmWorkingDirectory_ = path;
@@ -1266,21 +1144,21 @@ void MainWindow::resumeProviderConversation(const QString &provider, const QStri
         glmReady_ = false;
         if (glm_->isRunning()) glm_->resumeConversation(id, path);
         else { pendingGlmResumeId_ = id; glm_->start(path); }
-        provider_->setCurrentIndex(2);
+        selectProvider(2);
     } else if (provider == "Gemini") {
         if (geminiBusy_) { appendLine("[Wait for Gemini to finish.]"); return; }
         geminiWorkingDirectory_ = path;
         geminiFirstPrompt_.clear();
         geminiQueuedPrompts_.clear();
         gemini_->resumeConversation(id, path);
-        provider_->setCurrentIndex(3);
+        selectProvider(3);
     } else if (provider == "Antigravity") {
         if (antigravityBusy_) { appendLine("[Wait for Antigravity to finish.]"); return; }
         antigravityWorkingDirectory_ = path;
         antigravityFirstPrompt_.clear();
         antigravityQueuedPrompts_.clear();
         antigravity_->resumeConversation(id, path);
-        provider_->setCurrentIndex(4);
+        selectProvider(4);
     } else return;
     appendLine("[Resuming " + provider + " conversation: " + id + "]");
     updateStatus();
@@ -1440,18 +1318,13 @@ void MainWindow::sendNextPrompt()
     stopSent_ = false;
     QJsonObject params{{"threadId", threadId_},
                        {"input", QJsonArray{QJsonObject{{"type", "text"}, {"text", prompt}}}}};
-    if (!codexDirectories_.isEmpty()) {
-        QJsonArray writableRoots{codexWorkingDirectory_};
-        for (const QString &path : codexDirectories_) writableRoots.append(path);
-        params.insert("sandboxPolicy", QJsonObject{{"type", "workspaceWrite"}, {"writableRoots", writableRoots}});
-    }
     sendRequest("turn/start", params);
     updateStatus();
 }
 
 void MainWindow::requestStop()
 {
-    if (provider_->currentIndex() == 4) {
+    if (currentProvider_ == 4) {
         if (!antigravityBusy_) appendLine("[No active Antigravity response.]");
         else if (!antigravityStopRequested_) {
             antigravityStopRequested_ = true;
@@ -1461,7 +1334,7 @@ void MainWindow::requestStop()
         }
         return;
     }
-    if (provider_->currentIndex() == 3) {
+    if (currentProvider_ == 3) {
         if (!geminiBusy_) appendLine("[No active Gemini response.]");
         else if (!geminiStopRequested_) {
             geminiStopRequested_ = true;
@@ -1471,7 +1344,7 @@ void MainWindow::requestStop()
         }
         return;
     }
-    if (provider_->currentIndex() == 2) {
+    if (currentProvider_ == 2) {
         if (!glmBusy_) appendLine("[No active GLM response.]");
         else if (!glmStopRequested_) {
             glmStopRequested_ = true;
@@ -1481,7 +1354,7 @@ void MainWindow::requestStop()
         }
         return;
     }
-    if (provider_->currentIndex() == 1) {
+    if (currentProvider_ == 1) {
         if (!claudeBusy_) appendLine("[No active Claude response.]");
         else if (!claudeStopRequested_) {
             claudeStopRequested_ = true;
@@ -1719,22 +1592,22 @@ void MainWindow::appendLine(const QString &text)
 void MainWindow::updateStatus()
 {
     QString state;
-    if (provider_->currentIndex() == 4) {
+    if (currentProvider_ == 4) {
         if (antigravityBusy_) state = "Antigravity is responding…";
         else if (QStandardPaths::findExecutable(antigravity_->program()).isEmpty())
             state = "Antigravity CLI is not installed or is not in PATH";
         else state = "Antigravity ready";
         stopButton_->setEnabled(antigravityBusy_ && !antigravityStopRequested_);
-    } else if (provider_->currentIndex() == 3) {
+    } else if (currentProvider_ == 3) {
         state = geminiBusy_ ? "Gemini is responding…" : "Gemini ready";
         stopButton_->setEnabled(geminiBusy_ && !geminiStopRequested_);
-    } else if (provider_->currentIndex() == 2) {
+    } else if (currentProvider_ == 2) {
         if (glmBusy_) state = "GLM is responding…";
         else if (glmReady_) state = "GLM ready";
         else if (glm_->isRunning()) state = "Connecting to GLM via Claude Agent SDK…";
         else state = "GLM bridge is not running";
         stopButton_->setEnabled(glmBusy_ && !glmStopRequested_);
-    } else if (provider_->currentIndex() == 1) {
+    } else if (currentProvider_ == 1) {
         if (claudeBusy_) state = "Claude is responding…";
         else if (claudeReady_) state = "Claude ready";
         else if (claude_->isRunning()) state = "Connecting to Claude Agent SDK…";
@@ -1748,21 +1621,10 @@ void MainWindow::updateStatus()
         else state = "Connecting to Codex App Server…";
         stopButton_->setEnabled(busy_ && !stopRequested_);
     }
-    const QString currentDirectory = provider_->currentIndex() == 0 ? codexWorkingDirectory_
-        : (provider_->currentIndex() == 1 ? claudeWorkingDirectory_
-           : (provider_->currentIndex() == 2 ? glmWorkingDirectory_
-              : (provider_->currentIndex() == 3 ? geminiWorkingDirectory_ : antigravityWorkingDirectory_)));
+    const QString currentDirectory = providerWorkingDirectory(currentProvider_);
     status_->setText(state + "  •  " + QDir::toNativeSeparators(currentDirectory));
-    const int index = provider_->currentIndex();
+    const int index = currentProvider_;
     sendButton_->setText(index == 0 ? "Send to Codex" : (index == 1 ? "Send to Claude"
                          : (index == 2 ? "Send to GLM" : (index == 3 ? "Send to Gemini" : "Send to Antigravity"))));
-    addDirButton_->setText(index == 0 ? "Add writable directory…" : "Add directory…");
-    addDirButton_->setToolTip(index == 4 ? "Antigravity CLI does not expose an additional directory option."
-                             : index == 0
-                             ? "Give Codex write access to another directory and its subfolders for future turns."
-                             : "Give the selected agent access to another directory and its subfolders for this session.");
-    addDirButton_->setEnabled(index == 4 ? false : (index == 0 ? !busy_
-        : (index == 1 ? (claudeReady_ && !claudeBusy_)
-           : (index == 2 ? (glmReady_ && !glmBusy_) : !geminiBusy_))));
-    provider_->setEnabled(!busy_ && !claudeBusy_ && !glmBusy_ && !geminiBusy_ && !antigravityBusy_);
+    newChatButton_->setEnabled(!busy_ && !claudeBusy_ && !glmBusy_ && !geminiBusy_ && !antigravityBusy_);
 }

@@ -7,7 +7,6 @@
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QLineEdit>
-#include <QLabel>
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QTemporaryDir>
@@ -26,13 +25,36 @@ private slots:
     void helpAndConversation();
     void claudeConversationAndStop();
     void glmConversation();
-    void geminiConversationAndDirectories();
+    void geminiConversation();
     void antigravityConversationResumesAndPersists();
     void codexConversationIndexSurvivesRestart();
     void claudeSessionMetadataRefreshesExistingIndex();
     void missingGeminiCliReportsOneDiscoveryError();
     void geminiListsSessionsFromAllProjects();
 };
+
+// Starts a chat through the New chat dialog, choosing the agent and working directory there.
+static void startChat(MainWindow &window, int provider, const QString &path)
+{
+    auto *newChatButton = window.findChild<QPushButton *>("newChatButton");
+    QVERIFY(newChatButton);
+    bool accepted = false;
+    QTimer::singleShot(0, &window, [&] {
+        auto *dialog = window.findChild<QDialog *>();
+        QVERIFY(dialog);
+        auto *providerInput = dialog->findChild<QComboBox *>("newConversationProvider");
+        auto *pathInput = dialog->findChild<QLineEdit *>("newConversationPath");
+        auto *buttons = dialog->findChild<QDialogButtonBox *>();
+        QVERIFY(providerInput && pathInput && buttons);
+        QCOMPARE(providerInput->count(), 5);
+        providerInput->setCurrentIndex(provider);
+        pathInput->setText(path);
+        buttons->button(QDialogButtonBox::Ok)->click();
+        accepted = true;
+    });
+    QTest::mouseClick(newChatButton, Qt::LeftButton);
+    QVERIFY(accepted);
+}
 
 void MainWindowTest::codexExecutableFromEnvironment()
 {
@@ -101,13 +123,6 @@ for line in sys.stdin:
         send({"id": request["id"], "result": {"thread": {"id": "test-thread"}}})
     elif method == "turn/start":
         send({"id": request["id"], "result": {"turn": {"id": "test-turn"}}})
-        if request["params"]["input"][0]["text"] == "check roots":
-            roots = request["params"].get("sandboxPolicy", {}).get("writableRoots", [])
-            send({"method": "item/completed", "params": {
-                "item": {"id": "roots", "type": "agentMessage", "text": "Roots: " + ", ".join(roots)}}})
-            send({"method": "turn/completed", "params": {
-                "turn": {"id": "test-turn", "status": "completed"}}})
-            continue
         if request["params"]["input"][0]["text"].startswith("long"):
             send({"method": "turn/started", "params": {"turn": {"id": "test-turn"}}})
             continue
@@ -132,9 +147,9 @@ for line in sys.stdin:
     QVERIFY(input);
     QVERIFY(output);
     auto *stopButton = window.findChild<QPushButton *>("stopButton");
-    auto *addDirButton = window.findChild<QPushButton *>("addDirectoryButton");
     QVERIFY(stopButton);
-    QVERIFY(addDirButton);
+    QVERIFY(!window.findChild<QPushButton *>("addDirectoryButton"));
+    QVERIFY(!window.findChild<QComboBox *>("providerSelect"));
 
     QTest::keyClicks(input, "help");
     QTest::keyClick(input, Qt::Key_Return);
@@ -161,13 +176,6 @@ for line in sys.stdin:
     QTest::keyClicks(input, "stop");
     QTest::keyClick(input, Qt::Key_Return);
     QTRY_VERIFY(output->toPlainText().count("[Response: interrupted]") == 2);
-
-    QTemporaryDir extraDirectory;
-    QVERIFY(extraDirectory.isValid());
-    QVERIFY(QMetaObject::invokeMethod(&window, "addCodexDirectory", Q_ARG(QString, extraDirectory.path())));
-    QTest::keyClicks(input, "check roots");
-    QTest::keyClick(input, Qt::Key_Return);
-    QTRY_VERIFY(output->toPlainText().contains("Roots: " + directory.path() + ", " + extraDirectory.path()));
 }
 
 void MainWindowTest::claudeConversationAndStop()
@@ -198,9 +206,6 @@ for line in sys.stdin:
         send({"type": "complete", "status": "interrupted"})
     elif kind == "new":
         send({"type": "ready"})
-    elif kind == "add_directory":
-        send({"type": "ready"})
-        send({"type": "directory_added", "path": request["path"]})
     elif kind == "shutdown":
         break
 )PY");
@@ -215,23 +220,17 @@ for line in sys.stdin:
 
     MainWindow window("/nonexistent/codex", directory.path(), python, fakeBridge);
     window.show();
-    auto *provider = window.findChild<QComboBox *>("providerSelect");
     auto *input = window.findChild<QLineEdit *>("commandInput");
     auto *output = window.findChild<QPlainTextEdit *>("output");
     auto *stopButton = window.findChild<QPushButton *>("stopButton");
     auto *sendButton = window.findChild<QPushButton *>("sendButton");
-    auto *addDirButton = window.findChild<QPushButton *>("addDirectoryButton");
-    QVERIFY(provider);
     QVERIFY(input);
     QVERIFY(output);
     QVERIFY(stopButton);
     QVERIFY(sendButton);
-    QVERIFY(addDirButton);
-    provider->setCurrentIndex(1);
+    startChat(window, 1, directory.path());
     QTRY_VERIFY(output->toPlainText().contains("[Connected to Claude Agent SDK]"));
     QCOMPARE(sendButton->text(), QString("Send to Claude"));
-    QVERIFY(addDirButton->isVisible());
-    QVERIFY(addDirButton->isEnabled());
 
     const QByteArray previousPath = qgetenv("PATH");
     qputenv("PATH", directory.path().toLocal8Bit());
@@ -273,14 +272,6 @@ for line in sys.stdin:
     QTest::keyClick(input, Qt::Key_Return);
     QVERIFY(rejectedMissingDirectory);
     QTRY_VERIFY(output->toPlainText().count("[Connected to Claude Agent SDK]") == 2);
-
-    QTemporaryDir extraDirectory;
-    QVERIFY(extraDirectory.isValid());
-    QVERIFY(QMetaObject::invokeMethod(&window, "addClaudeDirectory", Q_ARG(QString, extraDirectory.path())));
-    QTRY_VERIFY(output->toPlainText().contains("[Claude directory available: " + extraDirectory.path() + "]"));
-    auto *directoriesLabel = window.findChild<QLabel *>("claudeDirectories");
-    QVERIFY(directoriesLabel);
-    QVERIFY(directoriesLabel->text().contains(extraDirectory.path()));
 }
 
 void MainWindowTest::glmConversation()
@@ -302,30 +293,21 @@ for line in sys.stdin:
     if request["type"] == "prompt":
         print(json.dumps({"type": "delta", "text": "Hello from GLM"}), flush=True)
         print(json.dumps({"type": "complete", "status": "completed"}), flush=True)
-    elif request["type"] == "add_directory":
-        print(json.dumps({"type": "ready"}), flush=True)
-        print(json.dumps({"type": "directory_added", "path": request["path"]}), flush=True)
     elif request["type"] == "shutdown":
         break
 )PY");
     script.close();
     MainWindow window("/nonexistent/codex", directory.path(), python, fakeBridge);
     window.show();
-    auto *provider = window.findChild<QComboBox *>("providerSelect");
     auto *input = window.findChild<QLineEdit *>("commandInput");
     auto *output = window.findChild<QPlainTextEdit *>("output");
-    QVERIFY(provider);
     QVERIFY(input);
     QVERIFY(output);
-    provider->setCurrentIndex(2);
+    startChat(window, 2, directory.path());
     QTRY_VERIFY(output->toPlainText().contains("[Connected to GLM via Claude Agent SDK]"));
     QTest::keyClicks(input, "hello");
     QTest::keyClick(input, Qt::Key_Return);
     QTRY_VERIFY(output->toPlainText().contains("GLM: Hello from GLM"));
-    QTemporaryDir extraDirectory;
-    QVERIFY(extraDirectory.isValid());
-    QVERIFY(QMetaObject::invokeMethod(&window, "addGlmDirectory", Q_ARG(QString, extraDirectory.path())));
-    QTRY_VERIFY(output->toPlainText().contains("[GLM directory available: " + extraDirectory.path() + "]"));
 }
 
 void MainWindowTest::antigravityConversationResumesAndPersists()
@@ -362,13 +344,11 @@ print(json.dumps({"event": "result", "result": {
 
     const QString indexPath = directory.filePath("codex-conversations.json");
     MainWindow window("/nonexistent/codex", directory.path(), {}, {}, "gemini", nullptr, indexPath, fakeAgy);
-    auto *provider = window.findChild<QComboBox *>("providerSelect");
     auto *input = window.findChild<QLineEdit *>("commandInput");
     auto *output = window.findChild<QPlainTextEdit *>("output");
     auto *tree = window.findChild<QTreeWidget *>("conversationTree");
-    QVERIFY(provider && input && output && tree);
-    QCOMPARE(provider->count(), 5);
-    provider->setCurrentIndex(4);
+    QVERIFY(input && output && tree);
+    startChat(window, 4, directory.path());
     input->setText("help");
     QTest::keyClick(input, Qt::Key_Return);
     QTRY_VERIFY(output->toPlainText().contains("Usage: agy"));
@@ -389,7 +369,7 @@ print(json.dumps({"event": "result", "result": {
     }
 }
 
-void MainWindowTest::geminiConversationAndDirectories()
+void MainWindowTest::geminiConversation()
 {
     QTemporaryDir directory;
     QVERIFY(directory.isValid());
@@ -402,13 +382,10 @@ import sys
 
 args = sys.argv[1:]
 if "--help" in args:
-    print("Usage: gemini [--include-directories DIR] [--resume ID]", flush=True)
+    print("Usage: gemini [--resume ID]", flush=True)
     sys.exit(0)
 if "--resume" in args:
     assert args[args.index("--resume") + 1] == "gemini-test-session"
-if "--include-directories" in args:
-    directory = args[args.index("--include-directories") + 1]
-    assert directory
 prompt = args[args.index("--prompt") + 1]
 print(json.dumps({"type": "init", "session_id": "gemini-test-session", "model": "fake"}), flush=True)
 if prompt == "long":
@@ -422,30 +399,22 @@ else:
     QVERIFY(script.setPermissions(QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner));
     MainWindow window("/nonexistent/codex", directory.path(), {}, {}, fakeGemini);
     window.show();
-    auto *provider = window.findChild<QComboBox *>("providerSelect");
     auto *input = window.findChild<QLineEdit *>("commandInput");
     auto *output = window.findChild<QPlainTextEdit *>("output");
     auto *stopButton = window.findChild<QPushButton *>("stopButton");
-    QVERIFY(provider);
     QVERIFY(input);
     QVERIFY(output);
     QVERIFY(stopButton);
-    provider->setCurrentIndex(3);
+    startChat(window, 3, directory.path());
     QTest::keyClicks(input, "help");
     QTest::keyClick(input, Qt::Key_Return);
     QTRY_VERIFY(output->toPlainText().contains("Usage: gemini"));
     QTest::keyClicks(input, "first");
     QTest::keyClick(input, Qt::Key_Return);
     QTRY_VERIFY(output->toPlainText().contains("Gemini: first answered"));
-    QTemporaryDir extraDirectory;
-    QVERIFY(extraDirectory.isValid());
-    QVERIFY(QMetaObject::invokeMethod(&window, "addGeminiDirectory", Q_ARG(QString, extraDirectory.path())));
     QTest::keyClicks(input, "second");
     QTest::keyClick(input, Qt::Key_Return);
     QTRY_VERIFY(output->toPlainText().contains("Gemini: second answered"));
-    auto *directoriesLabel = window.findChild<QLabel *>("geminiDirectories");
-    QVERIFY(directoriesLabel);
-    QVERIFY(directoriesLabel->text().contains(extraDirectory.path()));
     QTest::keyClicks(input, "long");
     QTest::keyClick(input, Qt::Key_Return);
     QTRY_VERIFY(stopButton->isEnabled());
