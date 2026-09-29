@@ -31,6 +31,7 @@ private:
     void sendNextPrompt();
     void sendNextClaudePrompt();
     Q_INVOKABLE void addClaudeDirectory(const QString &path);
+    Q_INVOKABLE void addCodexDirectory(const QString &path);
     void requestStop();
     void sendStopIfPossible();
     qint64 sendRequest(const QString &method, const QJsonObject &params);
@@ -56,6 +57,7 @@ private:
     QPushButton *addDirButton_;
     QLabel *status_;
     QLabel *claudeDirsLabel_;
+    QLabel *codexDirsLabel_;
     QByteArray readBuffer_;
     QHash<qint64, QString> pendingRequests_;
     QSet<QString> streamedMessages_;
@@ -63,6 +65,7 @@ private:
     QStringList queuedPrompts_;
     QStringList claudeQueuedPrompts_;
     QStringList claudeDirectories_;
+    QStringList codexDirectories_;
     QString threadId_;
     QString activeTurnId_;
     qint64 nextRequestId_ = 1;

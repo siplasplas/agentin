@@ -47,6 +47,12 @@ The directory is passed to the SDK using `add_dirs`; it is not saved as a global
 Claude Code trust setting. CLI options are shown for reference; this window
 communicates through the SDK. Claude Code's interactive slash commands are
 listed in the [Claude Code commands reference](https://code.claude.com/docs/en/commands).
+
+For Codex, Add writable directory adds a root to `sandboxPolicy.workspaceWrite.writableRoots`
+on future turns. The working directory remains included. Both providers include
+ordinary subdirectories of an added folder; other permission rules and
+protected paths may still apply. Additional directories are kept only while
+this application is open.
 The client also supports `new`, `clear`, `stop`, and `quit`. Any other text is
 sent to the selected agent as a message. Messages entered while a response is
 in progress are queued. Requests to approve an action or answer a question

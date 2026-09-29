@@ -34,13 +34,14 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     provider_->setObjectName("providerSelect");
     provider_->addItems({"Codex", "Claude"});
     addDirButton_ = new QPushButton("Add directory…", central);
-    addDirButton_->setObjectName("addClaudeDirectoryButton");
-    addDirButton_->setToolTip("Give Claude access to another directory for this session.");
-    addDirButton_->setVisible(false);
+    addDirButton_->setObjectName("addDirectoryButton");
     claudeDirsLabel_ = new QLabel("Additional Claude directories: none", central);
     claudeDirsLabel_->setObjectName("claudeDirectories");
     claudeDirsLabel_->setWordWrap(true);
     claudeDirsLabel_->setVisible(false);
+    codexDirsLabel_ = new QLabel("Additional writable Codex directories: none", central);
+    codexDirsLabel_->setObjectName("codexDirectories");
+    codexDirsLabel_->setWordWrap(true);
     status_ = new QLabel(central);
     output_ = new QPlainTextEdit(central);
     output_->setObjectName("output");
@@ -67,6 +68,7 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     providerRow->addStretch();
     layout->addLayout(providerRow);
     layout->addWidget(claudeDirsLabel_);
+    layout->addWidget(codexDirsLabel_);
     layout->addWidget(status_);
     layout->addWidget(output_, 1);
     layout->addLayout(inputRow);
@@ -76,14 +78,19 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     connect(sendButton_, &QPushButton::clicked, this, &MainWindow::submitCommand);
     connect(stopButton_, &QPushButton::clicked, this, &MainWindow::requestStop);
     connect(addDirButton_, &QPushButton::clicked, this, [this] {
-        const QString path = QFileDialog::getExistingDirectory(this, "Add directory for Claude", workingDirectory_);
-        if (!path.isEmpty()) addClaudeDirectory(path);
+        const bool forClaude = provider_->currentIndex() == 1;
+        const QString path = QFileDialog::getExistingDirectory(
+            this, forClaude ? "Add directory for Claude" : "Add writable directory for Codex", workingDirectory_);
+        if (!path.isEmpty()) {
+            if (forClaude) addClaudeDirectory(path);
+            else addCodexDirectory(path);
+        }
     });
     connect(provider_, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int index) {
         appendLine(index == 0 ? "[Codex selected]" : "[Claude selected]");
         if (index == 1 && !claudeReady_) claude_->start();
-        addDirButton_->setVisible(index == 1);
         claudeDirsLabel_->setVisible(index == 1);
+        codexDirsLabel_->setVisible(index == 0);
         updateStatus();
     });
     connect(claude_, &ClaudeBridge::ready, this, [this] {
@@ -295,7 +302,7 @@ void MainWindow::showHelp()
     if (claudeSelected) {
         appendLine("Claude Agent SDK:");
         appendLine("  Send a message with Enter or the Send to Claude button.");
-        appendLine("  Use Add directory to give Claude access to another folder for this session.");
+        appendLine("  Use Add directory to give Claude access to a folder and its subfolders for this session.");
         appendLine("  Responses are streamed into this window.");
         appendLine("  Tool approvals and questions appear in dialogs.");
         appendLine("  Messages entered during a response are queued.");
@@ -311,6 +318,7 @@ void MainWindow::showHelp()
         }
     } else {
         appendLine("Codex connection: codex app-server --stdio (direct JSONL).");
+        appendLine("Use Add writable directory to grant Codex write access to a folder and its subfolders for future turns.");
         appendLine("Installed Codex App Server commands and options (reference; CLI subcommands are not chat messages):");
         helpProgram = codexProgram_;
         helpArguments = {"app-server", "--help"};
@@ -351,6 +359,23 @@ void MainWindow::addClaudeDirectory(const QString &path)
     updateStatus();
 }
 
+void MainWindow::addCodexDirectory(const QString &path)
+{
+    if (path.isEmpty()) return;
+    const QFileInfo directory(QDir(workingDirectory_).absoluteFilePath(path));
+    if (!directory.isDir()) {
+        appendLine("[Directory does not exist: " + directory.absoluteFilePath() + "]");
+        return;
+    }
+    const QString canonicalPath = directory.canonicalFilePath();
+    if (!codexDirectories_.contains(canonicalPath) && canonicalPath != QDir(workingDirectory_).canonicalPath()) {
+        codexDirectories_.append(canonicalPath);
+    }
+    codexDirsLabel_->setText("Additional writable Codex directories: "
+                             + (codexDirectories_.isEmpty() ? "none" : codexDirectories_.join(", ")));
+    appendLine("[Codex writable directory available for future turns: " + canonicalPath + "]");
+}
+
 void MainWindow::sendNextClaudePrompt()
 {
     if (!claudeReady_ || claudeBusy_ || claudeQueuedPrompts_.isEmpty()) return;
@@ -377,8 +402,14 @@ void MainWindow::sendNextPrompt()
     activeTurnId_.clear();
     stopRequested_ = false;
     stopSent_ = false;
-    sendRequest("turn/start", {{"threadId", threadId_},
-                               {"input", QJsonArray{QJsonObject{{"type", "text"}, {"text", prompt}}}}});
+    QJsonObject params{{"threadId", threadId_},
+                       {"input", QJsonArray{QJsonObject{{"type", "text"}, {"text", prompt}}}}};
+    if (!codexDirectories_.isEmpty()) {
+        QJsonArray writableRoots{workingDirectory_};
+        for (const QString &path : codexDirectories_) writableRoots.append(path);
+        params.insert("sandboxPolicy", QJsonObject{{"type", "workspaceWrite"}, {"writableRoots", writableRoots}});
+    }
+    sendRequest("turn/start", params);
     updateStatus();
 }
 
@@ -628,6 +659,10 @@ void MainWindow::updateStatus()
     }
     status_->setText(state + "  •  " + QDir::toNativeSeparators(workingDirectory_));
     sendButton_->setText(provider_->currentIndex() == 1 ? "Send to Claude" : "Send to Codex");
-    addDirButton_->setEnabled(provider_->currentIndex() == 1 && claudeReady_ && !claudeBusy_);
+    addDirButton_->setText(provider_->currentIndex() == 1 ? "Add directory…" : "Add writable directory…");
+    addDirButton_->setToolTip(provider_->currentIndex() == 1
+                             ? "Give Claude access to another directory and its subfolders for this session."
+                             : "Give Codex write access to another directory and its subfolders for future turns.");
+    addDirButton_->setEnabled(provider_->currentIndex() == 1 ? (claudeReady_ && !claudeBusy_) : !busy_);
     provider_->setEnabled(!busy_ && !claudeBusy_);
 }

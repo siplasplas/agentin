@@ -90,6 +90,13 @@ for line in sys.stdin:
         send({"id": request["id"], "result": {"thread": {"id": "test-thread"}}})
     elif method == "turn/start":
         send({"id": request["id"], "result": {"turn": {"id": "test-turn"}}})
+        if request["params"]["input"][0]["text"] == "check roots":
+            roots = request["params"].get("sandboxPolicy", {}).get("writableRoots", [])
+            send({"method": "item/completed", "params": {
+                "item": {"id": "roots", "type": "agentMessage", "text": "Roots: " + ", ".join(roots)}}})
+            send({"method": "turn/completed", "params": {
+                "turn": {"id": "test-turn", "status": "completed"}}})
+            continue
         if request["params"]["input"][0]["text"].startswith("long"):
             send({"method": "turn/started", "params": {"turn": {"id": "test-turn"}}})
             continue
@@ -114,7 +121,9 @@ for line in sys.stdin:
     QVERIFY(input);
     QVERIFY(output);
     auto *stopButton = window.findChild<QPushButton *>("stopButton");
+    auto *addDirButton = window.findChild<QPushButton *>("addDirectoryButton");
     QVERIFY(stopButton);
+    QVERIFY(addDirButton);
 
     QTest::keyClicks(input, "help");
     QTest::keyClick(input, Qt::Key_Return);
@@ -140,6 +149,13 @@ for line in sys.stdin:
     QTest::keyClicks(input, "stop");
     QTest::keyClick(input, Qt::Key_Return);
     QTRY_VERIFY(output->toPlainText().count("[Response: interrupted]") == 2);
+
+    QTemporaryDir extraDirectory;
+    QVERIFY(extraDirectory.isValid());
+    QVERIFY(QMetaObject::invokeMethod(&window, "addCodexDirectory", Q_ARG(QString, extraDirectory.path())));
+    QTest::keyClicks(input, "check roots");
+    QTest::keyClick(input, Qt::Key_Return);
+    QTRY_VERIFY(output->toPlainText().contains("Roots: " + directory.path() + ", " + extraDirectory.path()));
 }
 
 void MainWindowTest::claudeConversationAndStop()
@@ -192,7 +208,7 @@ for line in sys.stdin:
     auto *output = window.findChild<QPlainTextEdit *>("output");
     auto *stopButton = window.findChild<QPushButton *>("stopButton");
     auto *sendButton = window.findChild<QPushButton *>("sendButton");
-    auto *addDirButton = window.findChild<QPushButton *>("addClaudeDirectoryButton");
+    auto *addDirButton = window.findChild<QPushButton *>("addDirectoryButton");
     QVERIFY(provider);
     QVERIFY(input);
     QVERIFY(output);
