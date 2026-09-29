@@ -170,6 +170,13 @@ for line in sys.stdin:
 )PY");
     script.close();
 
+    const QString fakeClaude = directory.filePath("claude");
+    QFile cli(fakeClaude);
+    QVERIFY(cli.open(QIODevice::WriteOnly | QIODevice::Text));
+    cli.write("#!/bin/sh\nprintf 'Usage: claude [OPTIONS]\\n'\n");
+    cli.close();
+    QVERIFY(cli.setPermissions(QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner));
+
     MainWindow window("/nonexistent/codex", directory.path(), python, fakeBridge);
     window.show();
     auto *provider = window.findChild<QComboBox *>("providerSelect");
@@ -183,9 +190,15 @@ for line in sys.stdin:
     provider->setCurrentIndex(1);
     QTRY_VERIFY(output->toPlainText().contains("[Connected to Claude Agent SDK]"));
 
+    const QByteArray previousPath = qgetenv("PATH");
+    qputenv("PATH", directory.path().toLocal8Bit());
     QTest::keyClicks(input, "help");
     QTest::keyClick(input, Qt::Key_Return);
-    QVERIFY(output->toPlainText().contains("Claude uses the Python Agent SDK bridge"));
+    if (previousPath.isNull()) qunsetenv("PATH");
+    else qputenv("PATH", previousPath);
+    QVERIFY(output->toPlainText().contains("Claude Agent SDK:"));
+    QVERIFY(output->toPlainText().contains("Tool approvals and questions appear in dialogs."));
+    QTRY_VERIFY(output->toPlainText().contains("Usage: claude [OPTIONS]"));
 
     QTest::keyClicks(input, "hello");
     QTest::keyClick(input, Qt::Key_Return);

@@ -13,6 +13,7 @@
 #include <QPlainTextEdit>
 #include <QProcess>
 #include <QPushButton>
+#include <QStandardPaths>
 #include <QTextCursor>
 #include <QVBoxLayout>
 #include <QWidget>
@@ -249,36 +250,55 @@ void MainWindow::submitCommand()
 
 void MainWindow::showHelp()
 {
+    const bool claudeSelected = provider_->currentIndex() == 1;
     appendLine("Commands:");
-    appendLine("  help       show this help and provider options");
+    appendLine("  help       show this help and installed agent options");
     appendLine("  new        start a new conversation");
     appendLine("  clear      clear the output pane");
     appendLine("  stop       interrupt the current response");
     appendLine("  quit       close the application");
     appendLine("All other text is sent to the selected agent as a message.\n");
-    if (provider_->currentIndex() == 1) {
-        appendLine("Claude uses the Python Agent SDK bridge. The selected Python environment must have claude-agent-sdk installed.\n");
-        return;
+    QString helpProgram;
+    QStringList helpArguments;
+    QString helpName;
+    if (claudeSelected) {
+        appendLine("Claude Agent SDK:");
+        appendLine("  Responses are streamed into this window.");
+        appendLine("  Tool approvals and questions appear in dialogs.");
+        appendLine("  Messages entered during a response are queued.");
+        appendLine("  The selected Python environment needs claude-agent-sdk and API credentials.");
+        appendLine("Installed Claude CLI options (reference; this window uses the SDK):");
+        helpProgram = QStandardPaths::findExecutable("claude");
+        helpArguments = {"--help"};
+        helpName = "Claude CLI";
+        if (helpProgram.isEmpty()) {
+            appendLine("[Claude CLI is not installed or not in PATH.]\n");
+            return;
+        }
+    } else {
+        appendLine("Codex App Server options:");
+        helpProgram = codexProgram_;
+        helpArguments = {"app-server", "--help"};
+        helpName = "App Server";
     }
-    appendLine("Codex App Server options:");
 
     auto *helpProcess = new QProcess(this);
     helpProcess->setProcessChannelMode(QProcess::MergedChannels);
     connect(helpProcess, &QProcess::readyReadStandardOutput, this, [this, helpProcess] {
         appendText(QString::fromUtf8(helpProcess->readAllStandardOutput()));
     });
-    connect(helpProcess, &QProcess::errorOccurred, this, [this, helpProcess](QProcess::ProcessError error) {
-        appendLine("[Could not load App Server options] " + helpProcess->errorString());
+    connect(helpProcess, &QProcess::errorOccurred, this, [this, helpProcess, helpName](QProcess::ProcessError error) {
+        appendLine("[Could not load " + helpName + " options] " + helpProcess->errorString());
         if (error == QProcess::FailedToStart) helpProcess->deleteLater();
     });
     connect(helpProcess, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this,
-            [this, helpProcess](int code, QProcess::ExitStatus) {
+            [this, helpProcess, helpName](int code, QProcess::ExitStatus) {
         appendText(QString::fromUtf8(helpProcess->readAllStandardOutput()));
-        if (code != 0) appendLine(QString("[App Server help exited with code %1]").arg(code));
+        if (code != 0) appendLine(QString("[%1 help exited with code %2]").arg(helpName).arg(code));
         appendText("\n");
         helpProcess->deleteLater();
     });
-    helpProcess->start(codexProgram_, {"app-server", "--help"});
+    helpProcess->start(helpProgram, helpArguments);
 }
 
 void MainWindow::sendNextClaudePrompt()

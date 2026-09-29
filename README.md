@@ -38,7 +38,9 @@ and `CODEX_BIN`. You can select an executable explicitly with
 
 Type `help` (or `/help`) in the command field to see the available commands.
 With Codex selected, it also shows the options reported by
-`codex app-server --help`.
+`codex app-server --help`. With Claude selected, it explains the SDK workflow
+and shows `claude --help` when the Claude CLI is installed. CLI options are
+shown for reference; this window communicates through the SDK.
 The client also supports `new`, `clear`, `stop`, and `quit`. Any other text is
 sent to the selected agent as a message. Messages entered while a response is
 in progress are queued. Requests to approve an action or answer a question
