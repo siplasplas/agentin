@@ -433,7 +433,7 @@ for line in sys.stdin:
         QJsonArray active;
         if (includeNew) {
             active.append(QJsonObject{{"id", "new-102"}, {"createdAt", 102}, {"cwd", projectPath},
-                                      {"preview", QString(100, 'N')}});
+                                      {"preview", QString(300, 'N')}});
             active.append(QJsonObject{{"id", "new-101"}, {"createdAt", 101}, {"cwd", projectPath}, {"preview", "New"}});
         }
         for (int date = 100; date >= 96; --date) {
@@ -493,7 +493,19 @@ for line in sys.stdin:
         QVERIFY(folder->childCount() >= 1);
         auto *chat = folder->child(0);
         QVERIFY(chat->text(0).size() <= 72);
-        QVERIFY(chat->toolTip(0).contains(QString(100, 'N')));
+        QVERIFY(chat->toolTip(0).contains(QString(199, 'N')));
+        QVERIFY(!chat->toolTip(0).contains(QString(200, 'N')));
+        QFile index(indexPath);
+        QVERIFY(index.open(QIODevice::ReadOnly));
+        const QJsonArray saved = QJsonDocument::fromJson(index.readAll()).object().value("threads").toArray();
+        bool foundPreview = false;
+        for (const QJsonValue &entry : saved) {
+            if (entry.toObject().value("id").toString() == "new-102") {
+                foundPreview = true;
+                QCOMPARE(entry.toObject().value("preview").toString().size(), 200);
+            }
+        }
+        QVERIFY(foundPreview);
         QTest::mouseClick(tree->viewport(), Qt::LeftButton, {}, tree->visualItemRect(chat).center());
         QTest::mouseDClick(tree->viewport(), Qt::LeftButton, {}, tree->visualItemRect(chat).center());
         QTRY_VERIFY(output->toPlainText().contains("[Resumed Codex conversation: new-102]"));

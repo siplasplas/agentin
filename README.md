@@ -64,7 +64,8 @@ the first sync scans the full history and can take longer. Later syncs read
 new active chats from newest to oldest until they reach the saved boundary.
 Archived chats are scanned separately. Double click a chat to resume it.
 Directories appear under an agent only when they contain a discovered chat.
-Chat previews are shortened in the tree; hover over one to read its full title.
+Chat previews are shortened in the tree; hover over one to read the longer stored preview.
+Codex previews in the local JSON index are limited to 200 characters.
 
 Expanding Claude lists SDK sessions across all Claude projects. Expanding
 Gemini asks Gemini CLI for sessions in known working directories. GLM shows chats

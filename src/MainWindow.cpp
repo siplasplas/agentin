@@ -40,6 +40,15 @@ QString shortPreview(const QString &value)
     constexpr int limit = 72;
     return singleLine.size() > limit ? singleLine.left(limit - 1) + QChar(0x2026) : singleLine;
 }
+
+void limitCodexPreview(QJsonObject &thread)
+{
+    if (!thread.value("preview").isString()) return;
+    QString preview = thread.value("preview").toString().simplified();
+    constexpr int limit = 200;
+    if (preview.size() > limit) preview = preview.left(limit - 1) + QChar(0x2026);
+    thread.insert("preview", preview);
+}
 }
 
 MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirectory,
@@ -957,7 +966,8 @@ bool MainWindow::loadCodexConversationIndex()
         return false;
     }
     for (const QJsonValue &value : document.object().value("threads").toArray()) {
-        const QJsonObject thread = value.toObject();
+        QJsonObject thread = value.toObject();
+        limitCodexPreview(thread);
         const QString id = thread.value("id").toString();
         if (!id.isEmpty()) cachedCodexConversations_.insert(id, thread);
     }
@@ -1228,6 +1238,7 @@ void MainWindow::handleCodexConversationPage(const QJsonObject &result)
     bool olderThanCached = false;
     for (const QJsonValue &value : result.value("data").toArray()) {
         QJsonObject thread = value.toObject();
+        limitCodexPreview(thread);
         const QString id = thread.value("id").toString();
         if (id.isEmpty()) continue;
         if (!syncingArchivedCodexConversations_ && activeConversationWatermark_ > 0
