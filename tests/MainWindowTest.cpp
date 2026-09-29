@@ -72,7 +72,9 @@ import json
 import sys
 
 if "--help" in sys.argv:
-    print("Usage: codex app-server [OPTIONS]", flush=True)
+    print("Usage: codex app-server [OPTIONS] [COMMAND]", flush=True)
+    print("Commands:\n  daemon  Manage local daemon\n  proxy  Connect to local daemon", flush=True)
+    print("Options:\n  --stdio  Use stdio transport", flush=True)
     sys.exit(0)
 
 def send(message):
@@ -116,7 +118,9 @@ for line in sys.stdin:
     QTest::keyClicks(input, "help");
     QTest::keyClick(input, Qt::Key_Return);
     QVERIFY(output->toPlainText().contains("Commands:"));
-    QTRY_VERIFY(output->toPlainText().contains("Usage: codex app-server [OPTIONS]"));
+    QTRY_VERIFY(output->toPlainText().contains("Codex connection: codex app-server --stdio"));
+    QTRY_VERIFY(output->toPlainText().contains("--stdio  Use stdio transport"));
+    QVERIFY(!output->toPlainText().contains("Manage local daemon"));
     QTRY_VERIFY(output->toPlainText().contains("[Connected to Codex]"));
 
     QTest::keyClicks(input, "test");

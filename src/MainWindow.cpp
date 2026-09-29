@@ -276,7 +276,9 @@ void MainWindow::showHelp()
             return;
         }
     } else {
-        appendLine("Codex App Server options:");
+        appendLine("Codex connection: codex app-server --stdio (direct JSONL).");
+        appendLine("The daemon and proxy subcommands are for connecting to a separate persistent server.");
+        appendLine("Options for this connection:");
         helpProgram = codexProgram_;
         helpArguments = {"app-server", "--help"};
         helpName = "App Server";
@@ -284,16 +286,18 @@ void MainWindow::showHelp()
 
     auto *helpProcess = new QProcess(this);
     helpProcess->setProcessChannelMode(QProcess::MergedChannels);
-    connect(helpProcess, &QProcess::readyReadStandardOutput, this, [this, helpProcess] {
-        appendText(QString::fromUtf8(helpProcess->readAllStandardOutput()));
-    });
     connect(helpProcess, &QProcess::errorOccurred, this, [this, helpProcess, helpName](QProcess::ProcessError error) {
         appendLine("[Could not load " + helpName + " options] " + helpProcess->errorString());
         if (error == QProcess::FailedToStart) helpProcess->deleteLater();
     });
     connect(helpProcess, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this,
-            [this, helpProcess, helpName](int code, QProcess::ExitStatus) {
-        appendText(QString::fromUtf8(helpProcess->readAllStandardOutput()));
+            [this, helpProcess, helpName, claudeSelected](int code, QProcess::ExitStatus) {
+        QString helpText = QString::fromUtf8(helpProcess->readAllStandardOutput());
+        if (!claudeSelected) {
+            const qsizetype options = helpText.indexOf("\nOptions:");
+            if (options >= 0) helpText = helpText.mid(options + 1);
+        }
+        appendText(helpText);
         if (code != 0) appendLine(QString("[%1 help exited with code %2]").arg(helpName).arg(code));
         appendText("\n");
         helpProcess->deleteLater();

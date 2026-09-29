@@ -37,8 +37,10 @@ and `CODEX_BIN`. You can select an executable explicitly with
 `--codex /path/to/codex`.
 
 Type `help` (or `/help`) in the command field to see the available commands.
-With Codex selected, it also shows the options reported by
-`codex app-server --help`. With Claude selected, it explains the SDK workflow
+With Codex selected, it shows the relevant options reported by
+`codex app-server --help` and explains that the client uses direct stdio mode.
+The `daemon` and `proxy` subcommands are for a separate persistent server.
+With Claude selected, it explains the SDK workflow
 and shows `claude --help` when the Claude CLI is installed. CLI options are
 shown for reference; this window communicates through the SDK.
 The client also supports `new`, `clear`, `stop`, and `quit`. Any other text is
