@@ -10,6 +10,7 @@
 #include <QLineEdit>
 #include <QPlainTextEdit>
 #include <QPushButton>
+#include <QScopeGuard>
 #include <QTemporaryDir>
 #include <QTimer>
 #include <QTreeWidget>
@@ -32,6 +33,8 @@ private slots:
     void claudeSessionMetadataRefreshesExistingIndex();
     void missingGeminiCliReportsOneDiscoveryError();
     void geminiListsSessionsFromAllProjects();
+    void claudeAttachRespectsExternalLock();
+    void geminiAttachRespectsExternalLock();
 };
 
 // Starts a chat through the New chat dialog, choosing the agent and working directory there.
@@ -464,9 +467,15 @@ for line in sys.stdin:
         result = {"data": page, "nextCursor": str(next_offset) if next_offset < len(items) else None}
         with open(os.path.join(folder, "requests.log"), "a") as log:
             log.write(("archived" if params["archived"] else "active") + "\n")
+    elif method == "thread/resume":
+        if request["params"]["threadId"] == "new-101":
+            print(json.dumps({"id": request["id"], "error": {"code": -32000,
+                "message": "thread is in use by another client"}}), flush=True)
+            continue
+        result = {"thread": {"id": request["params"]["threadId"]}}
     elif method == "thread/items/list":
         params = request["params"]
-        assert params["threadId"] == "new-102" and params["sortDirection"] == "desc"
+        assert params["sortDirection"] == "desc"
         def user(text):
             return {"turnId": "t", "item": {"type": "userMessage", "id": text, "content": [{"type": "text", "text": text}]}}
         def agent(text):
@@ -573,7 +582,6 @@ for line in sys.stdin:
         auto *sendButton = window.findChild<QPushButton *>("sendButton");
         QVERIFY(chat && header && loadEarlier && input && sendButton);
         QTest::mouseClick(tree->viewport(), Qt::LeftButton, {}, tree->visualItemRect(chatItem).center());
-        QTest::mouseDClick(tree->viewport(), Qt::LeftButton, {}, tree->visualItemRect(chatItem).center());
         QTRY_VERIFY(chat->toPlainText().contains("Codex: Latest answer"));
         const QString latest = chat->toPlainText();
         QVERIFY(latest.indexOf("You: Latest question") < latest.indexOf("[Codex tool: $ ls]"));
@@ -594,6 +602,35 @@ for line in sys.stdin:
         QVERIFY(log.open(QIODevice::ReadOnly));
         QVERIFY(!QString::fromUtf8(log.readAll()).contains("turn\n"));
         log.close();
+
+        QTreeWidgetItem *lockedItem = nullptr;
+        for (int i = 0; i < folder->childCount(); ++i) {
+            if (folder->child(i)->data(0, Qt::UserRole + 1).toString() == "new-101") lockedItem = folder->child(i);
+        }
+        QVERIFY(lockedItem);
+        QTest::mouseClick(tree->viewport(), Qt::LeftButton, {}, tree->visualItemRect(lockedItem).center());
+        QTest::mouseDClick(tree->viewport(), Qt::LeftButton, {}, tree->visualItemRect(lockedItem).center());
+        QTRY_VERIFY(header->text().contains("locked: the Codex App Server refused to open it"));
+        QVERIFY(header->text().contains("thread is in use by another client"));
+        QVERIFY(!sendButton->isEnabled());
+
+        QTest::mouseClick(tree->viewport(), Qt::LeftButton, {}, tree->visualItemRect(chatItem).center());
+        QTest::mouseDClick(tree->viewport(), Qt::LeftButton, {}, tree->visualItemRect(chatItem).center());
+        QTRY_VERIFY(sendButton->isEnabled());
+        QTRY_VERIFY(chat->toPlainText().contains("Codex: Latest answer"));
+        QVERIFY(!header->text().contains("read-only"));
+        QVERIFY(output->toPlainText().contains("[Resumed Codex conversation: new-102]"));
+        input->setText("continue here");
+        QTest::keyClick(input, Qt::Key_Return);
+        QTRY_VERIFY(chat->toPlainText().contains("You: continue here"));
+        QVERIFY(chat->toPlainText().contains("You: Latest question"));
+        const auto requested = [&log] {
+            if (!log.open(QIODevice::ReadOnly)) return QString();
+            const QString text = QString::fromUtf8(log.readAll());
+            log.close();
+            return text;
+        };
+        QTRY_VERIFY(requested().contains("turn\n"));
     }
 }
 
@@ -805,6 +842,162 @@ void MainWindowTest::geminiListsSessionsFromAllProjects()
     QVERIFY(reopenedTree);
     reopenedTree->topLevelItem(2)->setExpanded(true);
     QCOMPARE(reopenedTree->topLevelItem(2)->childCount(), 2);
+}
+
+// Clicks and then double-clicks a tree item, which is how a real double-click reaches QTreeWidget.
+static void doubleClickItem(QTreeWidget *tree, QTreeWidgetItem *item)
+{
+    tree->scrollToItem(item);
+    QTest::mouseClick(tree->viewport(), Qt::LeftButton, {}, tree->visualItemRect(item).center());
+    QTest::mouseDClick(tree->viewport(), Qt::LeftButton, {}, tree->visualItemRect(item).center());
+}
+
+void MainWindowTest::claudeAttachRespectsExternalLock()
+{
+    const QString python = QStandardPaths::findExecutable("python3");
+    if (python.isEmpty()) QSKIP("Python 3 is unavailable");
+    if (!QFileInfo::exists("/proc/1")) QSKIP("Process information is unavailable");
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString fakeBridge = directory.filePath("fake-claude.py");
+    QFile script(fakeBridge);
+    QVERIFY(script.open(QIODevice::WriteOnly | QIODevice::Text));
+    script.write(R"PY(import json
+import sys
+
+def send(message):
+    print(json.dumps(message), flush=True)
+
+if "--read-session" in sys.argv:
+    send({"type": "history", "total": 2, "entries": [
+        {"role": "user", "text": "Saved question"}, {"role": "assistant", "text": "Saved answer"}]})
+    sys.exit(0)
+if "--list-sessions" in sys.argv:
+    send({"type": "sessions", "sessions": []})
+    sys.exit(0)
+send({"type": "ready"})
+for line in sys.stdin:
+    request = json.loads(line)
+    if request["type"] == "resume":
+        with open(sys.argv[0] + ".resumed", "a") as log:
+            log.write(request["session_id"] + "\n")
+        send({"type": "ready"})
+    elif request["type"] == "prompt":
+        send({"type": "delta", "text": "Continued"})
+        send({"type": "complete", "status": "completed"})
+    elif request["type"] == "shutdown":
+        break
+)PY");
+    script.close();
+    QFile index(directory.filePath("claude-conversations.json"));
+    QVERIFY(index.open(QIODevice::WriteOnly));
+    const QJsonArray threads{QJsonObject{{"provider", "Claude"}, {"id", "claude-1"}, {"cwd", directory.path()},
+                                         {"title", "Saved chat"}, {"createdAt", 1}}};
+    QVERIFY(index.write(QJsonDocument(QJsonObject{{"version", 1}, {"threads", threads}}).toJson()) > 0);
+    index.close();
+    // PID 1 is alive and is not started by this test, so it stands in for another Claude Code window.
+    const QString configDirectory = directory.filePath("claude-config");
+    QVERIFY(QDir().mkpath(configDirectory + "/sessions"));
+    QFile lock(configDirectory + "/sessions/1.json");
+    QVERIFY(lock.open(QIODevice::WriteOnly));
+    lock.write(QJsonDocument(QJsonObject{{"pid", 1}, {"sessionId", "claude-1"}, {"kind", "interactive"}}).toJson());
+    lock.close();
+    const QByteArray previousConfig = qgetenv("CLAUDE_CONFIG_DIR");
+    const auto restoreConfig = qScopeGuard([&previousConfig] {
+        if (previousConfig.isNull()) qunsetenv("CLAUDE_CONFIG_DIR");
+        else qputenv("CLAUDE_CONFIG_DIR", previousConfig);
+    });
+    qputenv("CLAUDE_CONFIG_DIR", configDirectory.toLocal8Bit());
+
+    MainWindow window("/bin/true", directory.path(), python, fakeBridge, "gemini", nullptr,
+                      directory.filePath("codex-conversations.json"));
+    window.show();
+    auto *tree = window.findChild<QTreeWidget *>("conversationTree");
+    auto *chat = window.findChild<QPlainTextEdit *>("chatView");
+    auto *output = window.findChild<QPlainTextEdit *>("log");
+    auto *header = window.findChild<QLabel *>("chatHeader");
+    auto *input = window.findChild<QLineEdit *>("commandInput");
+    auto *sendButton = window.findChild<QPushButton *>("sendButton");
+    QVERIFY(tree && chat && output && header && input && sendButton);
+    tree->topLevelItem(1)->setExpanded(true);
+    QTRY_VERIFY(output->toPlainText().contains("[Claude sessions discovered: 0]"));
+    QTreeWidgetItem *chatItem = tree->topLevelItem(1)->child(0)->child(0);
+    QVERIFY(chatItem);
+
+    doubleClickItem(tree, chatItem);
+    QTRY_VERIFY(chat->toPlainText().contains("Claude: Saved answer"));
+    QVERIFY(header->text().contains("locked: open in Claude Code interactive (PID 1)"));
+    QVERIFY(output->toPlainText().contains("stays read-only"));
+    QVERIFY(!sendButton->isEnabled());
+    QVERIFY(!QFileInfo::exists(fakeBridge + ".resumed"));
+
+    QVERIFY(lock.remove());
+    doubleClickItem(tree, chatItem);
+    QTRY_VERIFY(sendButton->isEnabled());
+    QVERIFY(!header->text().contains("locked"));
+    QVERIFY(!header->text().contains("read-only"));
+    input->setText("more");
+    QTest::keyClick(input, Qt::Key_Return);
+    QTRY_VERIFY(chat->toPlainText().contains("Claude: Continued"));
+    const QString transcript = chat->toPlainText();
+    QVERIFY(transcript.indexOf("Claude: Saved answer") < transcript.indexOf("You: more"));
+    QFile resumed(fakeBridge + ".resumed");
+    QVERIFY(resumed.open(QIODevice::ReadOnly));
+    QCOMPARE(QString::fromUtf8(resumed.readAll()), QString("claude-1\n"));
+}
+
+void MainWindowTest::geminiAttachRespectsExternalLock()
+{
+    const QString python = QStandardPaths::findExecutable("python3");
+    if (python.isEmpty()) QSKIP("Python 3 is unavailable");
+    if (!QFileInfo::exists("/proc/self/cmdline")) QSKIP("Process information is unavailable");
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString geminiData = directory.filePath("gemini-data");
+    const QString project = directory.filePath("project");
+    QVERIFY(QDir().mkpath(project));
+    QVERIFY(QDir().mkpath(geminiData + "/tmp/p/chats"));
+    QFile projects(geminiData + "/projects.json");
+    QVERIFY(projects.open(QIODevice::WriteOnly));
+    projects.write(QJsonDocument(QJsonObject{{"projects", QJsonObject{{project, "p"}}}}).toJson());
+    projects.close();
+    const QString sessionId = "gemini-lock-" + QString::number(QCoreApplication::applicationPid());
+    QFile session(geminiData + "/tmp/p/chats/session-2026-09-29T10-00-lock.jsonl");
+    QVERIFY(session.open(QIODevice::WriteOnly));
+    session.write(QJsonDocument(QJsonObject{{"sessionId", sessionId}, {"kind", "main"},
+                                        {"startTime", "2026-09-29T10:00:00Z"}}).toJson(QJsonDocument::Compact) + "\n");
+    session.write(QJsonDocument(QJsonObject{{"type", "user"}, {"id", "u1"}, {"content", "Locked prompt"}})
+                      .toJson(QJsonDocument::Compact) + "\n");
+    session.close();
+
+    // A detached process is not a child of this application, like a Gemini CLI started elsewhere.
+    qint64 holder = 0;
+    QVERIFY(QProcess::startDetached(python, {"-c", "import time; time.sleep(30)", "--resume", sessionId}, {}, &holder));
+    const auto stopHolder = qScopeGuard([holder] { QProcess::execute("kill", {QString::number(holder)}); });
+
+    MainWindow window("/bin/true", project, {}, {}, directory.filePath("missing-gemini"), nullptr,
+                      directory.filePath("codex-conversations.json"), "agy", geminiData);
+    window.show();
+    auto *tree = window.findChild<QTreeWidget *>("conversationTree");
+    auto *header = window.findChild<QLabel *>("chatHeader");
+    auto *sendButton = window.findChild<QPushButton *>("sendButton");
+    QVERIFY(tree && header && sendButton);
+    tree->topLevelItem(2)->setExpanded(true);
+    QTRY_COMPARE(tree->topLevelItem(2)->childCount(), 1);
+    QTreeWidgetItem *chatItem = tree->topLevelItem(2)->child(0)->child(0);
+    doubleClickItem(tree, chatItem);
+    QTRY_VERIFY(header->text().contains(QString("locked: open in PID %1").arg(holder)));
+    QVERIFY(!sendButton->isEnabled());
+
+    QProcess::execute("kill", {QString::number(holder)});
+    const auto holderRunning = [holder] {
+        QFile commandLine(QString("/proc/%1/cmdline").arg(holder));
+        return commandLine.open(QIODevice::ReadOnly) && !commandLine.readAll().isEmpty();
+    };
+    QTRY_VERIFY(!holderRunning());
+    doubleClickItem(tree, chatItem);
+    QTRY_VERIFY(sendButton->isEnabled());
+    QVERIFY(!header->text().contains("locked"));
 }
 
 QTEST_MAIN(MainWindowTest)

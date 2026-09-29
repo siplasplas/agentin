@@ -117,6 +117,18 @@ Agent SDK, and Gemini history is read from the saved CLI session file.
 Antigravity does not expose its history, so no preview is available. Messages
 cannot be sent to a previewed chat; `help`, `new`, `clear`, and `quit` still work.
 
+Double-click a chat to continue it. Its history stays visible and new messages
+are added below it. A chat that is open in another tool stays read-only and the
+chat header shows it as locked:
+
+- Codex: the App Server decides; if `thread/resume` fails, its error is shown.
+- Claude and GLM: Claude Code registers running sessions in
+  `~/.claude/sessions/<pid>.json` (or under `CLAUDE_CONFIG_DIR`); a live process
+  there that this application did not start locks the session.
+- Gemini and Antigravity: on Linux, another process whose command line contains
+  the session ID (for example `gemini --resume <id>`) locks the session. This is
+  a heuristic, because these CLIs do not publish which sessions are open.
+
 Type `help` (or `/help`) in the command field to see the available commands.
 With Codex selected, it shows the complete output of `codex app-server --help`
 and explains that the client uses direct stdio mode. CLI subcommands shown in
@@ -137,7 +149,7 @@ directory is passed as the CLI process directory. Headless mode uses the CLI's c
 policy; approval prompts are not shown as Qt dialogs.
 
 The client also supports `new`, `clear` (clears the log), `stop`, and `quit`.
-Any other text is sent to the agent of the chat started with New chat. Messages entered while a response is
+Any other text is sent to the displayed chat when it is not a read-only preview. Messages entered while a response is
 in progress are queued. Requests to approve an action or answer a question
 appear in a separate dialog. Each agent keeps its own conversation while the
 application is open.

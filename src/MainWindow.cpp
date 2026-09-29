@@ -4,6 +4,7 @@
 #include "MainWindow.h"
 
 #include <QComboBox>
+#include <QCoreApplication>
 #include <QDateTime>
 #include <QDialog>
 #include <QDialogButtonBox>
@@ -157,6 +158,67 @@ QList<ChatEntry> codexHistoryEntries(const QJsonObject &item)
     return {};
 }
 
+// Returns the /proc/<pid>/stat fields that follow the command name (state, ppid, ...).
+QStringList processStatFields(qint64 pid)
+{
+    QFile file(QString("/proc/%1/stat").arg(pid));
+    if (!file.open(QIODevice::ReadOnly)) return {};
+    const QString stat = QString::fromUtf8(file.readAll());
+    const qsizetype end = stat.lastIndexOf(')');
+    return end < 0 ? QStringList{} : stat.mid(end + 2).split(' ', Qt::SkipEmptyParts);
+}
+
+bool isOwnDescendant(qint64 pid)
+{
+    const qint64 self = QCoreApplication::applicationPid();
+    for (int depth = 0; depth < 64 && pid > 1; ++depth) {
+        if (pid == self) return true;
+        const QStringList fields = processStatFields(pid);
+        if (fields.size() < 2) return false;
+        pid = fields.at(1).toLongLong();
+    }
+    return false;
+}
+
+// Claude Code registers each running session in <config>/sessions/<pid>.json.
+QString claudeSessionLock(const QString &configDirectory, const QString &sessionId)
+{
+    const QDir sessions(QDir(configDirectory).filePath("sessions"));
+    for (const QFileInfo &info : sessions.entryInfoList({"*.json"}, QDir::Files)) {
+        QFile file(info.filePath());
+        if (!file.open(QIODevice::ReadOnly)) continue;
+        const QJsonObject entry = QJsonDocument::fromJson(file.readAll()).object();
+        if (entry.value("sessionId").toString() != sessionId) continue;
+        const qint64 pid = entry.value("pid").toInteger();
+        if (pid <= 0 || !QFileInfo::exists(QString("/proc/%1").arg(pid)) || isOwnDescendant(pid)) continue;
+        const QString start = entry.value("procStart").toString();
+        const QStringList fields = processStatFields(pid);
+        if (!start.isEmpty() && (fields.size() <= 19 || fields.at(19) != start)) continue;
+        const QString kind = entry.value("kind").toString("session");
+        return QString("Claude Code %1 (PID %2)").arg(kind).arg(pid);
+    }
+    return {};
+}
+
+// Heuristic for CLIs without a session registry: another process that names the session on its command line.
+QString commandLineLock(const QString &sessionId)
+{
+    const QDir processes("/proc");
+    for (const QString &name : processes.entryList(QDir::Dirs | QDir::NoDotAndDotDot)) {
+        bool numeric = false;
+        const qint64 pid = name.toLongLong(&numeric);
+        if (!numeric || isOwnDescendant(pid)) continue;
+        QFile file(processes.filePath(name + "/cmdline"));
+        if (!file.open(QIODevice::ReadOnly)) continue;
+        const QStringList arguments = QString::fromUtf8(file.readAll()).split(QChar('\0'), Qt::SkipEmptyParts);
+        for (const QString &argument : arguments) {
+            if (!argument.contains(sessionId)) continue;
+            return QString("PID %1: %2").arg(pid).arg(arguments.mid(0, 3).join(' '));
+        }
+    }
+    return {};
+}
+
 void limitCodexPreview(QJsonObject &thread)
 {
     if (!thread.value("preview").isString()) return;
@@ -252,12 +314,12 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     logSplitter->setStretchFactor(0, 1);
     logSplitter->setSizes({450, 150});
     setCentralWidget(logSplitter);
-    // Selecting or double-clicking a chat shows a read-only preview of its latest messages.
+    // Selecting a chat shows a read-only preview of its latest messages; double-clicking continues it.
     connect(conversationTree_, &QTreeWidget::currentItemChanged, this, [this](QTreeWidgetItem *item) {
         if (item) showChatPreview(item);
     });
     connect(conversationTree_, &QTreeWidget::itemDoubleClicked, this, [this](QTreeWidgetItem *item, int) {
-        showChatPreview(item);
+        attachChat(item);
     });
     connect(loadEarlierButton_, &QPushButton::clicked, this, [this] {
         historyLimit_ += kHistoryPageSize;
@@ -454,13 +516,16 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     });
     connect(claude_, &ClaudeBridge::sessionChanged, this, [this](const QString &id) {
         claudeSessionId_ = id;
+        if (viewLive_ && viewProvider_ == "Claude") viewId_ = id;
         rememberLocalConversation("Claude", id);
     });
     connect(glm_, &ClaudeBridge::sessionChanged, this, [this](const QString &id) {
         glmSessionId_ = id;
+        if (viewLive_ && viewProvider_ == "GLM") viewId_ = id;
         rememberLocalConversation("GLM", id);
     });
     connect(gemini_, &GeminiBridge::sessionChanged, this, [this](const QString &id) {
+        if (viewLive_ && viewProvider_ == "Gemini") viewId_ = id;
         rememberLocalConversation("Gemini", id);
     });
     connect(antigravity_, &AntigravityBridge::textDelta, this, [this](const QString &text) {
@@ -487,6 +552,7 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
         sendNextAntigravityPrompt();
     });
     connect(antigravity_, &AntigravityBridge::conversationChanged, this, [this](const QString &id) {
+        if (viewLive_ && viewProvider_ == "Antigravity") viewId_ = id;
         rememberLocalConversation("Antigravity", id);
     });
     connect(server_, &QProcess::started, this, [this] {
@@ -593,7 +659,7 @@ void MainWindow::submitCommand()
         close();
     } else {
         if (!viewLive_) {
-            appendLine("[The displayed chat is a read-only preview. Use New chat to start a conversation.]");
+            appendLine("[The displayed chat is a read-only preview. Double-click it in the tree to continue it.]");
             return;
         }
         if (currentProvider_ == 4) {
@@ -740,6 +806,30 @@ QString MainWindow::providerWorkingDirectory(int index) const
     return index == 0 ? codexWorkingDirectory_
         : (index == 1 ? claudeWorkingDirectory_ : (index == 2 ? glmWorkingDirectory_
            : (index == 3 ? geminiWorkingDirectory_ : antigravityWorkingDirectory_)));
+}
+
+int MainWindow::providerIndex(const QString &name)
+{
+    for (int i = 0; i < 5; ++i) {
+        if (providerName(i) == name) return i;
+    }
+    return -1;
+}
+
+QString MainWindow::liveSessionId(int index) const
+{
+    return index == 0 ? threadId_ : (index == 1 ? claudeSessionId_ : (index == 2 ? glmSessionId_
+        : (index == 3 ? gemini_->sessionId() : antigravity_->conversationId())));
+}
+
+QString MainWindow::externalLock(const QString &provider, const QString &id) const
+{
+    // Codex is not checked here: the App Server itself refuses to resume a thread it cannot open.
+    if (provider == "Claude" || provider == "GLM") {
+        return claudeSessionLock(qEnvironmentVariable("CLAUDE_CONFIG_DIR", QDir::home().filePath(".claude")), id);
+    }
+    if (provider == "Gemini" || provider == "Antigravity") return commandLineLock(id);
+    return {};
 }
 
 void MainWindow::selectProvider(int index)
@@ -1537,6 +1627,13 @@ void MainWindow::handleResponse(const QJsonObject &message)
             stagedCodexConversations_.clear();
         } else if (method == "thread/start" || method == "thread/resume") {
             codexThreadOpening_ = false;
+            if (method == "thread/resume" && !pendingCodexAttachId_.isEmpty()) {
+                if (viewProvider_ == "Codex" && viewId_ == pendingCodexAttachId_) {
+                    lockNotice_ = "the Codex App Server refused to open it: " + error.value("message").toString();
+                    updateChatHeader();
+                }
+                pendingCodexAttachId_.clear();
+            }
         } else if (method == "turn/start") {
             busy_ = false;
             activeTurnId_.clear();
@@ -1574,6 +1671,16 @@ void MainWindow::handleResponse(const QJsonObject &message)
         threadId_ = result.value("thread").toObject().value("id").toString();
         if (threadId_.isEmpty()) appendLine("[Server did not return a conversation ID.]");
         else appendLine(method == "thread/start" ? "[Connected to Codex]" : "[Resumed Codex conversation: " + threadId_ + "]");
+        if (method == "thread/resume" && !pendingCodexAttachId_.isEmpty()) {
+            if (threadId_ == pendingCodexAttachId_ && viewProvider_ == "Codex" && viewId_ == threadId_) {
+                viewLive_ = true;
+                lockNotice_.clear();
+                updateChatHeader();
+            }
+            pendingCodexAttachId_.clear();
+        } else if (method == "thread/start" && viewLive_ && viewProvider_ == "Codex") {
+            viewId_ = threadId_;
+        }
         refreshConversationTree();
         sendNextPrompt();
     } else if (method == "turn/start") {
@@ -1708,6 +1815,7 @@ void MainWindow::appendChatText(const QString &provider, const QString &text)
 {
     // Live output is shown only while its conversation is displayed; saved history covers the rest.
     if (!viewLive_ || viewProvider_ != provider) return;
+    liveTranscript_ += text;
     QTextCursor cursor = chatView_->textCursor();
     cursor.movePosition(QTextCursor::End);
     cursor.insertText(text);
@@ -1725,6 +1833,8 @@ void MainWindow::showLiveChat(const QString &provider, const QString &path)
     viewPath_ = path;
     viewTitle_ = "New chat";
     viewLive_ = true;
+    lockNotice_.clear();
+    liveTranscript_.clear();
     historyEntries_.clear();
     chatView_->clear();
     loadEarlierButton_->setVisible(false);
@@ -1738,12 +1848,55 @@ void MainWindow::showChatPreview(QTreeWidgetItem *item)
     if (kind.isEmpty() || kind == "provider") return;
     const QString provider = kind == "codex-chat" ? "Codex" : kind;
     const QString id = item->data(0, Qt::UserRole + 1).toString();
-    if (!viewLive_ && viewProvider_ == provider && viewId_ == id) return;
+    if (viewProvider_ == provider && viewId_ == id) return;
+    openChat(provider, id, item->data(0, Qt::UserRole + 2).toString(), item->text(0));
+}
+
+void MainWindow::attachChat(QTreeWidgetItem *item)
+{
+    const QString kind = item->data(0, Qt::UserRole).toString();
+    if (kind.isEmpty() || kind == "provider") return;
+    const QString provider = kind == "codex-chat" ? "Codex" : kind;
+    const QString id = item->data(0, Qt::UserRole + 1).toString();
+    const QString path = item->data(0, Qt::UserRole + 2).toString();
+    const int index = providerIndex(provider);
+    if (id.isEmpty() || index < 0 || (viewLive_ && viewProvider_ == provider && viewId_ == id)) return;
+    if (viewProvider_ != provider || viewId_ != id) openChat(provider, id, path, item->text(0));
+    const bool alreadyLive = liveSessionId(index) == id;
+    if (!alreadyLive) {
+        const QString lock = externalLock(provider, id);
+        if (!lock.isEmpty()) {
+            lockNotice_ = "open in " + lock;
+            updateChatHeader();
+            appendLine("[" + provider + " conversation is open in another tool and stays read-only: " + lock + "]");
+            return;
+        }
+        lockNotice_.clear();
+        updateChatHeader();
+        if (provider == "Codex") {
+            pendingCodexAttachId_ = id;
+            resumeCodexConversation(id, path);
+            if (!codexThreadOpening_) pendingCodexAttachId_.clear();
+            return;
+        }
+        resumeProviderConversation(provider, id, path);
+        if (liveSessionId(index) != id) return;
+    }
+    selectProvider(index);
+    viewLive_ = true;
+    updateChatHeader();
+    updateStatus();
+}
+
+void MainWindow::openChat(const QString &provider, const QString &id, const QString &path, const QString &title)
+{
     viewProvider_ = provider;
     viewId_ = id;
-    viewPath_ = item->data(0, Qt::UserRole + 2).toString();
-    viewTitle_ = item->text(0);
+    viewPath_ = path;
+    viewTitle_ = title;
     viewLive_ = false;
+    lockNotice_.clear();
+    liveTranscript_.clear();
     historyLimit_ = kHistoryPageSize;
     historyTotal_ = 0;
     historyEntries_.clear();
@@ -1770,6 +1923,7 @@ void MainWindow::loadHistory(bool reset)
         if (!reset && !codexHistoryCursor_.isEmpty()) params.insert("cursor", codexHistoryCursor_);
         codexHistoryRequest_ = sendRequest("thread/items/list", params);
     } else if (viewProvider_ == "Claude" || viewProvider_ == "GLM") {
+        if (!reset) liveTranscript_.clear();
         if (claudePython_.isEmpty() || claudeScript_.isEmpty()) {
             showHistory({}, false, "The Claude Agent SDK bridge is not configured.");
             return;
@@ -1822,6 +1976,7 @@ void MainWindow::loadHistory(bool reset)
             showHistory({}, false, "The Gemini session file was not found.");
             return;
         }
+        if (!reset) liveTranscript_.clear();
         const QList<ChatEntry> entries = readGeminiHistory(filePath);
         historyTotal_ = entries.size();
         historyEntries_ = entries.mid(qMax(0, entries.size() - historyLimit_));
@@ -1841,7 +1996,7 @@ void MainWindow::showHistory(const QList<ChatEntry> &entries, bool hasMore, cons
     }
     if (!notice.isEmpty()) blocks.append("[" + notice + "]");
     else if (blocks.isEmpty()) blocks.append("[This conversation has no messages to show.]");
-    chatView_->setPlainText(blocks.join("\n\n") + '\n');
+    chatView_->setPlainText(blocks.join("\n\n") + '\n' + (viewLive_ ? liveTranscript_ : QString()));
     chatView_->moveCursor(QTextCursor::End);
     chatView_->ensureCursorVisible();
     loadEarlierButton_->setVisible(hasMore);
@@ -1850,7 +2005,8 @@ void MainWindow::showHistory(const QList<ChatEntry> &entries, bool hasMore, cons
 void MainWindow::updateChatHeader()
 {
     QStringList parts{viewProvider_, viewTitle_, QDir::toNativeSeparators(viewPath_)};
-    if (!viewLive_) parts.append("read-only preview");
+    if (!lockNotice_.isEmpty()) parts.append("locked: " + lockNotice_);
+    else if (!viewLive_) parts.append("read-only preview");
     chatHeader_->setText(parts.join("  •  "));
     chatHeader_->setToolTip(viewId_);
 }
@@ -1893,6 +2049,10 @@ void MainWindow::updateStatus()
     sendButton_->setText(index == 0 ? "Send to Codex" : (index == 1 ? "Send to Claude"
                          : (index == 2 ? "Send to GLM" : (index == 3 ? "Send to Gemini" : "Send to Antigravity"))));
     sendButton_->setEnabled(viewLive_);
+    // Reloading a longer tail while a live response streams would drop the partial answer.
+    const bool viewBusy = viewLive_ && (currentProvider_ == 0 ? busy_ : (currentProvider_ == 1 ? claudeBusy_
+        : (currentProvider_ == 2 ? glmBusy_ : (currentProvider_ == 3 ? geminiBusy_ : antigravityBusy_))));
+    loadEarlierButton_->setEnabled(!viewBusy);
     input_->setPlaceholderText(viewLive_ ? "Enter a message or help, then press Enter"
                                          : "Read-only preview. Type help, new or clear, then press Enter");
     newChatButton_->setEnabled(!busy_ && !claudeBusy_ && !glmBusy_ && !geminiBusy_ && !antigravityBusy_);

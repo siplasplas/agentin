@@ -63,6 +63,7 @@ private:
     Q_INVOKABLE void newCodexConversation(const QString &path);
     Q_INVOKABLE void resumeCodexConversation(const QString &id, const QString &path);
     static QString providerName(int index);
+    static int providerIndex(const QString &name);
     QString providerWorkingDirectory(int index) const;
     void selectProvider(int index);
     void requestStop();
@@ -78,6 +79,10 @@ private:
     void appendLine(const QString &text);
     void appendChatText(const QString &provider, const QString &text);
     void showChatPreview(QTreeWidgetItem *item);
+    void attachChat(QTreeWidgetItem *item);
+    void openChat(const QString &provider, const QString &id, const QString &path, const QString &title);
+    QString liveSessionId(int index) const;
+    QString externalLock(const QString &provider, const QString &id) const;
     void showLiveChat(const QString &provider, const QString &path);
     void loadHistory(bool reset);
     void showHistory(const QList<ChatEntry> &entries, bool hasMore, const QString &notice = {});
@@ -144,6 +149,9 @@ private:
     QString viewPath_;
     QString viewTitle_;
     QList<ChatEntry> historyEntries_;
+    QString liveTranscript_;
+    QString lockNotice_;
+    QString pendingCodexAttachId_;
     QString codexHistoryCursor_;
     qint64 codexHistoryRequest_ = 0;
     quint64 historyGeneration_ = 0;
