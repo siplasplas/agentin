@@ -52,7 +52,9 @@ void GeminiBridge::prompt(const QString &text)
     interrupted_ = false;
     resultSeen_ = false;
     QStringList arguments{"--output-format", "stream-json"};
-    if (!sessionId_.isEmpty()) arguments << "--resume" << sessionId_;
+    if (!sessionId_.isEmpty()) {
+        arguments << "--resume" << (sessionId_.startsWith("index:") ? sessionId_.mid(6) : sessionId_);
+    }
     for (const QString &directory : directories_) arguments << "--include-directories" << directory;
     arguments << "--prompt" << text;
     process_->setWorkingDirectory(workingDirectory_);
@@ -70,6 +72,21 @@ void GeminiBridge::interrupt()
 }
 
 void GeminiBridge::resetConversation() { sessionId_.clear(); }
+
+void GeminiBridge::resetConversation(const QString &workingDirectory)
+{
+    workingDirectory_ = workingDirectory;
+    sessionId_.clear();
+}
+
+void GeminiBridge::resumeConversation(const QString &sessionId, const QString &workingDirectory)
+{
+    if (isRunning()) return;
+    sessionId_ = sessionId;
+    workingDirectory_ = workingDirectory;
+}
+
+QString GeminiBridge::sessionId() const { return sessionId_; }
 
 bool GeminiBridge::addDirectory(const QString &path)
 {
@@ -93,7 +110,10 @@ void GeminiBridge::handleLine(const QByteArray &line)
     const QString type = event.value("type").toString();
     if (type == "init") {
         const QString id = event.value("session_id").toString();
-        if (!id.isEmpty()) sessionId_ = id;
+        if (!id.isEmpty()) {
+            sessionId_ = id;
+            emit sessionChanged(id);
+        }
     } else if (type == "message" && event.value("role").toString() == "assistant") {
         const QString content = event.value("content").toString();
         if (!content.isEmpty()) emit textDelta(content);

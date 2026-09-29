@@ -17,6 +17,9 @@ public:
     void prompt(const QString &text);
     void interrupt();
     void resetConversation();
+    void resetConversation(const QString &workingDirectory);
+    void resumeConversation(const QString &sessionId, const QString &workingDirectory);
+    QString sessionId() const;
     bool addDirectory(const QString &path);
     QStringList directories() const;
 
@@ -25,6 +28,7 @@ signals:
     void toolStarted(const QString &name, const QJsonObject &input);
     void completed(const QString &status, const QString &details);
     void error(const QString &message);
+    void sessionChanged(const QString &sessionId);
 
 private:
     void handleLine(const QByteArray &line);

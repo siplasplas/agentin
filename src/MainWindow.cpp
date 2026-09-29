@@ -3,7 +3,11 @@
 #include "MainWindow.h"
 
 #include <QComboBox>
+#include <QDateTime>
+#include <QDialog>
+#include <QDialogButtonBox>
 #include <QDir>
+#include <QFile>
 #include <QFileDialog>
 #include <QFileInfo>
 #include <QHBoxLayout>
@@ -12,26 +16,51 @@
 #include <QJsonDocument>
 #include <QLabel>
 #include <QLineEdit>
+#include <QMenuBar>
 #include <QMessageBox>
 #include <QPlainTextEdit>
 #include <QProcess>
 #include <QPushButton>
+#include <QRegularExpression>
+#include <QSaveFile>
+#include <QSignalBlocker>
+#include <QSplitter>
 #include <QStandardPaths>
 #include <QTextCursor>
+#include <QTreeWidget>
 #include <QVBoxLayout>
 #include <QWidget>
 
+#include <algorithm>
+
 MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirectory,
                        const QString &claudePython, const QString &claudeScript,
-                       const QString &geminiProgram, QWidget *parent)
+                       const QString &geminiProgram, QWidget *parent, const QString &codexIndexPath)
     : QMainWindow(parent), codexProgram_(codexProgram), workingDirectory_(workingDirectory),
+      codexIndexPath_(codexIndexPath.isEmpty()
+          ? QDir(QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation)).filePath("codex-conversations.json")
+          : codexIndexPath),
+      claudePython_(claudePython), claudeScript_(claudeScript),
       server_(new QProcess(this)),
       claude_(new ClaudeBridge(claudePython, claudeScript, workingDirectory, "claude", this)),
       glm_(new ClaudeBridge(claudePython, claudeScript, workingDirectory, "glm", this)),
       gemini_(new GeminiBridge(geminiProgram, workingDirectory, this))
 {
+    codexWorkingDirectory_ = workingDirectory_;
+    claudeWorkingDirectory_ = workingDirectory_;
+    glmWorkingDirectory_ = workingDirectory_;
+    geminiWorkingDirectory_ = workingDirectory_;
+    localIndexPath_ = QDir(QFileInfo(codexIndexPath_).absolutePath()).filePath("agent-conversations.json");
     setWindowTitle("agentdeskt — Codex, Claude, GLM and Gemini");
     resize(850, 600);
+    auto *conversationMenu = menuBar()->addMenu("Conversations");
+    auto *newConversationAction = conversationMenu->addAction("New conversation in directory…");
+    connect(newConversationAction, &QAction::triggered, this, &MainWindow::showNewConversationDialog);
+    auto *codexMenu = menuBar()->addMenu("Codex");
+    syncCodexAction_ = codexMenu->addAction("Sync conversations");
+    syncCodexAction_->setObjectName("syncCodexConversations");
+    connect(syncCodexAction_, &QAction::triggered, this, &MainWindow::syncCodexConversations);
+    syncCodexAction_->setEnabled(false);
 
     auto *central = new QWidget(this);
     auto *layout = new QVBoxLayout(central);
@@ -87,7 +116,37 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     layout->addWidget(status_);
     layout->addWidget(output_, 1);
     layout->addLayout(inputRow);
-    setCentralWidget(central);
+    auto *splitter = new QSplitter(Qt::Horizontal, this);
+    conversationTree_ = new QTreeWidget(splitter);
+    conversationTree_->setObjectName("conversationTree");
+    conversationTree_->setHeaderHidden(true);
+    conversationTree_->setMinimumWidth(180);
+    splitter->addWidget(conversationTree_);
+    splitter->addWidget(central);
+    splitter->setStretchFactor(1, 1);
+    splitter->setSizes({260, 590});
+    setCentralWidget(splitter);
+    connect(conversationTree_, &QTreeWidget::itemDoubleClicked, this, [this](QTreeWidgetItem *item, int) {
+        const QString kind = item->data(0, Qt::UserRole).toString();
+        const QString id = item->data(0, Qt::UserRole + 1).toString();
+        const QString path = item->data(0, Qt::UserRole + 2).toString();
+        if (kind == "codex-chat") resumeCodexConversation(id, path);
+        else if (!kind.isEmpty()) resumeProviderConversation(kind, id, path);
+    });
+    connect(conversationTree_, &QTreeWidget::itemExpanded, this, [this](QTreeWidgetItem *item) {
+        if (item->data(0, Qt::UserRole).toString() != "provider") return;
+        const QString provider = item->text(0);
+        expandedProviders_.insert(provider);
+        refreshConversationTree();
+        if (provider == "Codex") syncCodexConversations();
+        else if (provider == "Claude") fetchClaudeSessions();
+        else if (provider == "Gemini") fetchGeminiSessions();
+    });
+    connect(conversationTree_, &QTreeWidget::itemCollapsed, this, [this](QTreeWidgetItem *item) {
+        if (item->data(0, Qt::UserRole).toString() != "provider") return;
+        expandedProviders_.remove(item->text(0));
+        refreshConversationTree();
+    });
 
     connect(input_, &QLineEdit::returnPressed, this, &MainWindow::submitCommand);
     connect(sendButton_, &QPushButton::clicked, this, &MainWindow::submitCommand);
@@ -107,8 +166,8 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     });
     connect(provider_, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int index) {
         appendLine("[" + provider_->itemText(index) + " selected]");
-        if (index == 1 && !claudeReady_) claude_->start();
-        if (index == 2 && !glmReady_) glm_->start();
+        if (index == 1 && !claudeReady_) claude_->start(claudeWorkingDirectory_);
+        if (index == 2 && !glmReady_) glm_->start(glmWorkingDirectory_);
         claudeDirsLabel_->setVisible(index == 1);
         glmDirsLabel_->setVisible(index == 2);
         geminiDirsLabel_->setVisible(index == 3);
@@ -117,6 +176,13 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     });
     connect(claude_, &ClaudeBridge::ready, this, [this] {
         claudeReady_ = true;
+        if (!pendingClaudeResumeId_.isEmpty()) {
+            const QString id = pendingClaudeResumeId_;
+            pendingClaudeResumeId_.clear();
+            claudeReady_ = false;
+            claude_->resumeConversation(id, claudeWorkingDirectory_);
+            return;
+        }
         appendLine("[Connected to Claude Agent SDK]");
         updateStatus();
         sendNextClaudePrompt();
@@ -197,6 +263,13 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     });
     connect(glm_, &ClaudeBridge::ready, this, [this] {
         glmReady_ = true;
+        if (!pendingGlmResumeId_.isEmpty()) {
+            const QString id = pendingGlmResumeId_;
+            pendingGlmResumeId_.clear();
+            glmReady_ = false;
+            glm_->resumeConversation(id, glmWorkingDirectory_);
+            return;
+        }
         appendLine("[Connected to GLM via Claude Agent SDK]");
         updateStatus();
         sendNextGlmPrompt();
@@ -293,6 +366,17 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
         updateStatus();
         sendNextGeminiPrompt();
     });
+    connect(claude_, &ClaudeBridge::sessionChanged, this, [this](const QString &id) {
+        claudeSessionId_ = id;
+        rememberLocalConversation("Claude", id);
+    });
+    connect(glm_, &ClaudeBridge::sessionChanged, this, [this](const QString &id) {
+        glmSessionId_ = id;
+        rememberLocalConversation("GLM", id);
+    });
+    connect(gemini_, &GeminiBridge::sessionChanged, this, [this](const QString &id) {
+        rememberLocalConversation("Gemini", id);
+    });
     connect(server_, &QProcess::started, this, [this] {
         sendRequest("initialize", {{"clientInfo", QJsonObject{
             {"name", "agentdeskt"}, {"title", "agentdeskt Qt"}, {"version", "0.1.0"}}}});
@@ -319,18 +403,30 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     });
     connect(server_, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this,
             [this](int code, QProcess::ExitStatus) {
+        if (syncingCodexConversations_) {
+            syncingCodexConversations_ = false;
+            stagedCodexConversations_.clear();
+            appendLine("[Codex conversation sync stopped: server disconnected]");
+        }
         initialized_ = false;
         busy_ = false;
+        codexThreadOpening_ = false;
         stopRequested_ = false;
         stopSent_ = false;
         threadId_.clear();
         activeTurnId_.clear();
+        refreshConversationTree();
         appendLine(QString("[Server exited with code %1]").arg(code));
         updateStatus();
     });
 
     appendLine("Directory: " + workingDirectory_);
     appendLine("Type help to see the available commands.\n");
+    if (loadCodexConversationIndex()) {
+        appendLine(QString("[Cached Codex conversations: %1]").arg(cachedCodexConversations_.size()));
+    }
+    loadLocalConversations();
+    refreshConversationTree();
     updateStatus();
     if (!QDir(workingDirectory_).exists()) {
         appendLine("[Working directory does not exist: " + workingDirectory_ + "]");
@@ -343,6 +439,16 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
 
 MainWindow::~MainWindow()
 {
+    for (QProcess *process : historyProcesses_) {
+        disconnect(process, nullptr, this, nullptr);
+        if (process->state() != QProcess::NotRunning) {
+            process->terminate();
+            if (!process->waitForFinished(1000)) {
+                process->kill();
+                process->waitForFinished(1000);
+            }
+        }
+    }
     disconnect(claude_, nullptr, this, nullptr);
     disconnect(glm_, nullptr, this, nullptr);
     disconnect(gemini_, nullptr, this, nullptr);
@@ -367,58 +473,21 @@ void MainWindow::submitCommand()
     } else if (local == "clear" || local == "/clear") {
         output_->clear();
     } else if (local == "new" || local == "/new") {
-        if (provider_->currentIndex() == 3) {
-            if (geminiBusy_) appendLine("[Wait for Gemini to finish or enter stop.]");
-            else {
-                geminiQueuedPrompts_.clear();
-                gemini_->resetConversation();
-                appendLine("[Starting a new Gemini conversation]");
-            }
-            return;
-        }
-        if (provider_->currentIndex() == 2) {
-            if (glmBusy_) appendLine("[Wait for GLM to finish or enter stop.]");
-            else if (glmReady_) {
-                glmQueuedPrompts_.clear();
-                glmReady_ = false;
-                glm_->resetConversation();
-                appendLine("[Starting a new GLM conversation]");
-                updateStatus();
-            } else appendLine("[GLM is not connected.]");
-            return;
-        }
-        if (provider_->currentIndex() == 1) {
-            if (claudeBusy_) appendLine("[Wait for Claude to finish or enter stop.]");
-            else if (claudeReady_) {
-                claudeQueuedPrompts_.clear();
-                claudeReady_ = false;
-                claude_->resetConversation();
-                appendLine("[Starting a new Claude conversation]");
-                updateStatus();
-            } else appendLine("[Claude is not connected.]");
-            return;
-        }
-        if (busy_) {
-            appendLine("[Wait for the response to finish, or enter stop.]");
-        } else if (initialized_) {
-            queuedPrompts_.clear();
-            threadId_.clear();
-            startThread();
-        } else {
-            appendLine("[Server is not connected.]");
-        }
+        showNewConversationDialog();
     } else if (local == "stop" || local == "/stop") {
         requestStop();
     } else if (local == "quit" || local == "/quit" || local == "exit") {
         close();
     } else {
         if (provider_->currentIndex() == 3) {
+            if (gemini_->sessionId().isEmpty() && geminiFirstPrompt_.isEmpty()) geminiFirstPrompt_ = command;
             appendLine("You (Gemini): " + command);
             geminiQueuedPrompts_.append(command);
             sendNextGeminiPrompt();
             return;
         }
         if (provider_->currentIndex() == 2) {
+            if (glmSessionId_.isEmpty() && glmFirstPrompt_.isEmpty()) glmFirstPrompt_ = command;
             appendLine("You (GLM): " + command);
             glmQueuedPrompts_.append(command);
             if (!glmReady_) glm_->start();
@@ -426,6 +495,7 @@ void MainWindow::submitCommand()
             return;
         }
         if (provider_->currentIndex() == 1) {
+            if (claudeSessionId_.isEmpty() && claudeFirstPrompt_.isEmpty()) claudeFirstPrompt_ = command;
             appendLine("You (Claude): " + command);
             claudeQueuedPrompts_.append(command);
             if (!claudeReady_) claude_->start();
@@ -438,6 +508,7 @@ void MainWindow::submitCommand()
         }
         appendLine("You: " + command);
         queuedPrompts_.append(command);
+        if (threadId_.isEmpty()) startThread();
         sendNextPrompt();
     }
 }
@@ -530,7 +601,7 @@ void MainWindow::showHelp()
 void MainWindow::addClaudeDirectory(const QString &path)
 {
     if (path.isEmpty()) return;
-    const QFileInfo directory(QDir(workingDirectory_).absoluteFilePath(path));
+    const QFileInfo directory(QDir(claudeWorkingDirectory_).absoluteFilePath(path));
     if (!directory.isDir()) {
         appendLine("[Directory does not exist: " + directory.absoluteFilePath() + "]");
         return;
@@ -548,7 +619,7 @@ void MainWindow::addClaudeDirectory(const QString &path)
 void MainWindow::addGlmDirectory(const QString &path)
 {
     if (path.isEmpty()) return;
-    const QFileInfo directory(QDir(workingDirectory_).absoluteFilePath(path));
+    const QFileInfo directory(QDir(glmWorkingDirectory_).absoluteFilePath(path));
     if (!directory.isDir()) {
         appendLine("[Directory does not exist: " + directory.absoluteFilePath() + "]");
         return;
@@ -566,13 +637,13 @@ void MainWindow::addGlmDirectory(const QString &path)
 void MainWindow::addGeminiDirectory(const QString &path)
 {
     if (path.isEmpty()) return;
-    const QFileInfo directory(QDir(workingDirectory_).absoluteFilePath(path));
+    const QFileInfo directory(QDir(geminiWorkingDirectory_).absoluteFilePath(path));
     if (!directory.isDir()) {
         appendLine("[Directory does not exist: " + directory.absoluteFilePath() + "]");
         return;
     }
     const QString canonicalPath = directory.canonicalFilePath();
-    if (canonicalPath != QDir(workingDirectory_).canonicalPath() && !gemini_->addDirectory(canonicalPath)) {
+    if (canonicalPath != QDir(geminiWorkingDirectory_).canonicalPath() && !gemini_->addDirectory(canonicalPath)) {
         appendLine("[Gemini CLI supports up to five additional directories.]");
         return;
     }
@@ -585,18 +656,609 @@ void MainWindow::addGeminiDirectory(const QString &path)
 void MainWindow::addCodexDirectory(const QString &path)
 {
     if (path.isEmpty()) return;
-    const QFileInfo directory(QDir(workingDirectory_).absoluteFilePath(path));
+    const QFileInfo directory(QDir(codexWorkingDirectory_).absoluteFilePath(path));
     if (!directory.isDir()) {
         appendLine("[Directory does not exist: " + directory.absoluteFilePath() + "]");
         return;
     }
     const QString canonicalPath = directory.canonicalFilePath();
-    if (!codexDirectories_.contains(canonicalPath) && canonicalPath != QDir(workingDirectory_).canonicalPath()) {
+    if (!codexDirectories_.contains(canonicalPath) && canonicalPath != QDir(codexWorkingDirectory_).canonicalPath()) {
         codexDirectories_.append(canonicalPath);
     }
     codexDirsLabel_->setText("Additional writable Codex directories: "
                              + (codexDirectories_.isEmpty() ? "none" : codexDirectories_.join(", ")));
     appendLine("[Codex writable directory available for future turns: " + canonicalPath + "]");
+}
+
+void MainWindow::newCodexConversation(const QString &path)
+{
+    if (!initialized_) {
+        appendLine("[Codex App Server is not connected.]");
+        return;
+    }
+    if (busy_ || codexThreadOpening_) {
+        appendLine("[Wait for the current Codex response to finish.]");
+        return;
+    }
+    const QFileInfo directory(path);
+    if (!directory.isDir()) {
+        appendLine("[Directory does not exist: " + directory.absoluteFilePath() + "]");
+        return;
+    }
+    codexWorkingDirectory_ = directory.canonicalFilePath();
+    queuedPrompts_.clear();
+    threadId_.clear();
+    activeTurnId_.clear();
+    provider_->setCurrentIndex(0);
+    startThread();
+    refreshConversationTree();
+}
+
+void MainWindow::resumeCodexConversation(const QString &id, const QString &path)
+{
+    if (id.isEmpty() || !initialized_) return;
+    if (busy_ || codexThreadOpening_) {
+        appendLine("[Wait for the current Codex response to finish.]");
+        return;
+    }
+    if (!path.isEmpty()) codexWorkingDirectory_ = path;
+    queuedPrompts_.clear();
+    activeTurnId_.clear();
+    threadId_.clear();
+    codexThreadOpening_ = true;
+    provider_->setCurrentIndex(0);
+    appendLine("[Resuming Codex conversation: " + id + "]");
+    sendRequest("thread/resume", {{"threadId", id}});
+    updateStatus();
+}
+
+void MainWindow::refreshConversationTree()
+{
+    const QSignalBlocker blocker(conversationTree_);
+    conversationTree_->clear();
+    const QStringList providers{"Codex", "Claude", "Gemini", "GLM"};
+    QHash<QString, QTreeWidgetItem *> roots;
+    QHash<QString, QTreeWidgetItem *> directories;
+    for (const QString &provider : providers) {
+        auto *root = new QTreeWidgetItem(conversationTree_, {provider});
+        roots.insert(provider, root);
+        root->setData(0, Qt::UserRole, "provider");
+        if (!expandedProviders_.contains(provider)) continue;
+        root->setExpanded(true);
+        const QString path = provider == "Codex" ? codexWorkingDirectory_
+            : (provider == "Claude" ? claudeWorkingDirectory_
+               : (provider == "GLM" ? glmWorkingDirectory_ : geminiWorkingDirectory_));
+        auto *directory = new QTreeWidgetItem(root, {QDir::toNativeSeparators(path)});
+        directory->setToolTip(0, path);
+        directory->setExpanded(true);
+        directories.insert(provider + '\n' + path, directory);
+    }
+    if (expandedProviders_.contains("Codex")) {
+    QList<QJsonObject> threads = cachedCodexConversations_.values();
+    std::sort(threads.begin(), threads.end(), [](const QJsonObject &left, const QJsonObject &right) {
+        return left.value("createdAt").toInteger() > right.value("createdAt").toInteger();
+    });
+    for (const QJsonObject &thread : threads) {
+        const QString id = thread.value("id").toString();
+        const QString path = thread.value("cwd").toString();
+        const QString directoryName = path.isEmpty() ? "(unknown directory)" : QDir::toNativeSeparators(path);
+        const QString key = "Codex\n" + path;
+        QTreeWidgetItem *directory = directories.value(key);
+        if (!directory) {
+            directory = new QTreeWidgetItem(roots.value("Codex"), {directoryName});
+            directory->setToolTip(0, path);
+            directory->setExpanded(true);
+            directories.insert(key, directory);
+        }
+        QString title = thread.value("name").toString();
+        if (title.isEmpty()) title = thread.value("preview").toString();
+        if (title.isEmpty()) title = id;
+        if (thread.value("archived").toBool()) title += " (archived)";
+        auto *chat = new QTreeWidgetItem(directory, {title});
+        chat->setData(0, Qt::UserRole, "codex-chat");
+        chat->setData(0, Qt::UserRole + 1, id);
+        chat->setData(0, Qt::UserRole + 2, path);
+        chat->setToolTip(0, id);
+    }
+    if (!threadId_.isEmpty() && !cachedCodexConversations_.contains(threadId_)) {
+        const QString key = "Codex\n" + codexWorkingDirectory_;
+        QTreeWidgetItem *directory = directories.value(key);
+        if (!directory) {
+            directory = new QTreeWidgetItem(roots.value("Codex"), {QDir::toNativeSeparators(codexWorkingDirectory_)});
+            directory->setExpanded(true);
+            directories.insert(key, directory);
+        }
+        auto *chat = new QTreeWidgetItem(directory, {"Current chat"});
+        chat->setData(0, Qt::UserRole, "codex-chat");
+        chat->setData(0, Qt::UserRole + 1, threadId_);
+        chat->setData(0, Qt::UserRole + 2, codexWorkingDirectory_);
+        chat->setToolTip(0, threadId_);
+    }
+    }
+    QList<QJsonObject> localThreads = localConversations_.values();
+    std::sort(localThreads.begin(), localThreads.end(), [](const QJsonObject &left, const QJsonObject &right) {
+        return left.value("createdAt").toInteger() > right.value("createdAt").toInteger();
+    });
+    for (const QJsonObject &thread : localThreads) {
+        const QString provider = thread.value("provider").toString();
+        if (!expandedProviders_.contains(provider)) continue;
+        const QString id = thread.value("id").toString();
+        const QString path = thread.value("cwd").toString();
+        const QString key = provider + '\n' + path;
+        QTreeWidgetItem *directory = directories.value(key);
+        if (!directory) {
+            directory = new QTreeWidgetItem(roots.value(provider), {QDir::toNativeSeparators(path)});
+            directory->setToolTip(0, path);
+            directory->setExpanded(true);
+            directories.insert(key, directory);
+        }
+        const QString title = thread.value("title").toString(id);
+        auto *chat = new QTreeWidgetItem(directory, {title});
+        chat->setData(0, Qt::UserRole, provider);
+        chat->setData(0, Qt::UserRole + 1, id);
+        chat->setData(0, Qt::UserRole + 2, path);
+        chat->setToolTip(0, id);
+    }
+    for (const QJsonObject &thread : externalGeminiConversations_) {
+        if (!expandedProviders_.contains("Gemini")) break;
+        const QString id = thread.value("id").toString();
+        const QString path = thread.value("cwd").toString();
+        const QString key = "Gemini\n" + path;
+        QTreeWidgetItem *directory = directories.value(key);
+        if (!directory) {
+            directory = new QTreeWidgetItem(roots.value("Gemini"), {QDir::toNativeSeparators(path)});
+            directory->setToolTip(0, path);
+            directory->setExpanded(true);
+            directories.insert(key, directory);
+        }
+        auto *chat = new QTreeWidgetItem(directory, {thread.value("title").toString(id)});
+        chat->setData(0, Qt::UserRole, "Gemini");
+        chat->setData(0, Qt::UserRole + 1, id);
+        chat->setData(0, Qt::UserRole + 2, path);
+        chat->setToolTip(0, id);
+    }
+}
+
+QStringList MainWindow::knownDirectories() const
+{
+    QSet<QString> paths;
+    const QStringList candidates{workingDirectory_, codexWorkingDirectory_, claudeWorkingDirectory_,
+                                 glmWorkingDirectory_, geminiWorkingDirectory_};
+    for (const QString &path : candidates) {
+        const QFileInfo info(path);
+        if (!info.isDir()) continue;
+        const QString canonical = info.canonicalFilePath();
+        if (!canonical.isEmpty()) paths.insert(canonical);
+    }
+    for (const QJsonObject &thread : cachedCodexConversations_) {
+        const QFileInfo info(thread.value("cwd").toString());
+        if (!info.isDir()) continue;
+        const QString canonical = info.canonicalFilePath();
+        if (!canonical.isEmpty()) paths.insert(canonical);
+    }
+    for (const QJsonObject &thread : localConversations_) {
+        const QFileInfo info(thread.value("cwd").toString());
+        if (!info.isDir()) continue;
+        const QString canonical = info.canonicalFilePath();
+        if (!canonical.isEmpty()) paths.insert(canonical);
+    }
+    QStringList result = paths.values();
+    result.sort();
+    return result;
+}
+
+void MainWindow::fetchClaudeSessions()
+{
+    if (claudePython_.isEmpty() || claudeScript_.isEmpty()) return;
+    auto *process = new QProcess(this);
+    historyProcesses_.append(process);
+    process->setWorkingDirectory(workingDirectory_);
+    const QByteArray directories = QJsonDocument(QJsonArray::fromStringList(knownDirectories()))
+                                       .toJson(QJsonDocument::Compact);
+    connect(process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this,
+            [this, process](int exitCode, QProcess::ExitStatus status) {
+        historyProcesses_.removeAll(process);
+        if (status == QProcess::NormalExit && exitCode == 0) {
+            const QJsonDocument document = QJsonDocument::fromJson(process->readAllStandardOutput().trimmed());
+            bool changed = false;
+            for (const QJsonValue &value : document.object().value("sessions").toArray()) {
+                const QJsonObject session = value.toObject();
+                const QString id = session.value("id").toString();
+                const QString path = session.value("cwd").toString();
+                if (id.isEmpty() || !QFileInfo(path).isDir()
+                    || localConversations_.contains("GLM\n" + id)) continue;
+                const QString key = "Claude\n" + id;
+                if (localConversations_.contains(key)) continue;
+                QJsonObject entry = session;
+                entry.insert("provider", "Claude");
+                localConversations_.insert(key, entry);
+                changed = true;
+            }
+            if (changed) {
+                saveLocalConversations();
+                refreshConversationTree();
+            }
+        } else {
+            const QJsonObject error = QJsonDocument::fromJson(process->readAllStandardOutput()).object();
+            QString message = error.value("message").toString();
+            if (message.isEmpty()) message = QString::fromUtf8(process->readAllStandardError()).trimmed();
+            if (!message.isEmpty()) appendLine("[Claude session discovery: " + message + "]");
+        }
+        process->deleteLater();
+    });
+    connect(process, &QProcess::errorOccurred, this, [this, process](QProcess::ProcessError error) {
+        if (error != QProcess::FailedToStart) return;
+        historyProcesses_.removeAll(process);
+        appendLine("[Claude session discovery: " + process->errorString() + "]");
+        process->deleteLater();
+    });
+    process->start(claudePython_, {"-u", claudeScript_, "--cwd", workingDirectory_,
+                                   "--list-sessions", "--directories", QString::fromUtf8(directories)});
+}
+
+void MainWindow::fetchGeminiSessions()
+{
+    externalGeminiConversations_.clear();
+    for (const QString &directory : knownDirectories()) {
+        auto *process = new QProcess(this);
+        historyProcesses_.append(process);
+        process->setWorkingDirectory(directory);
+        connect(process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this,
+                [this, process, directory](int exitCode, QProcess::ExitStatus status) {
+            historyProcesses_.removeAll(process);
+            if (status == QProcess::NormalExit && exitCode == 0) {
+                const QString output = QString::fromUtf8(process->readAllStandardOutput());
+                const QRegularExpression row(R"(^\s*(\d+)\.\s*(.*?)\s*\[([^\]]+)\]\s*$)");
+                for (const QString &line : output.split('\n')) {
+                    const auto match = row.match(line);
+                    if (!match.hasMatch()) continue;
+                    const QString shortId = match.captured(3);
+                    bool known = false;
+                    for (const QJsonObject &entry : localConversations_) {
+                        if (entry.value("provider").toString() == "Gemini"
+                            && entry.value("cwd").toString() == directory
+                            && entry.value("id").toString().startsWith(shortId)) {
+                            known = true;
+                            break;
+                        }
+                    }
+                    if (known) continue;
+                    const QString id = "index:" + match.captured(1);
+                    externalGeminiConversations_.insert(directory + '\n' + id,
+                        QJsonObject{{"id", id}, {"cwd", directory}, {"title", match.captured(2)}});
+                }
+                refreshConversationTree();
+            }
+            process->deleteLater();
+        });
+        connect(process, &QProcess::errorOccurred, this, [this, process](QProcess::ProcessError error) {
+            if (error != QProcess::FailedToStart) return;
+            historyProcesses_.removeAll(process);
+            appendLine("[Gemini session discovery: " + process->errorString() + "]");
+            process->deleteLater();
+        });
+        process->start(gemini_->program(), {"--list-sessions"});
+    }
+}
+
+bool MainWindow::loadCodexConversationIndex()
+{
+    QFile file(codexIndexPath_);
+    if (!file.exists()) return false;
+    if (!file.open(QIODevice::ReadOnly)) {
+        appendLine("[Could not read Codex conversation index: " + file.errorString() + "]");
+        return false;
+    }
+    QJsonParseError error;
+    const QJsonDocument document = QJsonDocument::fromJson(file.readAll(), &error);
+    if (!document.isObject() || document.object().value("version").toInt() != 1
+        || !document.object().value("threads").isArray()) {
+        appendLine("[Invalid Codex conversation index: " + error.errorString() + "]");
+        return false;
+    }
+    for (const QJsonValue &value : document.object().value("threads").toArray()) {
+        const QJsonObject thread = value.toObject();
+        const QString id = thread.value("id").toString();
+        if (!id.isEmpty()) cachedCodexConversations_.insert(id, thread);
+    }
+    return true;
+}
+
+bool MainWindow::saveCodexConversationIndex()
+{
+    if (!QDir().mkpath(QFileInfo(codexIndexPath_).absolutePath())) {
+        appendLine("[Could not create directory for Codex conversation index]");
+        return false;
+    }
+    QList<QJsonObject> threads = cachedCodexConversations_.values();
+    std::sort(threads.begin(), threads.end(), [](const QJsonObject &left, const QJsonObject &right) {
+        const qint64 leftDate = left.value("createdAt").toInteger();
+        const qint64 rightDate = right.value("createdAt").toInteger();
+        return leftDate == rightDate ? left.value("id").toString() < right.value("id").toString()
+                                     : leftDate > rightDate;
+    });
+    QJsonArray data;
+    for (const QJsonObject &thread : threads) data.append(thread);
+    const QJsonObject root{{"version", 1},
+                           {"syncedAt", QDateTime::currentDateTimeUtc().toString(Qt::ISODate)},
+                           {"threads", data}};
+    QSaveFile file(codexIndexPath_);
+    if (!file.open(QIODevice::WriteOnly)
+        || file.write(QJsonDocument(root).toJson(QJsonDocument::Indented)) < 0
+        || !file.commit()) {
+        appendLine("[Could not save Codex conversation index: " + file.errorString() + "]");
+        return false;
+    }
+    return true;
+}
+
+bool MainWindow::loadLocalConversations()
+{
+    QFile file(localIndexPath_);
+    if (!file.exists()) return false;
+    if (!file.open(QIODevice::ReadOnly)) {
+        appendLine("[Could not read agent conversation index: " + file.errorString() + "]");
+        return false;
+    }
+    const QJsonDocument document = QJsonDocument::fromJson(file.readAll());
+    if (!document.isObject() || document.object().value("version").toInt() != 1
+        || !document.object().value("threads").isArray()) {
+        appendLine("[Invalid agent conversation index]");
+        return false;
+    }
+    for (const QJsonValue &value : document.object().value("threads").toArray()) {
+        const QJsonObject thread = value.toObject();
+        const QString provider = thread.value("provider").toString();
+        const QString id = thread.value("id").toString();
+        if ((provider == "Claude" || provider == "Gemini" || provider == "GLM") && !id.isEmpty()) {
+            localConversations_.insert(provider + '\n' + id, thread);
+        }
+    }
+    return true;
+}
+
+bool MainWindow::saveLocalConversations()
+{
+    if (!QDir().mkpath(QFileInfo(localIndexPath_).absolutePath())) return false;
+    QJsonArray threads;
+    for (const QJsonObject &thread : localConversations_) threads.append(thread);
+    QSaveFile file(localIndexPath_);
+    if (!file.open(QIODevice::WriteOnly)
+        || file.write(QJsonDocument(QJsonObject{{"version", 1}, {"threads", threads}})
+                          .toJson(QJsonDocument::Indented)) < 0
+        || !file.commit()) {
+        appendLine("[Could not save agent conversation index: " + file.errorString() + "]");
+        return false;
+    }
+    return true;
+}
+
+void MainWindow::rememberLocalConversation(const QString &provider, const QString &id)
+{
+    if (id.isEmpty()) return;
+    const QString key = provider + '\n' + id;
+    QJsonObject entry = localConversations_.value(key);
+    if (entry.isEmpty()) {
+        const QString path = provider == "Claude" ? claudeWorkingDirectory_
+            : (provider == "GLM" ? glmWorkingDirectory_ : geminiWorkingDirectory_);
+        const QString prompt = provider == "Claude" ? claudeFirstPrompt_
+            : (provider == "GLM" ? glmFirstPrompt_ : geminiFirstPrompt_);
+        entry = {{"provider", provider}, {"id", id}, {"cwd", path},
+                 {"title", prompt.isEmpty() ? id : prompt.left(120)},
+                 {"createdAt", QDateTime::currentSecsSinceEpoch()}};
+    }
+    localConversations_.insert(key, entry);
+    saveLocalConversations();
+    refreshConversationTree();
+}
+
+void MainWindow::newProviderConversation(int providerIndex, const QString &path)
+{
+    if (providerIndex == 0) { newCodexConversation(path); return; }
+    const QFileInfo directory(path);
+    if (!directory.isDir()) {
+        appendLine("[Directory does not exist: " + directory.absoluteFilePath() + "]");
+        return;
+    }
+    const QString canonicalPath = directory.canonicalFilePath();
+    if (providerIndex == 1) {
+        if (claudeBusy_) { appendLine("[Wait for Claude to finish.]"); return; }
+        claudeWorkingDirectory_ = canonicalPath;
+        claudeSessionId_.clear();
+        claudeFirstPrompt_.clear();
+        claudeQueuedPrompts_.clear();
+        pendingClaudeResumeId_.clear();
+        claudeReady_ = false;
+        if (claude_->isRunning()) claude_->resetConversation(canonicalPath);
+        else claude_->start(canonicalPath);
+    } else if (providerIndex == 2) {
+        if (glmBusy_) { appendLine("[Wait for GLM to finish.]"); return; }
+        glmWorkingDirectory_ = canonicalPath;
+        glmSessionId_.clear();
+        glmFirstPrompt_.clear();
+        glmQueuedPrompts_.clear();
+        pendingGlmResumeId_.clear();
+        glmReady_ = false;
+        if (glm_->isRunning()) glm_->resetConversation(canonicalPath);
+        else glm_->start(canonicalPath);
+    } else {
+        if (geminiBusy_) { appendLine("[Wait for Gemini to finish.]"); return; }
+        geminiWorkingDirectory_ = canonicalPath;
+        geminiFirstPrompt_.clear();
+        geminiQueuedPrompts_.clear();
+        gemini_->resetConversation(canonicalPath);
+    }
+    provider_->setCurrentIndex(providerIndex);
+    appendLine("[Starting a new " + provider_->itemText(providerIndex) + " conversation in " + canonicalPath + "]");
+    refreshConversationTree();
+    updateStatus();
+}
+
+void MainWindow::showNewConversationDialog()
+{
+    const int index = provider_->currentIndex();
+    const QString currentPath = index == 0 ? codexWorkingDirectory_
+        : (index == 1 ? claudeWorkingDirectory_ : (index == 2 ? glmWorkingDirectory_ : geminiWorkingDirectory_));
+    QDialog dialog(this);
+    dialog.setWindowTitle("New " + provider_->itemText(index) + " conversation");
+    auto *layout = new QVBoxLayout(&dialog);
+    layout->addWidget(new QLabel("Working directory:", &dialog));
+    auto *pathRow = new QHBoxLayout;
+    auto *pathInput = new QLineEdit(currentPath, &dialog);
+    pathInput->setObjectName("newConversationPath");
+    auto *browse = new QPushButton("Browse…", &dialog);
+    pathRow->addWidget(pathInput, 1);
+    pathRow->addWidget(browse);
+    layout->addLayout(pathRow);
+    auto *validation = new QLabel(&dialog);
+    layout->addWidget(validation);
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+    buttons->button(QDialogButtonBox::Ok)->setText("Create chat");
+    layout->addWidget(buttons);
+    const auto validatePath = [validation, buttons](const QString &path) {
+        const bool valid = !path.trimmed().isEmpty() && QFileInfo(path.trimmed()).isDir();
+        validation->setText(valid ? "Directory exists" : "Directory does not exist");
+        buttons->button(QDialogButtonBox::Ok)->setEnabled(valid);
+    };
+    connect(pathInput, &QLineEdit::textChanged, &dialog, validatePath);
+    connect(browse, &QPushButton::clicked, &dialog, [this, pathInput] {
+        const QString path = QFileDialog::getExistingDirectory(this, "Choose working directory", pathInput->text());
+        if (!path.isEmpty()) pathInput->setText(path);
+    });
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    validatePath(currentPath);
+    dialog.resize(560, dialog.sizeHint().height());
+    if (dialog.exec() == QDialog::Accepted) newProviderConversation(index, pathInput->text().trimmed());
+}
+
+void MainWindow::resumeProviderConversation(const QString &provider, const QString &id, const QString &path)
+{
+    if (id.isEmpty() || !QFileInfo(path).isDir()) return;
+    if (provider == "Claude") {
+        if (claudeBusy_) { appendLine("[Wait for Claude to finish.]"); return; }
+        claudeWorkingDirectory_ = path;
+        claudeSessionId_ = id;
+        claudeFirstPrompt_.clear();
+        claudeQueuedPrompts_.clear();
+        claudeReady_ = false;
+        if (claude_->isRunning()) claude_->resumeConversation(id, path);
+        else { pendingClaudeResumeId_ = id; claude_->start(path); }
+        provider_->setCurrentIndex(1);
+    } else if (provider == "GLM") {
+        if (glmBusy_) { appendLine("[Wait for GLM to finish.]"); return; }
+        glmWorkingDirectory_ = path;
+        glmSessionId_ = id;
+        glmFirstPrompt_.clear();
+        glmQueuedPrompts_.clear();
+        glmReady_ = false;
+        if (glm_->isRunning()) glm_->resumeConversation(id, path);
+        else { pendingGlmResumeId_ = id; glm_->start(path); }
+        provider_->setCurrentIndex(2);
+    } else if (provider == "Gemini") {
+        if (geminiBusy_) { appendLine("[Wait for Gemini to finish.]"); return; }
+        geminiWorkingDirectory_ = path;
+        geminiFirstPrompt_.clear();
+        geminiQueuedPrompts_.clear();
+        gemini_->resumeConversation(id, path);
+        provider_->setCurrentIndex(3);
+    } else return;
+    appendLine("[Resuming " + provider + " conversation: " + id + "]");
+    updateStatus();
+}
+
+void MainWindow::syncCodexConversations()
+{
+    if (syncingCodexConversations_) return;
+    if (!initialized_) {
+        appendLine("[Codex App Server is not connected.]");
+        return;
+    }
+    stagedCodexConversations_ = cachedCodexConversations_;
+    newCodexConversationIds_.clear();
+    activeConversationWatermark_ = 0;
+    for (const QJsonObject &thread : cachedCodexConversations_) {
+        if (!thread.value("archived").toBool()) {
+            activeConversationWatermark_ = qMax(activeConversationWatermark_, thread.value("createdAt").toInteger());
+        }
+    }
+    syncCursor_.clear();
+    syncPages_ = 0;
+    syncingArchivedCodexConversations_ = false;
+    syncingCodexConversations_ = true;
+    appendLine("[Syncing Codex conversations…]");
+    updateStatus();
+    requestCodexConversationPage();
+}
+
+void MainWindow::requestCodexConversationPage()
+{
+    QJsonArray sources{"cli", "vscode", "exec", "appServer", "subAgent", "subAgentReview",
+                       "subAgentCompact", "subAgentThreadSpawn", "subAgentOther", "unknown"};
+    QJsonObject params{{"limit", 100}, {"sortKey", "created_at"}, {"sortDirection", "desc"},
+                       {"sourceKinds", sources}, {"archived", syncingArchivedCodexConversations_}};
+    if (!syncCursor_.isEmpty()) params.insert("cursor", syncCursor_);
+    sendRequest("thread/list", params);
+}
+
+void MainWindow::handleCodexConversationPage(const QJsonObject &result)
+{
+    if (!syncingCodexConversations_) return;
+    if (!result.value("data").isArray()) {
+        appendLine("[Codex conversation sync failed: invalid thread/list response]");
+        syncingCodexConversations_ = false;
+        stagedCodexConversations_.clear();
+        updateStatus();
+        return;
+    }
+    ++syncPages_;
+    bool olderThanCached = false;
+    for (const QJsonValue &value : result.value("data").toArray()) {
+        QJsonObject thread = value.toObject();
+        const QString id = thread.value("id").toString();
+        if (id.isEmpty()) continue;
+        if (!syncingArchivedCodexConversations_ && activeConversationWatermark_ > 0
+            && thread.value("createdAt").toInteger() < activeConversationWatermark_) {
+            olderThanCached = true;
+        }
+        if (!cachedCodexConversations_.contains(id)) newCodexConversationIds_.insert(id);
+        thread.insert("archived", syncingArchivedCodexConversations_);
+        stagedCodexConversations_.insert(id, thread);
+    }
+    const QString nextCursor = result.value("nextCursor").toString();
+    if (!nextCursor.isEmpty() && nextCursor == syncCursor_) {
+        appendLine("[Codex conversation sync failed: repeated pagination cursor]");
+        syncingCodexConversations_ = false;
+        stagedCodexConversations_.clear();
+        updateStatus();
+        return;
+    }
+    if (!nextCursor.isEmpty() && !(olderThanCached && !syncingArchivedCodexConversations_)) {
+        syncCursor_ = nextCursor;
+        requestCodexConversationPage();
+        return;
+    }
+    if (!syncingArchivedCodexConversations_) {
+        syncingArchivedCodexConversations_ = true;
+        syncCursor_.clear();
+        requestCodexConversationPage();
+    } else {
+        finishCodexConversationSync();
+    }
+}
+
+void MainWindow::finishCodexConversationSync()
+{
+    cachedCodexConversations_ = std::move(stagedCodexConversations_);
+    stagedCodexConversations_.clear();
+    syncingCodexConversations_ = false;
+    const bool saved = saveCodexConversationIndex();
+    appendLine(QString("[Codex conversations: %1 total, %2 new; fetched %3 pages%4]")
+                   .arg(cachedCodexConversations_.size()).arg(newCodexConversationIds_.size()).arg(syncPages_)
+                   .arg(saved ? "" : "; index not saved"));
+    if (saved) appendLine("[Index: " + codexIndexPath_ + "]");
+    refreshConversationTree();
+    updateStatus();
 }
 
 void MainWindow::sendNextClaudePrompt()
@@ -631,9 +1293,10 @@ void MainWindow::sendNextGeminiPrompt()
 
 void MainWindow::startThread()
 {
-    if (!initialized_) return;
+    if (!initialized_ || codexThreadOpening_) return;
+    codexThreadOpening_ = true;
     appendLine("[Starting a new conversation]");
-    sendRequest("thread/start", {{"cwd", workingDirectory_}, {"serviceName", "agentdeskt"}});
+    sendRequest("thread/start", {{"cwd", codexWorkingDirectory_}, {"serviceName", "agentdeskt"}});
     updateStatus();
 }
 
@@ -648,7 +1311,7 @@ void MainWindow::sendNextPrompt()
     QJsonObject params{{"threadId", threadId_},
                        {"input", QJsonArray{QJsonObject{{"type", "text"}, {"text", prompt}}}}};
     if (!codexDirectories_.isEmpty()) {
-        QJsonArray writableRoots{workingDirectory_};
+        QJsonArray writableRoots{codexWorkingDirectory_};
         for (const QString &path : codexDirectories_) writableRoots.append(path);
         params.insert("sandboxPolicy", QJsonObject{{"type", "workspaceWrite"}, {"writableRoots", writableRoots}});
     }
@@ -753,7 +1416,12 @@ void MainWindow::handleResponse(const QJsonObject &message)
     const QJsonObject error = message.value("error").toObject();
     if (!error.isEmpty()) {
         appendLine("[Error in " + method + "] " + error.value("message").toString());
-        if (method == "turn/start") {
+        if (method == "thread/list") {
+            syncingCodexConversations_ = false;
+            stagedCodexConversations_.clear();
+        } else if (method == "thread/start" || method == "thread/resume") {
+            codexThreadOpening_ = false;
+        } else if (method == "turn/start") {
             busy_ = false;
             activeTurnId_.clear();
             stopRequested_ = false;
@@ -770,11 +1438,15 @@ void MainWindow::handleResponse(const QJsonObject &message)
     if (method == "initialize") {
         initialized_ = true;
         sendNotification("initialized", {});
-        startThread();
-    } else if (method == "thread/start") {
+        if (expandedProviders_.contains("Codex")) syncCodexConversations();
+    } else if (method == "thread/list") {
+        handleCodexConversationPage(result);
+    } else if (method == "thread/start" || method == "thread/resume") {
+        codexThreadOpening_ = false;
         threadId_ = result.value("thread").toObject().value("id").toString();
         if (threadId_.isEmpty()) appendLine("[Server did not return a conversation ID.]");
-        else appendLine("[Connected to Codex]");
+        else appendLine(method == "thread/start" ? "[Connected to Codex]" : "[Resumed Codex conversation: " + threadId_ + "]");
+        refreshConversationTree();
         sendNextPrompt();
     } else if (method == "turn/start") {
         if (busy_) {
@@ -925,11 +1597,15 @@ void MainWindow::updateStatus()
     } else {
         if (server_->state() == QProcess::NotRunning) state = "Server: not running";
         else if (busy_) state = "Codex is responding…";
-        else if (!threadId_.isEmpty()) state = "Ready";
+        else if (codexThreadOpening_) state = "Opening Codex conversation…";
+        else if (initialized_) state = "Codex ready";
         else state = "Connecting to Codex App Server…";
         stopButton_->setEnabled(busy_ && !stopRequested_);
     }
-    status_->setText(state + "  •  " + QDir::toNativeSeparators(workingDirectory_));
+    const QString currentDirectory = provider_->currentIndex() == 0 ? codexWorkingDirectory_
+        : (provider_->currentIndex() == 1 ? claudeWorkingDirectory_
+           : (provider_->currentIndex() == 2 ? glmWorkingDirectory_ : geminiWorkingDirectory_));
+    status_->setText(state + "  •  " + QDir::toNativeSeparators(currentDirectory));
     const int index = provider_->currentIndex();
     sendButton_->setText(index == 0 ? "Send to Codex" : (index == 1 ? "Send to Claude" : (index == 2 ? "Send to GLM" : "Send to Gemini")));
     addDirButton_->setText(index == 0 ? "Add writable directory…" : "Add directory…");
@@ -938,4 +1614,5 @@ void MainWindow::updateStatus()
                              : "Give the selected agent access to another directory and its subfolders for this session.");
     addDirButton_->setEnabled(index == 0 ? !busy_ : (index == 1 ? (claudeReady_ && !claudeBusy_) : (index == 2 ? (glmReady_ && !glmBusy_) : !geminiBusy_)));
     provider_->setEnabled(!busy_ && !claudeBusy_ && !glmBusy_ && !geminiBusy_);
+    syncCodexAction_->setEnabled(initialized_ && !syncingCodexConversations_);
 }

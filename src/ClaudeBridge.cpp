@@ -54,9 +54,10 @@ bool ClaudeBridge::isRunning() const
     return process_->state() != QProcess::NotRunning;
 }
 
-void ClaudeBridge::start()
+void ClaudeBridge::start(const QString &workingDirectory)
 {
     if (process_->state() != QProcess::NotRunning) return;
+    if (!workingDirectory.isEmpty()) workingDirectory_ = workingDirectory;
     process_->setWorkingDirectory(workingDirectory_);
     process_->start(pythonProgram_, {"-u", scriptPath_, "--cwd", workingDirectory_, "--provider", provider_});
 }
@@ -71,9 +72,16 @@ void ClaudeBridge::interrupt()
     send({{"type", "stop"}});
 }
 
-void ClaudeBridge::resetConversation()
+void ClaudeBridge::resetConversation(const QString &workingDirectory)
 {
-    send({{"type", "new"}});
+    QJsonObject command{{"type", "new"}};
+    if (!workingDirectory.isEmpty()) command.insert("cwd", workingDirectory);
+    send(command);
+}
+
+void ClaudeBridge::resumeConversation(const QString &sessionId, const QString &workingDirectory)
+{
+    send({{"type", "resume"}, {"session_id", sessionId}, {"cwd", workingDirectory}});
 }
 
 void ClaudeBridge::addDirectory(const QString &path)
@@ -114,5 +122,6 @@ void ClaudeBridge::handleLine(const QByteArray &line)
     else if (type == "approval") emit approvalRequested(message.value("id").toInt(), message.value("tool").toString(), message.value("input").toObject());
     else if (type == "question") emit questionsRequested(message.value("id").toInt(), message.value("questions").toArray());
     else if (type == "directory_added") emit directoryAdded(message.value("path").toString());
+    else if (type == "session") emit sessionChanged(message.value("id").toString());
     else if (type == "error") emit this->error(message.value("message").toString());
 }

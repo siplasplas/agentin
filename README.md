@@ -53,6 +53,28 @@ Without `-C`, the conversation uses the terminal's current directory. If
 and `CODEX_BIN`. You can select an executable explicitly with
 `--codex /path/to/codex`.
 
+## Conversations
+
+The left pane groups chats by agent and working directory. Expanding Codex
+loads its conversations through App Server, including chats from Codex CLI,
+Codex desktop, and this application when they use the same local Codex data.
+The **Codex → Sync conversations** menu refreshes that list. The app saves a
+local JSON index in its application data directory and, on later syncs, reads
+new active chats from newest to oldest until it reaches the saved boundary.
+Archived chats are scanned separately. Double click a chat to resume it.
+
+Expanding Claude lists SDK sessions for known working directories. Expanding
+Gemini asks Gemini CLI for sessions in those directories. GLM shows chats
+recorded by this application; the Claude SDK's shared transcript location does
+not identify which endpoint produced an older external session. Claude, Gemini,
+and GLM chats started here are saved in a second local JSON index.
+
+Use **Conversations → New conversation in directory…** or type `new` to start
+a chat. Enter a directory path or choose one with **Browse…**. The **Create
+chat** button is available only when that directory exists. Each chat has one
+working directory, and files under that directory are available subject to the
+selected agent's permissions.
+
 Type `help` (or `/help`) in the command field to see the available commands.
 With Codex selected, it shows the complete output of `codex app-server --help`
 and explains that the client uses direct stdio mode. CLI subcommands shown in

@@ -17,10 +17,11 @@ public:
                  QObject *parent = nullptr);
     ~ClaudeBridge() override;
     bool isRunning() const;
-    void start();
+    void start(const QString &workingDirectory = {});
     void prompt(const QString &text);
     void interrupt();
-    void resetConversation();
+    void resetConversation(const QString &workingDirectory = {});
+    void resumeConversation(const QString &sessionId, const QString &workingDirectory);
     void addDirectory(const QString &path);
     void answerApproval(int id, bool allow);
     void answerQuestions(int id, const QJsonObject &answers, bool accepted);
@@ -33,6 +34,7 @@ signals:
     void approvalRequested(int id, const QString &tool, const QJsonObject &input);
     void questionsRequested(int id, const QJsonArray &questions);
     void directoryAdded(const QString &path);
+    void sessionChanged(const QString &sessionId);
     void error(const QString &message);
     void disconnected();
 

@@ -136,6 +136,7 @@ class Bridge:
                 elif isinstance(message, ResultMessage):
                     if getattr(message, "session_id", None):
                         self.session_id = message.session_id
+                        send({"type": "session", "id": self.session_id})
                     if message.result and not self.turn_had_text:
                         send({"type": "delta", "text": message.result})
                     if self.stop_requested or (message.terminal_reason or "").startswith("aborted"):
@@ -176,7 +177,34 @@ class Bridge:
             await self.client.disconnect()
             self.connected = False
             self.session_id = None
+            requested_cwd = command.get("cwd")
+            if requested_cwd:
+                path = os.path.realpath(requested_cwd)
+                if not os.path.isdir(path):
+                    send({"type": "error", "message": f"Directory does not exist: {path}"})
+                    await self.connect()
+                    return
+                self.cwd = path
+                self.additional_dirs = []
             await self.connect()
+        elif kind == "resume":
+            if self.turn_task is not None:
+                send({"type": "error", "message": f"Wait for {self.provider.upper()} to finish before resuming a conversation"})
+                return
+            session_id = command.get("session_id")
+            requested_cwd = command.get("cwd")
+            if not isinstance(session_id, str) or not session_id:
+                send({"type": "error", "message": "Missing session ID"})
+                return
+            if not isinstance(requested_cwd, str) or not os.path.isdir(requested_cwd):
+                send({"type": "error", "message": f"Directory does not exist: {requested_cwd}"})
+                return
+            await self.client.disconnect()
+            self.connected = False
+            self.session_id = session_id
+            self.cwd = os.path.realpath(requested_cwd)
+            self.additional_dirs = []
+            await self.connect(resume=True)
         elif kind == "add_directory":
             if self.turn_task is not None:
                 send({"type": "error", "message": f"Wait for {self.provider.upper()} to finish before adding a directory"})
@@ -254,9 +282,38 @@ async def main(cwd, provider="claude"):
     return 0
 
 
+def list_local_sessions(directories):
+    from claude_agent_sdk import list_sessions
+
+    sessions = []
+    for directory in directories:
+        if not os.path.isdir(directory):
+            continue
+        for session in list_sessions(directory=directory):
+            sessions.append({
+                "id": session.session_id,
+                "cwd": session.cwd or directory,
+                "title": session.custom_title or session.summary or session.first_prompt or session.session_id,
+                "createdAt": int(session.created_at / 1000),
+            })
+    return sessions
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Claude Agent SDK bridge for agentdeskt")
     parser.add_argument("--cwd", required=True)
     parser.add_argument("--provider", choices=("claude", "glm"), default="claude")
+    parser.add_argument("--list-sessions", action="store_true")
+    parser.add_argument("--directories", default="[]")
     args = parser.parse_args()
+    if args.list_sessions:
+        try:
+            directories = json.loads(args.directories)
+            if not isinstance(directories, list) or not all(isinstance(path, str) for path in directories):
+                raise ValueError("Expected a list of directory paths")
+            send({"type": "sessions", "sessions": list_local_sessions(directories)})
+        except Exception as exc:
+            send({"type": "error", "message": f"Could not list Claude Agent SDK sessions: {exc}"})
+            raise SystemExit(1)
+        raise SystemExit(0)
     raise SystemExit(asyncio.run(main(args.cwd, args.provider)))

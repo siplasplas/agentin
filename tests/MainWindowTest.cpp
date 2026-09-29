@@ -4,11 +4,15 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QComboBox>
+#include <QDialog>
+#include <QDialogButtonBox>
 #include <QLineEdit>
 #include <QLabel>
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QTemporaryDir>
+#include <QTimer>
+#include <QTreeWidget>
 #include <QStandardPaths>
 #include <QtTest>
 
@@ -23,6 +27,7 @@ private slots:
     void claudeConversationAndStop();
     void glmConversation();
     void geminiConversationAndDirectories();
+    void codexConversationIndexSurvivesRestart();
 };
 
 void MainWindowTest::codexExecutableFromEnvironment()
@@ -133,10 +138,11 @@ for line in sys.stdin:
     QTRY_VERIFY(output->toPlainText().contains("Codex connection: codex app-server --stdio"));
     QTRY_VERIFY(output->toPlainText().contains("--stdio  Use stdio transport"));
     QVERIFY(output->toPlainText().contains("Manage local daemon"));
-    QTRY_VERIFY(output->toPlainText().contains("[Connected to Codex]"));
+    QVERIFY(!output->toPlainText().contains("[Connected to Codex]"));
 
     QTest::keyClicks(input, "test");
     QTest::keyClick(input, Qt::Key_Return);
+    QTRY_VERIFY(output->toPlainText().contains("[Connected to Codex]"));
     QTRY_VERIFY(output->toPlainText().contains("Codex: Hello from App Server"));
     QCOMPARE(output->toPlainText().count("Hello from App Server"), 1);
 
@@ -243,8 +249,25 @@ for line in sys.stdin:
     QTest::mouseClick(stopButton, Qt::LeftButton);
     QTRY_VERIFY(output->toPlainText().contains("[Claude response: interrupted]"));
 
+    bool rejectedMissingDirectory = false;
+    QTimer::singleShot(0, &window, [&] {
+        auto *dialog = window.findChild<QDialog *>();
+        QVERIFY(dialog);
+        auto *path = dialog->findChild<QLineEdit *>("newConversationPath");
+        auto *buttons = dialog->findChild<QDialogButtonBox *>();
+        QVERIFY(path);
+        QVERIFY(buttons);
+        path->setText(directory.filePath("missing"));
+        rejectedMissingDirectory = !buttons->button(QDialogButtonBox::Ok)->isEnabled();
+        path->setText(fakeBridge);
+        rejectedMissingDirectory = rejectedMissingDirectory
+            && !buttons->button(QDialogButtonBox::Ok)->isEnabled();
+        path->setText(directory.path());
+        buttons->button(QDialogButtonBox::Ok)->click();
+    });
     QTest::keyClicks(input, "new");
     QTest::keyClick(input, Qt::Key_Return);
+    QVERIFY(rejectedMissingDirectory);
     QTRY_VERIFY(output->toPlainText().count("[Connected to Claude Agent SDK]") == 2);
 
     QTemporaryDir extraDirectory;
@@ -363,6 +386,105 @@ else:
     QTRY_VERIFY(stopButton->isEnabled());
     QTest::mouseClick(stopButton, Qt::LeftButton);
     QTRY_VERIFY(output->toPlainText().contains("[Gemini response: interrupted]"));
+}
+
+void MainWindowTest::codexConversationIndexSurvivesRestart()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString fakeServer = directory.filePath("fake-codex-index");
+    QFile script(fakeServer);
+    QVERIFY(script.open(QIODevice::WriteOnly | QIODevice::Text));
+    script.write(R"PY(#!/usr/bin/env python3
+import json
+import os
+import sys
+
+folder = os.path.dirname(__file__)
+for line in sys.stdin:
+    request = json.loads(line)
+    method = request.get("method")
+    if method == "initialize":
+        result = {}
+    elif method == "thread/list":
+        params = request["params"]
+        assert "appServer" in params["sourceKinds"]
+        with open(os.path.join(folder, "threads.json")) as source:
+            state = json.load(source)
+        items = state["archived" if params["archived"] else "active"]
+        offset = int(params.get("cursor", "0"))
+        page = items[offset:offset + 2]
+        next_offset = offset + len(page)
+        result = {"data": page, "nextCursor": str(next_offset) if next_offset < len(items) else None}
+        with open(os.path.join(folder, "requests.log"), "a") as log:
+            log.write(("archived" if params["archived"] else "active") + "\n")
+    elif method == "thread/resume":
+        result = {"thread": {"id": request["params"]["threadId"]}}
+    else:
+        continue
+    print(json.dumps({"id": request["id"], "result": result}), flush=True)
+)PY");
+    script.close();
+    QVERIFY(script.setPermissions(QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner));
+
+    auto writeState = [&](bool includeNew) {
+        QJsonArray active;
+        if (includeNew) {
+            active.append(QJsonObject{{"id", "new-102"}, {"createdAt", 102}, {"cwd", directory.path()}, {"preview", "Newest"}});
+            active.append(QJsonObject{{"id", "new-101"}, {"createdAt", 101}, {"cwd", directory.path()}, {"preview", "New"}});
+        }
+        for (int date = 100; date >= 96; --date) {
+            active.append(QJsonObject{{"id", QString("old-%1").arg(date)}, {"createdAt", date},
+                                       {"cwd", directory.path()}, {"preview", "Old conversation"}});
+        }
+        QJsonArray archived{QJsonObject{{"id", "archived-1"}, {"createdAt", 50},
+                                        {"cwd", directory.path()}, {"preview", "Archived conversation"}}};
+        QFile state(directory.filePath("threads.json"));
+        if (!state.open(QIODevice::WriteOnly)) return false;
+        return state.write(QJsonDocument(QJsonObject{{"active", active}, {"archived", archived}}).toJson()) > 0;
+    };
+    QVERIFY(writeState(false));
+    const QString indexPath = directory.filePath("codex-index.json");
+    {
+        MainWindow window(fakeServer, directory.path(), {}, {}, "gemini", nullptr, indexPath);
+        window.show();
+        auto *tree = window.findChild<QTreeWidget *>("conversationTree");
+        auto *output = window.findChild<QPlainTextEdit *>("output");
+        QVERIFY(tree);
+        QVERIFY(output);
+        QTRY_VERIFY(window.findChild<QAction *>("syncCodexConversations")->isEnabled());
+        QCOMPARE(tree->topLevelItemCount(), 4);
+        QCOMPARE(tree->topLevelItem(0)->text(0), QString("Codex"));
+        tree->topLevelItem(0)->setExpanded(true);
+        QTRY_VERIFY(output->toPlainText().contains("[Codex conversations: 6 total, 6 new; fetched 4 pages]"));
+        QVERIFY(QFileInfo::exists(indexPath));
+    }
+    QVERIFY(writeState(true));
+    QFile log(directory.filePath("requests.log"));
+    QVERIFY(log.open(QIODevice::WriteOnly | QIODevice::Truncate));
+    log.close();
+    {
+        MainWindow window(fakeServer, directory.path(), {}, {}, "gemini", nullptr, indexPath);
+        window.show();
+        auto *tree = window.findChild<QTreeWidget *>("conversationTree");
+        auto *output = window.findChild<QPlainTextEdit *>("output");
+        QVERIFY(tree);
+        QVERIFY(output);
+        QVERIFY(output->toPlainText().contains("[Cached Codex conversations: 6]"));
+        QTRY_VERIFY(window.findChild<QAction *>("syncCodexConversations")->isEnabled());
+        tree->topLevelItem(0)->setExpanded(true);
+        QTRY_VERIFY(output->toPlainText().contains("[Codex conversations: 8 total, 2 new; fetched 3 pages]"));
+        QVERIFY(log.open(QIODevice::ReadOnly));
+        QCOMPARE(QString::fromUtf8(log.readAll()).count("active\n"), 2);
+        log.close();
+        auto *folder = tree->topLevelItem(0)->child(0);
+        QVERIFY(folder);
+        QVERIFY(folder->childCount() >= 1);
+        auto *chat = folder->child(0);
+        QTest::mouseClick(tree->viewport(), Qt::LeftButton, {}, tree->visualItemRect(chat).center());
+        QTest::mouseDClick(tree->viewport(), Qt::LeftButton, {}, tree->visualItemRect(chat).center());
+        QTRY_VERIFY(output->toPlainText().contains("[Resumed Codex conversation: new-102]"));
+    }
 }
 
 QTEST_MAIN(MainWindowTest)

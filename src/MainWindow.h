@@ -15,6 +15,8 @@ class QProcess;
 class QPushButton;
 class ClaudeBridge;
 class GeminiBridge;
+class QAction;
+class QTreeWidget;
 
 class MainWindow : public QMainWindow
 {
@@ -23,7 +25,8 @@ class MainWindow : public QMainWindow
 public:
     MainWindow(const QString &codexProgram, const QString &workingDirectory,
                const QString &claudePython = {}, const QString &claudeScript = {},
-               const QString &geminiProgram = "gemini", QWidget *parent = nullptr);
+               const QString &geminiProgram = "gemini", QWidget *parent = nullptr,
+               const QString &codexIndexPath = {});
     ~MainWindow() override;
 
 private:
@@ -34,6 +37,24 @@ private:
     void sendNextClaudePrompt();
     void sendNextGlmPrompt();
     void sendNextGeminiPrompt();
+    Q_INVOKABLE void syncCodexConversations();
+    void requestCodexConversationPage();
+    void handleCodexConversationPage(const QJsonObject &result);
+    void finishCodexConversationSync();
+    bool loadCodexConversationIndex();
+    bool saveCodexConversationIndex();
+    bool loadLocalConversations();
+    bool saveLocalConversations();
+    void rememberLocalConversation(const QString &provider, const QString &id);
+    void newProviderConversation(int providerIndex, const QString &path);
+    void showNewConversationDialog();
+    void resumeProviderConversation(const QString &provider, const QString &id, const QString &path);
+    void fetchClaudeSessions();
+    void fetchGeminiSessions();
+    QStringList knownDirectories() const;
+    void refreshConversationTree();
+    Q_INVOKABLE void newCodexConversation(const QString &path);
+    Q_INVOKABLE void resumeCodexConversation(const QString &id, const QString &path);
     Q_INVOKABLE void addClaudeDirectory(const QString &path);
     Q_INVOKABLE void addGlmDirectory(const QString &path);
     Q_INVOKABLE void addCodexDirectory(const QString &path);
@@ -53,6 +74,20 @@ private:
 
     QString codexProgram_;
     QString workingDirectory_;
+    QString codexIndexPath_;
+    QString claudePython_;
+    QString claudeScript_;
+    QString localIndexPath_;
+    QString claudeWorkingDirectory_;
+    QString glmWorkingDirectory_;
+    QString geminiWorkingDirectory_;
+    QString claudeSessionId_;
+    QString glmSessionId_;
+    QString pendingClaudeResumeId_;
+    QString pendingGlmResumeId_;
+    QString claudeFirstPrompt_;
+    QString glmFirstPrompt_;
+    QString geminiFirstPrompt_;
     QProcess *server_;
     ClaudeBridge *claude_;
     ClaudeBridge *glm_;
@@ -68,6 +103,8 @@ private:
     QLabel *glmDirsLabel_;
     QLabel *geminiDirsLabel_;
     QLabel *codexDirsLabel_;
+    QAction *syncCodexAction_;
+    QTreeWidget *conversationTree_;
     QByteArray readBuffer_;
     QHash<qint64, QString> pendingRequests_;
     QSet<QString> streamedMessages_;
@@ -81,8 +118,22 @@ private:
     QStringList codexDirectories_;
     QString threadId_;
     QString activeTurnId_;
+    QString codexWorkingDirectory_;
+    QString syncCursor_;
+    QHash<QString, QJsonObject> cachedCodexConversations_;
+    QHash<QString, QJsonObject> localConversations_;
+    QHash<QString, QJsonObject> externalGeminiConversations_;
+    QList<QProcess *> historyProcesses_;
+    QHash<QString, QJsonObject> stagedCodexConversations_;
+    QSet<QString> newCodexConversationIds_;
+    QSet<QString> expandedProviders_;
+    qint64 activeConversationWatermark_ = 0;
+    int syncPages_ = 0;
     qint64 nextRequestId_ = 1;
     bool initialized_ = false;
+    bool codexThreadOpening_ = false;
+    bool syncingCodexConversations_ = false;
+    bool syncingArchivedCodexConversations_ = false;
     bool busy_ = false;
     bool stopRequested_ = false;
     bool stopSent_ = false;
