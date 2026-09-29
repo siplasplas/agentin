@@ -10,7 +10,6 @@
 #include <QDialogButtonBox>
 #include <QDir>
 #include <QFile>
-#include <QFileDialog>
 #include <QFileInfo>
 #include <QHBoxLayout>
 #include <QInputDialog>
@@ -31,6 +30,8 @@
 #include <QTreeWidget>
 #include <QVBoxLayout>
 #include <QWidget>
+
+#include <qxdirdialog.h>
 
 #include <algorithm>
 
@@ -604,6 +605,7 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
         appendLine(QString("[Cached Codex conversations: %1]").arg(cachedCodexConversations_.size()));
     }
     loadLocalConversations();
+    loadRecentDirectories();
     refreshConversationTree();
     showLiveChat("Codex", workingDirectory_);
     if (!QDir(workingDirectory_).exists()) {
@@ -1176,6 +1178,38 @@ bool MainWindow::loadLocalConversations()
     return loaded;
 }
 
+// Recently used working directories are shown in the directory chooser of the New chat dialog.
+void MainWindow::loadRecentDirectories()
+{
+    QFile file(QDir(QFileInfo(localIndexPath_).absolutePath()).filePath("recent-directories.json"));
+    if (!file.open(QIODevice::ReadOnly)) return;
+    recentDirectories_.clear();
+    for (const QJsonValue &value : QJsonDocument::fromJson(file.readAll()).object().value("directories").toArray()) {
+        if (!value.toString().isEmpty()) recentDirectories_.append(value.toString());
+    }
+}
+
+void MainWindow::saveRecentDirectories()
+{
+    if (!QDir().mkpath(QFileInfo(localIndexPath_).absolutePath())) return;
+    QSaveFile file(QDir(QFileInfo(localIndexPath_).absolutePath()).filePath("recent-directories.json"));
+    if (!file.open(QIODevice::WriteOnly)
+        || file.write(QJsonDocument(QJsonObject{{"version", 1}, {"directories", QJsonArray::fromStringList(recentDirectories_)}})
+                          .toJson(QJsonDocument::Indented)) < 0
+        || !file.commit()) {
+        appendLine("[Could not save recent directories: " + file.errorString() + "]");
+    }
+}
+
+void MainWindow::rememberRecentDirectory(const QString &path)
+{
+    constexpr int limit = 15;
+    recentDirectories_.removeAll(path);
+    recentDirectories_.prepend(path);
+    while (recentDirectories_.size() > limit) recentDirectories_.removeLast();
+    saveRecentDirectories();
+}
+
 bool MainWindow::saveLocalConversations()
 {
     if (!QDir().mkpath(QFileInfo(localIndexPath_).absolutePath())) return false;
@@ -1300,7 +1334,9 @@ void MainWindow::showNewConversationDialog()
     };
     connect(pathInput, &QLineEdit::textChanged, &dialog, validatePath);
     connect(browse, &QPushButton::clicked, &dialog, [this, pathInput] {
-        const QString path = QFileDialog::getExistingDirectory(this, "Choose working directory", pathInput->text());
+        const QString path = QxDirDialog::getExistingDirectory(this, "Choose working directory", pathInput->text(),
+                                                               &recentDirectories_);
+        saveRecentDirectories();
         if (!path.isEmpty()) pathInput->setText(path);
     });
     connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
@@ -1308,7 +1344,9 @@ void MainWindow::showNewConversationDialog()
     validatePath(currentPath);
     dialog.resize(560, dialog.sizeHint().height());
     if (dialog.exec() == QDialog::Accepted) {
-        newProviderConversation(providerInput->currentIndex(), pathInput->text().trimmed());
+        const QString path = QDir::cleanPath(pathInput->text().trimmed());
+        rememberRecentDirectory(path);
+        newProviderConversation(providerInput->currentIndex(), path);
     }
 }
 

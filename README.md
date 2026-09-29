@@ -8,8 +8,9 @@ Agent SDK. Gemini and Antigravity run through their respective CLIs in headless 
 
 ## Build and run
 
-Requires Qt 6 Widgets, CMake, a C++17 compiler, and an installed `codex` CLI
-for Codex. Claude requires Python 3, `claude-agent-sdk`, and a configured API
+Requires Qt 6 Widgets, CMake, a C++17 compiler, the `qt-extra` library
+(installed so that `find_package(qt-extra)` finds it; it provides the directory
+chooser), and an installed `codex` CLI for Codex. Claude requires Python 3, `claude-agent-sdk`, and a configured API
 key. GLM uses the same Python SDK with a Z.AI API key. Gemini requires an
 installed and authenticated Gemini CLI. Antigravity requires an installed and
 authenticated `agy` CLI. The optional test also requires Qt 6
@@ -104,7 +105,8 @@ Antigravity index to remain available.
 
 Use the **New chat…** button, **Conversations → New conversation in
 directory…**, or type `new` to start a chat. In the dialog, choose the agent,
-then enter a directory path or choose one with **Browse…**. The **Create chat**
+then enter a directory path or choose one with **Browse…**, which also lists
+recently used directories. The **Create chat**
 button is available only when that directory exists. Each chat has one working
 directory, and files under that directory are available subject to the
 selected agent's permissions.

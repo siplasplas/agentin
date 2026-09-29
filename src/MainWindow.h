@@ -54,6 +54,9 @@ private:
     bool loadLocalConversations();
     bool saveLocalConversations();
     void rememberLocalConversation(const QString &provider, const QString &id);
+    void loadRecentDirectories();
+    void saveRecentDirectories();
+    void rememberRecentDirectory(const QString &path);
     void newProviderConversation(int providerIndex, const QString &path);
     void showNewConversationDialog();
     void resumeProviderConversation(const QString &provider, const QString &id, const QString &path);
@@ -150,6 +153,7 @@ private:
     QString viewTitle_;
     QList<ChatEntry> historyEntries_;
     QString liveTranscript_;
+    QStringList recentDirectories_;
     QString lockNotice_;
     QString pendingCodexAttachId_;
     QString codexHistoryCursor_;
