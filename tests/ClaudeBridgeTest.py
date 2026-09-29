@@ -72,7 +72,7 @@ class ClaudeBridgeTest(unittest.IsolatedAsyncioTestCase):
             client.responses = [
                 sdk.StreamEvent(event={"type": "content_block_delta", "delta": {"type": "text_delta", "text": "Hello"}}),
                 sdk.AssistantMessage(content=[sdk.TextBlock(text="Hello"), sdk.ToolUseBlock(name="Read", input={"file_path": "a"})]),
-                sdk.ResultMessage(result="Hello", is_error=False, terminal_reason="completed"),
+                sdk.ResultMessage(result="Hello", is_error=False, terminal_reason="completed", session_id="session-test"),
             ]
             await bridge.handle({"type": "prompt", "text": "hi"})
             await bridge.turn_task
@@ -88,10 +88,19 @@ class ClaudeBridgeTest(unittest.IsolatedAsyncioTestCase):
             await bridge.handle({"type": "approval_response", "id": request["id"], "allow": True})
             self.assertIsInstance(await approval, sdk_types.PermissionResultAllow)
 
+            extra_directory = str(Path(__file__).resolve().parent)
+            await bridge.handle({"type": "add_directory", "path": extra_directory})
+            self.assertFalse(client.connected)
+            self.assertEqual(bridge.client.options.add_dirs, [extra_directory])
+            self.assertEqual(bridge.client.options.resume, "session-test")
+            self.assertEqual(events[-1], {"type": "directory_added", "path": extra_directory})
+
             await bridge.handle({"type": "new"})
             self.assertFalse(client.connected)
             self.assertIsNot(bridge.client, client)
             self.assertTrue(bridge.client.connected)
+            self.assertEqual(bridge.client.options.add_dirs, [extra_directory])
+            self.assertIsNone(bridge.client.options.resume)
 
     async def test_stop_marks_turn_interrupted(self):
         events = []

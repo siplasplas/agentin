@@ -3,6 +3,8 @@
 
 #include <QComboBox>
 #include <QDir>
+#include <QFileDialog>
+#include <QFileInfo>
 #include <QHBoxLayout>
 #include <QInputDialog>
 #include <QJsonArray>
@@ -31,6 +33,14 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     provider_ = new QComboBox(central);
     provider_->setObjectName("providerSelect");
     provider_->addItems({"Codex", "Claude"});
+    addDirButton_ = new QPushButton("Add directory…", central);
+    addDirButton_->setObjectName("addClaudeDirectoryButton");
+    addDirButton_->setToolTip("Give Claude access to another directory for this session.");
+    addDirButton_->setVisible(false);
+    claudeDirsLabel_ = new QLabel("Additional Claude directories: none", central);
+    claudeDirsLabel_->setObjectName("claudeDirectories");
+    claudeDirsLabel_->setWordWrap(true);
+    claudeDirsLabel_->setVisible(false);
     status_ = new QLabel(central);
     output_ = new QPlainTextEdit(central);
     output_->setObjectName("output");
@@ -41,6 +51,7 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     input_->setObjectName("commandInput");
     input_->setPlaceholderText("Enter a message or help, then press Enter");
     sendButton_ = new QPushButton("Send", central);
+    sendButton_->setObjectName("sendButton");
     stopButton_ = new QPushButton("Stop", central);
     stopButton_->setObjectName("stopButton");
     stopButton_->setEnabled(false);
@@ -52,8 +63,10 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     auto *providerRow = new QHBoxLayout;
     providerRow->addWidget(new QLabel("Agent:", central));
     providerRow->addWidget(provider_);
+    providerRow->addWidget(addDirButton_);
     providerRow->addStretch();
     layout->addLayout(providerRow);
+    layout->addWidget(claudeDirsLabel_);
     layout->addWidget(status_);
     layout->addWidget(output_, 1);
     layout->addLayout(inputRow);
@@ -62,9 +75,15 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     connect(input_, &QLineEdit::returnPressed, this, &MainWindow::submitCommand);
     connect(sendButton_, &QPushButton::clicked, this, &MainWindow::submitCommand);
     connect(stopButton_, &QPushButton::clicked, this, &MainWindow::requestStop);
+    connect(addDirButton_, &QPushButton::clicked, this, [this] {
+        const QString path = QFileDialog::getExistingDirectory(this, "Add directory for Claude", workingDirectory_);
+        if (!path.isEmpty()) addClaudeDirectory(path);
+    });
     connect(provider_, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int index) {
         appendLine(index == 0 ? "[Codex selected]" : "[Claude selected]");
         if (index == 1 && !claudeReady_) claude_->start();
+        addDirButton_->setVisible(index == 1);
+        claudeDirsLabel_->setVisible(index == 1);
         updateStatus();
     });
     connect(claude_, &ClaudeBridge::ready, this, [this] {
@@ -126,6 +145,16 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
         }
         claude_->answerQuestions(id, answers, allAccepted);
     });
+    connect(claude_, &ClaudeBridge::directoryAdded, this, [this](const QString &path) {
+        if (!claudeDirectories_.contains(path) && QDir::cleanPath(path) != QDir::cleanPath(workingDirectory_)) {
+            claudeDirectories_.append(path);
+        }
+        claudeDirsLabel_->setText("Additional Claude directories: "
+                                  + (claudeDirectories_.isEmpty() ? "none" : claudeDirectories_.join(", ")));
+        appendLine("[Claude directory available: " + path + "]");
+        claudeReady_ = true;
+        updateStatus();
+    });
     connect(claude_, &ClaudeBridge::error, this, [this](const QString &message) {
         appendLine("[Claude] " + message);
     });
@@ -133,6 +162,8 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
         claudeReady_ = false;
         claudeBusy_ = false;
         claudeStopRequested_ = false;
+        claudeDirectories_.clear();
+        claudeDirsLabel_->setText("Additional Claude directories: none");
         updateStatus();
     });
     connect(server_, &QProcess::started, this, [this] {
@@ -263,11 +294,14 @@ void MainWindow::showHelp()
     QString helpName;
     if (claudeSelected) {
         appendLine("Claude Agent SDK:");
+        appendLine("  Send a message with Enter or the Send to Claude button.");
+        appendLine("  Use Add directory to give Claude access to another folder for this session.");
         appendLine("  Responses are streamed into this window.");
         appendLine("  Tool approvals and questions appear in dialogs.");
         appendLine("  Messages entered during a response are queued.");
         appendLine("  The selected Python environment needs claude-agent-sdk and API credentials.");
-        appendLine("Installed Claude CLI options (reference; this window uses the SDK):");
+        appendLine("  Claude Code slash commands: https://code.claude.com/docs/en/commands");
+        appendLine("Installed Claude CLI commands and options (reference; this window uses the SDK):");
         helpProgram = QStandardPaths::findExecutable("claude");
         helpArguments = {"--help"};
         helpName = "Claude CLI";
@@ -277,8 +311,7 @@ void MainWindow::showHelp()
         }
     } else {
         appendLine("Codex connection: codex app-server --stdio (direct JSONL).");
-        appendLine("The daemon and proxy subcommands are for connecting to a separate persistent server.");
-        appendLine("Options for this connection:");
+        appendLine("Installed Codex App Server commands and options (reference; CLI subcommands are not chat messages):");
         helpProgram = codexProgram_;
         helpArguments = {"app-server", "--help"};
         helpName = "App Server";
@@ -291,18 +324,31 @@ void MainWindow::showHelp()
         if (error == QProcess::FailedToStart) helpProcess->deleteLater();
     });
     connect(helpProcess, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this,
-            [this, helpProcess, helpName, claudeSelected](int code, QProcess::ExitStatus) {
-        QString helpText = QString::fromUtf8(helpProcess->readAllStandardOutput());
-        if (!claudeSelected) {
-            const qsizetype options = helpText.indexOf("\nOptions:");
-            if (options >= 0) helpText = helpText.mid(options + 1);
-        }
-        appendText(helpText);
+            [this, helpProcess, helpName](int code, QProcess::ExitStatus) {
+        appendText(QString::fromUtf8(helpProcess->readAllStandardOutput()));
         if (code != 0) appendLine(QString("[%1 help exited with code %2]").arg(helpName).arg(code));
         appendText("\n");
         helpProcess->deleteLater();
     });
     helpProcess->start(helpProgram, helpArguments);
+}
+
+void MainWindow::addClaudeDirectory(const QString &path)
+{
+    if (path.isEmpty()) return;
+    const QFileInfo directory(QDir(workingDirectory_).absoluteFilePath(path));
+    if (!directory.isDir()) {
+        appendLine("[Directory does not exist: " + directory.absoluteFilePath() + "]");
+        return;
+    }
+    if (!claudeReady_ || claudeBusy_) {
+        appendLine("[Wait for Claude to be ready before adding a directory.]");
+        return;
+    }
+    claudeReady_ = false;
+    claude_->addDirectory(directory.canonicalFilePath());
+    appendLine("[Adding Claude directory: " + directory.canonicalFilePath() + "]");
+    updateStatus();
 }
 
 void MainWindow::sendNextClaudePrompt()
@@ -581,5 +627,7 @@ void MainWindow::updateStatus()
         stopButton_->setEnabled(busy_ && !stopRequested_);
     }
     status_->setText(state + "  •  " + QDir::toNativeSeparators(workingDirectory_));
+    sendButton_->setText(provider_->currentIndex() == 1 ? "Send to Claude" : "Send to Codex");
+    addDirButton_->setEnabled(provider_->currentIndex() == 1 && claudeReady_ && !claudeBusy_);
     provider_->setEnabled(!busy_ && !claudeBusy_);
 }

@@ -20,6 +20,7 @@ public:
     void prompt(const QString &text);
     void interrupt();
     void resetConversation();
+    void addDirectory(const QString &path);
     void answerApproval(int id, bool allow);
     void answerQuestions(int id, const QJsonObject &answers, bool accepted);
 
@@ -30,6 +31,7 @@ signals:
     void completed(const QString &status, const QString &details);
     void approvalRequested(int id, const QString &tool, const QJsonObject &input);
     void questionsRequested(int id, const QJsonArray &questions);
+    void directoryAdded(const QString &path);
     void error(const QString &message);
     void disconnected();
 

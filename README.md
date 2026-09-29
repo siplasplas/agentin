@@ -37,12 +37,16 @@ and `CODEX_BIN`. You can select an executable explicitly with
 `--codex /path/to/codex`.
 
 Type `help` (or `/help`) in the command field to see the available commands.
-With Codex selected, it shows the relevant options reported by
-`codex app-server --help` and explains that the client uses direct stdio mode.
-The `daemon` and `proxy` subcommands are for a separate persistent server.
+With Codex selected, it shows the complete output of `codex app-server --help`
+and explains that the client uses direct stdio mode. CLI subcommands shown in
+that output are reference information and are not chat messages.
 With Claude selected, it explains the SDK workflow
-and shows `claude --help` when the Claude CLI is installed. CLI options are
-shown for reference; this window communicates through the SDK.
+and shows `claude --help` when the Claude CLI is installed. Use the Add directory
+button to give Claude access to an additional folder in the current session.
+The directory is passed to the SDK using `add_dirs`; it is not saved as a global
+Claude Code trust setting. CLI options are shown for reference; this window
+communicates through the SDK. Claude Code's interactive slash commands are
+listed in the [Claude Code commands reference](https://code.claude.com/docs/en/commands).
 The client also supports `new`, `clear`, `stop`, and `quit`. Any other text is
 sent to the selected agent as a message. Messages entered while a response is
 in progress are queued. Requests to approve an action or answer a question

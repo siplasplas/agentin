@@ -5,6 +5,7 @@
 #include <QFileInfo>
 #include <QComboBox>
 #include <QLineEdit>
+#include <QLabel>
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QTemporaryDir>
@@ -120,7 +121,7 @@ for line in sys.stdin:
     QVERIFY(output->toPlainText().contains("Commands:"));
     QTRY_VERIFY(output->toPlainText().contains("Codex connection: codex app-server --stdio"));
     QTRY_VERIFY(output->toPlainText().contains("--stdio  Use stdio transport"));
-    QVERIFY(!output->toPlainText().contains("Manage local daemon"));
+    QVERIFY(output->toPlainText().contains("Manage local daemon"));
     QTRY_VERIFY(output->toPlainText().contains("[Connected to Codex]"));
 
     QTest::keyClicks(input, "test");
@@ -169,6 +170,9 @@ for line in sys.stdin:
         send({"type": "complete", "status": "interrupted"})
     elif kind == "new":
         send({"type": "ready"})
+    elif kind == "add_directory":
+        send({"type": "ready"})
+        send({"type": "directory_added", "path": request["path"]})
     elif kind == "shutdown":
         break
 )PY");
@@ -187,12 +191,19 @@ for line in sys.stdin:
     auto *input = window.findChild<QLineEdit *>("commandInput");
     auto *output = window.findChild<QPlainTextEdit *>("output");
     auto *stopButton = window.findChild<QPushButton *>("stopButton");
+    auto *sendButton = window.findChild<QPushButton *>("sendButton");
+    auto *addDirButton = window.findChild<QPushButton *>("addClaudeDirectoryButton");
     QVERIFY(provider);
     QVERIFY(input);
     QVERIFY(output);
     QVERIFY(stopButton);
+    QVERIFY(sendButton);
+    QVERIFY(addDirButton);
     provider->setCurrentIndex(1);
     QTRY_VERIFY(output->toPlainText().contains("[Connected to Claude Agent SDK]"));
+    QCOMPARE(sendButton->text(), QString("Send to Claude"));
+    QVERIFY(addDirButton->isVisible());
+    QVERIFY(addDirButton->isEnabled());
 
     const QByteArray previousPath = qgetenv("PATH");
     qputenv("PATH", directory.path().toLocal8Bit());
@@ -217,6 +228,14 @@ for line in sys.stdin:
     QTest::keyClicks(input, "new");
     QTest::keyClick(input, Qt::Key_Return);
     QTRY_VERIFY(output->toPlainText().count("[Connected to Claude Agent SDK]") == 2);
+
+    QTemporaryDir extraDirectory;
+    QVERIFY(extraDirectory.isValid());
+    QVERIFY(QMetaObject::invokeMethod(&window, "addClaudeDirectory", Q_ARG(QString, extraDirectory.path())));
+    QTRY_VERIFY(output->toPlainText().contains("[Claude directory available: " + extraDirectory.path() + "]"));
+    auto *directoriesLabel = window.findChild<QLabel *>("claudeDirectories");
+    QVERIFY(directoriesLabel);
+    QVERIFY(directoriesLabel->text().contains(extraDirectory.path()));
 }
 
 QTEST_MAIN(MainWindowTest)

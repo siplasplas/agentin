@@ -3,6 +3,7 @@
 import argparse
 import asyncio
 import json
+import os
 import sys
 
 
@@ -36,15 +37,22 @@ class Bridge:
         self.next_id = 1
         self.streamed_text = False
         self.turn_had_text = False
+        self.session_id = None
+        self.additional_dirs = []
+        self.connected = False
 
-    async def connect(self):
+    async def connect(self, resume=False):
         options = ClaudeAgentOptions(
             cwd=self.cwd,
+            add_dirs=self.additional_dirs,
+            resume=self.session_id if resume else None,
             include_partial_messages=True,
             can_use_tool=self.can_use_tool,
         )
         self.client = ClaudeSDKClient(options=options)
+        self.connected = False
         await self.client.connect()
+        self.connected = True
         send({"type": "ready"})
 
     async def can_use_tool(self, tool_name, input_data, context):
@@ -106,6 +114,8 @@ class Bridge:
                             send({"type": "tool", "name": block.name, "input": block.input})
                     self.streamed_text = False
                 elif isinstance(message, ResultMessage):
+                    if getattr(message, "session_id", None):
+                        self.session_id = message.session_id
                     if message.result and not self.turn_had_text:
                         send({"type": "delta", "text": message.result})
                     if self.stop_requested or (message.terminal_reason or "").startswith("aborted"):
@@ -144,7 +154,27 @@ class Bridge:
                 send({"type": "error", "message": "Wait for Claude to finish before starting a new conversation"})
                 return
             await self.client.disconnect()
+            self.connected = False
+            self.session_id = None
             await self.connect()
+        elif kind == "add_directory":
+            if self.turn_task is not None:
+                send({"type": "error", "message": "Wait for Claude to finish before adding a directory"})
+                return
+            raw_path = command.get("path")
+            path = os.path.realpath(raw_path) if isinstance(raw_path, str) and raw_path else ""
+            if not os.path.isdir(path):
+                send({"type": "error", "message": f"Directory does not exist: {path}"})
+                send({"type": "ready"})
+                return
+            if path in self.additional_dirs or path == os.path.realpath(self.cwd):
+                send({"type": "directory_added", "path": path})
+                return
+            self.additional_dirs.append(path)
+            await self.client.disconnect()
+            self.connected = False
+            await self.connect(resume=True)
+            send({"type": "directory_added", "path": path})
         elif kind in ("approval_response", "question_response"):
             future = self.pending.get(command.get("id"))
             if future is not None and not future.done():
@@ -182,6 +212,8 @@ async def main(cwd):
                 await bridge.handle(command)
             except Exception as exc:
                 send({"type": "error", "message": f"Claude bridge error: {exc}"})
+                if not bridge.connected:
+                    return 1
     except Exception as exc:
         send({"type": "error", "message": f"Could not connect to Claude: {exc}"})
         return 1
@@ -194,7 +226,10 @@ async def main(cwd):
             except asyncio.CancelledError:
                 pass
         if bridge.client is not None:
-            await bridge.client.disconnect()
+            try:
+                await bridge.client.disconnect()
+            except Exception:
+                pass
         reader.cancel()
     return 0
 

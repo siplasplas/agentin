@@ -76,6 +76,11 @@ void ClaudeBridge::resetConversation()
     send({{"type", "new"}});
 }
 
+void ClaudeBridge::addDirectory(const QString &path)
+{
+    send({{"type", "add_directory"}, {"path", path}});
+}
+
 void ClaudeBridge::answerApproval(int id, bool allow)
 {
     send({{"type", "approval_response"}, {"id", id}, {"allow", allow}});
@@ -108,5 +113,6 @@ void ClaudeBridge::handleLine(const QByteArray &line)
     else if (type == "complete") emit completed(message.value("status").toString(), message.value("details").toString());
     else if (type == "approval") emit approvalRequested(message.value("id").toInt(), message.value("tool").toString(), message.value("input").toObject());
     else if (type == "question") emit questionsRequested(message.value("id").toInt(), message.value("questions").toArray());
+    else if (type == "directory_added") emit directoryAdded(message.value("path").toString());
     else if (type == "error") emit this->error(message.value("message").toString());
 }
