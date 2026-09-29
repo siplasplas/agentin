@@ -6,11 +6,14 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 
 find_package(Qt6 REQUIRED COMPONENTS Widgets)
+configure_file(claude/bridge.py ${CMAKE_CURRENT_BINARY_DIR}/claude_bridge.py COPYONLY)
 
 add_executable(agentdeskt
     src/main.cpp
     src/CodexLocator.cpp
     src/CodexLocator.h
+    src/ClaudeBridge.cpp
+    src/ClaudeBridge.h
     src/MainWindow.cpp
     src/MainWindow.h
 )
@@ -21,10 +24,13 @@ option(BUILD_TESTING "Build tests" OFF)
 include(CTest)
 if(BUILD_TESTING)
     find_package(Qt6 REQUIRED COMPONENTS Test)
+    find_package(Python3 COMPONENTS Interpreter)
     add_executable(agentdeskt_test
         tests/MainWindowTest.cpp
         src/CodexLocator.cpp
         src/CodexLocator.h
+        src/ClaudeBridge.cpp
+        src/ClaudeBridge.h
         src/MainWindow.cpp
         src/MainWindow.h
     )
@@ -32,4 +38,7 @@ if(BUILD_TESTING)
     target_include_directories(agentdeskt_test PRIVATE src)
     add_test(NAME agentdeskt_test COMMAND agentdeskt_test)
     set_tests_properties(agentdeskt_test PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+    if(Python3_Interpreter_FOUND)
+        add_test(NAME claude_bridge_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/ClaudeBridgeTest.py)
+    endif()
 endif()

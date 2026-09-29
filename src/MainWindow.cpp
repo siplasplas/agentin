@@ -1,5 +1,7 @@
+#include "ClaudeBridge.h"
 #include "MainWindow.h"
 
+#include <QComboBox>
 #include <QDir>
 #include <QHBoxLayout>
 #include <QInputDialog>
@@ -15,20 +17,25 @@
 #include <QVBoxLayout>
 #include <QWidget>
 
-MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirectory, QWidget *parent)
-    : QMainWindow(parent), codexProgram_(codexProgram), workingDirectory_(workingDirectory), server_(new QProcess(this))
+MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirectory,
+                       const QString &claudePython, const QString &claudeScript, QWidget *parent)
+    : QMainWindow(parent), codexProgram_(codexProgram), workingDirectory_(workingDirectory),
+      server_(new QProcess(this)), claude_(new ClaudeBridge(claudePython, claudeScript, workingDirectory, this))
 {
-    setWindowTitle("agentdeskt — Codex");
+    setWindowTitle("agentdeskt — Codex and Claude");
     resize(850, 600);
 
     auto *central = new QWidget(this);
     auto *layout = new QVBoxLayout(central);
+    provider_ = new QComboBox(central);
+    provider_->setObjectName("providerSelect");
+    provider_->addItems({"Codex", "Claude"});
     status_ = new QLabel(central);
     output_ = new QPlainTextEdit(central);
     output_->setObjectName("output");
     output_->setReadOnly(true);
     output_->setLineWrapMode(QPlainTextEdit::WidgetWidth);
-    output_->setPlaceholderText("Codex responses will appear here.");
+    output_->setPlaceholderText("Agent responses will appear here.");
     input_ = new QLineEdit(central);
     input_->setObjectName("commandInput");
     input_->setPlaceholderText("Enter a message or help, then press Enter");
@@ -41,6 +48,11 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     inputRow->addWidget(input_, 1);
     inputRow->addWidget(sendButton_);
     inputRow->addWidget(stopButton_);
+    auto *providerRow = new QHBoxLayout;
+    providerRow->addWidget(new QLabel("Agent:", central));
+    providerRow->addWidget(provider_);
+    providerRow->addStretch();
+    layout->addLayout(providerRow);
     layout->addWidget(status_);
     layout->addWidget(output_, 1);
     layout->addLayout(inputRow);
@@ -49,6 +61,79 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     connect(input_, &QLineEdit::returnPressed, this, &MainWindow::submitCommand);
     connect(sendButton_, &QPushButton::clicked, this, &MainWindow::submitCommand);
     connect(stopButton_, &QPushButton::clicked, this, &MainWindow::requestStop);
+    connect(provider_, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int index) {
+        appendLine(index == 0 ? "[Codex selected]" : "[Claude selected]");
+        if (index == 1 && !claudeReady_) claude_->start();
+        updateStatus();
+    });
+    connect(claude_, &ClaudeBridge::ready, this, [this] {
+        claudeReady_ = true;
+        appendLine("[Connected to Claude Agent SDK]");
+        updateStatus();
+        sendNextClaudePrompt();
+    });
+    connect(claude_, &ClaudeBridge::textDelta, this, [this](const QString &text) {
+        if (!claudeTextStarted_) {
+            appendText("\nClaude: ");
+            claudeTextStarted_ = true;
+        }
+        appendText(text);
+    });
+    connect(claude_, &ClaudeBridge::toolStarted, this, [this](const QString &name, const QJsonObject &input) {
+        appendLine("\n[Claude tool: " + name + "] "
+                   + QString::fromUtf8(QJsonDocument(input).toJson(QJsonDocument::Compact)));
+    });
+    connect(claude_, &ClaudeBridge::completed, this, [this](const QString &state, const QString &details) {
+        if (claudeTextStarted_) appendText("\n");
+        if (state != "completed") appendLine("[Claude response: " + state + (details.isEmpty() ? "" : ": " + details) + "]");
+        claudeBusy_ = false;
+        claudeStopRequested_ = false;
+        claudeTextStarted_ = false;
+        updateStatus();
+        sendNextClaudePrompt();
+    });
+    connect(claude_, &ClaudeBridge::approvalRequested, this,
+            [this](int id, const QString &tool, const QJsonObject &input) {
+        const QString details = QString::fromUtf8(QJsonDocument(input).toJson(QJsonDocument::Indented));
+        const auto answer = QMessageBox::question(this, "Approve Claude action",
+                                                   tool + "\n\n" + details + "\nAllow this action?",
+                                                   QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+        claude_->answerApproval(id, answer == QMessageBox::Yes);
+    });
+    connect(claude_, &ClaudeBridge::questionsRequested, this, [this](int id, const QJsonArray &questions) {
+        QJsonObject answers;
+        bool allAccepted = true;
+        for (const QJsonValue &value : questions) {
+            const QJsonObject question = value.toObject();
+            const QString text = question.value("question").toString();
+            const QString title = question.value("header").toString("Claude question");
+            const QJsonArray options = question.value("options").toArray();
+            bool accepted = false;
+            QString reply;
+            if (question.value("multiSelect").toBool() || options.isEmpty()) {
+                reply = QInputDialog::getText(this, title, text, QLineEdit::Normal, {}, &accepted);
+            } else {
+                QStringList labels;
+                for (const QJsonValue &option : options) labels.append(option.toObject().value("label").toString());
+                reply = QInputDialog::getItem(this, title, text, labels, 0, false, &accepted);
+            }
+            if (!accepted) {
+                allAccepted = false;
+                break;
+            }
+            answers.insert(text, reply);
+        }
+        claude_->answerQuestions(id, answers, allAccepted);
+    });
+    connect(claude_, &ClaudeBridge::error, this, [this](const QString &message) {
+        appendLine("[Claude] " + message);
+    });
+    connect(claude_, &ClaudeBridge::disconnected, this, [this] {
+        claudeReady_ = false;
+        claudeBusy_ = false;
+        claudeStopRequested_ = false;
+        updateStatus();
+    });
     connect(server_, &QProcess::started, this, [this] {
         sendRequest("initialize", {{"clientInfo", QJsonObject{
             {"name", "agentdeskt"}, {"title", "agentdeskt Qt"}, {"version", "0.1.0"}}}});
@@ -120,6 +205,17 @@ void MainWindow::submitCommand()
     } else if (local == "clear" || local == "/clear") {
         output_->clear();
     } else if (local == "new" || local == "/new") {
+        if (provider_->currentIndex() == 1) {
+            if (claudeBusy_) appendLine("[Wait for Claude to finish or enter stop.]");
+            else if (claudeReady_) {
+                claudeQueuedPrompts_.clear();
+                claudeReady_ = false;
+                claude_->resetConversation();
+                appendLine("[Starting a new Claude conversation]");
+                updateStatus();
+            } else appendLine("[Claude is not connected.]");
+            return;
+        }
         if (busy_) {
             appendLine("[Wait for the response to finish, or enter stop.]");
         } else if (initialized_) {
@@ -134,6 +230,13 @@ void MainWindow::submitCommand()
     } else if (local == "quit" || local == "/quit" || local == "exit") {
         close();
     } else {
+        if (provider_->currentIndex() == 1) {
+            appendLine("You (Claude): " + command);
+            claudeQueuedPrompts_.append(command);
+            if (!claudeReady_) claude_->start();
+            sendNextClaudePrompt();
+            return;
+        }
         if (server_->state() == QProcess::NotRunning) {
             appendLine("[Server is not running. Check the codex executable and restart.]");
             return;
@@ -147,12 +250,16 @@ void MainWindow::submitCommand()
 void MainWindow::showHelp()
 {
     appendLine("Commands:");
-    appendLine("  help       show this help and App Server options");
+    appendLine("  help       show this help and provider options");
     appendLine("  new        start a new conversation");
     appendLine("  clear      clear the output pane");
     appendLine("  stop       interrupt the current response");
     appendLine("  quit       close the application");
-    appendLine("All other text is sent to Codex as a message.\n");
+    appendLine("All other text is sent to the selected agent as a message.\n");
+    if (provider_->currentIndex() == 1) {
+        appendLine("Claude uses the Python Agent SDK bridge. The selected Python environment must have claude-agent-sdk installed.\n");
+        return;
+    }
     appendLine("Codex App Server options:");
 
     auto *helpProcess = new QProcess(this);
@@ -172,6 +279,16 @@ void MainWindow::showHelp()
         helpProcess->deleteLater();
     });
     helpProcess->start(codexProgram_, {"app-server", "--help"});
+}
+
+void MainWindow::sendNextClaudePrompt()
+{
+    if (!claudeReady_ || claudeBusy_ || claudeQueuedPrompts_.isEmpty()) return;
+    claudeBusy_ = true;
+    claudeStopRequested_ = false;
+    claudeTextStarted_ = false;
+    claude_->prompt(claudeQueuedPrompts_.takeFirst());
+    updateStatus();
 }
 
 void MainWindow::startThread()
@@ -197,6 +314,16 @@ void MainWindow::sendNextPrompt()
 
 void MainWindow::requestStop()
 {
+    if (provider_->currentIndex() == 1) {
+        if (!claudeBusy_) appendLine("[No active Claude response.]");
+        else if (!claudeStopRequested_) {
+            claudeStopRequested_ = true;
+            appendLine("[Interrupting Claude response]");
+            claude_->interrupt();
+            updateStatus();
+        }
+        return;
+    }
     if (!busy_) {
         appendLine("[No active response.]");
         return;
@@ -416,10 +543,19 @@ void MainWindow::appendLine(const QString &text)
 void MainWindow::updateStatus()
 {
     QString state;
-    if (server_->state() == QProcess::NotRunning) state = "Server: not running";
-    else if (busy_) state = "Codex is responding…";
-    else if (!threadId_.isEmpty()) state = "Ready";
-    else state = "Connecting to Codex App Server…";
+    if (provider_->currentIndex() == 1) {
+        if (claudeBusy_) state = "Claude is responding…";
+        else if (claudeReady_) state = "Claude ready";
+        else if (claude_->isRunning()) state = "Connecting to Claude Agent SDK…";
+        else state = "Claude bridge is not running";
+        stopButton_->setEnabled(claudeBusy_ && !claudeStopRequested_);
+    } else {
+        if (server_->state() == QProcess::NotRunning) state = "Server: not running";
+        else if (busy_) state = "Codex is responding…";
+        else if (!threadId_.isEmpty()) state = "Ready";
+        else state = "Connecting to Codex App Server…";
+        stopButton_->setEnabled(busy_ && !stopRequested_);
+    }
     status_->setText(state + "  •  " + QDir::toNativeSeparators(workingDirectory_));
-    stopButton_->setEnabled(busy_ && !stopRequested_);
+    provider_->setEnabled(!busy_ && !claudeBusy_);
 }

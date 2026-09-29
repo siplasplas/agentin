@@ -3,10 +3,12 @@
 
 #include <QFile>
 #include <QFileInfo>
+#include <QComboBox>
 #include <QLineEdit>
 #include <QPlainTextEdit>
 #include <QPushButton>
 #include <QTemporaryDir>
+#include <QStandardPaths>
 #include <QtTest>
 
 class MainWindowTest : public QObject
@@ -17,6 +19,7 @@ private slots:
     void codexExecutableFromEnvironment();
     void desktopExecutableWithoutPath();
     void helpAndConversation();
+    void claudeConversationAndStop();
 };
 
 void MainWindowTest::codexExecutableFromEnvironment()
@@ -132,6 +135,71 @@ for line in sys.stdin:
     QTest::keyClicks(input, "stop");
     QTest::keyClick(input, Qt::Key_Return);
     QTRY_VERIFY(output->toPlainText().count("[Response: interrupted]") == 2);
+}
+
+void MainWindowTest::claudeConversationAndStop()
+{
+    const QString python = QStandardPaths::findExecutable("python3");
+    if (python.isEmpty()) QSKIP("Python 3 is unavailable");
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString fakeBridge = directory.filePath("fake-claude.py");
+    QFile script(fakeBridge);
+    QVERIFY(script.open(QIODevice::WriteOnly | QIODevice::Text));
+    script.write(R"PY(import json
+import sys
+
+def send(message):
+    print(json.dumps(message), flush=True)
+
+send({"type": "ready"})
+for line in sys.stdin:
+    request = json.loads(line)
+    kind = request.get("type")
+    if kind == "prompt":
+        if request["text"].startswith("long"):
+            continue
+        send({"type": "delta", "text": "Hello from Claude"})
+        send({"type": "complete", "status": "completed"})
+    elif kind == "stop":
+        send({"type": "complete", "status": "interrupted"})
+    elif kind == "new":
+        send({"type": "ready"})
+    elif kind == "shutdown":
+        break
+)PY");
+    script.close();
+
+    MainWindow window("/nonexistent/codex", directory.path(), python, fakeBridge);
+    window.show();
+    auto *provider = window.findChild<QComboBox *>("providerSelect");
+    auto *input = window.findChild<QLineEdit *>("commandInput");
+    auto *output = window.findChild<QPlainTextEdit *>("output");
+    auto *stopButton = window.findChild<QPushButton *>("stopButton");
+    QVERIFY(provider);
+    QVERIFY(input);
+    QVERIFY(output);
+    QVERIFY(stopButton);
+    provider->setCurrentIndex(1);
+    QTRY_VERIFY(output->toPlainText().contains("[Connected to Claude Agent SDK]"));
+
+    QTest::keyClicks(input, "help");
+    QTest::keyClick(input, Qt::Key_Return);
+    QVERIFY(output->toPlainText().contains("Claude uses the Python Agent SDK bridge"));
+
+    QTest::keyClicks(input, "hello");
+    QTest::keyClick(input, Qt::Key_Return);
+    QTRY_VERIFY(output->toPlainText().contains("Claude: Hello from Claude"));
+
+    QTest::keyClicks(input, "long response");
+    QTest::keyClick(input, Qt::Key_Return);
+    QTRY_VERIFY(stopButton->isEnabled());
+    QTest::mouseClick(stopButton, Qt::LeftButton);
+    QTRY_VERIFY(output->toPlainText().contains("[Claude response: interrupted]"));
+
+    QTest::keyClicks(input, "new");
+    QTest::keyClick(input, Qt::Key_Return);
+    QTRY_VERIFY(output->toPlainText().count("[Connected to Claude Agent SDK]") == 2);
 }
 
 QTEST_MAIN(MainWindowTest)
