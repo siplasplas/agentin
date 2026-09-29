@@ -1,8 +1,8 @@
 # agentdeskt
 
-A Qt 6 desktop client for Codex, Claude, GLM, Gemini, and Antigravity. Select an
-agent in the window, enter a message, and read streamed responses in one output
-pane. Codex uses the local `codex` executable and its existing sign-in and
+A Qt 6 desktop client for Codex, Claude, GLM, Gemini, and Antigravity. Start a
+chat with an agent, enter a message, and read streamed responses in the chat
+pane; application messages appear in the log pane at the bottom. Codex uses the local `codex` executable and its existing sign-in and
 configuration. Claude and GLM run through a Python JSONL bridge to the Claude
 Agent SDK. Gemini and Antigravity run through their respective CLIs in headless mode.
 
@@ -107,8 +107,15 @@ directory…**, or type `new` to start a chat. In the dialog, choose the agent,
 then enter a directory path or choose one with **Browse…**. The **Create chat**
 button is available only when that directory exists. Each chat has one working
 directory, and files under that directory are available subject to the
-selected agent's permissions. Double-click a chat in the conversation tree to
-continue it with its agent and working directory.
+selected agent's permissions.
+
+Select a chat in the conversation tree to show a read-only preview of its
+latest messages. Only the last 20 entries are loaded at first; use **Show
+earlier messages** to load older ones. Codex history is paged through the App
+Server (`thread/items/list`), Claude and GLM history is read through the Claude
+Agent SDK, and Gemini history is read from the saved CLI session file.
+Antigravity does not expose its history, so no preview is available. Messages
+cannot be sent to a previewed chat; `help`, `new`, `clear`, and `quit` still work.
 
 Type `help` (or `/help`) in the command field to see the available commands.
 With Codex selected, it shows the complete output of `codex app-server --help`
@@ -129,8 +136,8 @@ With Antigravity selected, `help` shows `agy --help`. The selected working
 directory is passed as the CLI process directory. Headless mode uses the CLI's cached authentication and its configured permission
 policy; approval prompts are not shown as Qt dialogs.
 
-The client also supports `new`, `clear`, `stop`, and `quit`. Any other text is
-sent to the selected agent as a message. Messages entered while a response is
+The client also supports `new`, `clear` (clears the log), `stop`, and `quit`.
+Any other text is sent to the agent of the chat started with New chat. Messages entered while a response is
 in progress are queued. Requests to approve an action or answer a question
 appear in a separate dialog. Each agent keeps its own conversation while the
 application is open.

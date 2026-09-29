@@ -75,6 +75,24 @@ class ClaudeBridgeTest(unittest.IsolatedAsyncioTestCase):
             }])
             listing.assert_called_once_with(directory=None)
 
+    async def test_reads_session_tail_as_chat_entries(self):
+        messages = [
+            Message(type="user", message={"role": "user", "content": "First question"}),
+            Message(type="assistant", message={"role": "assistant", "content": [
+                {"type": "thinking", "thinking": "hidden"},
+                {"type": "text", "text": "Checking"},
+                {"type": "tool_use", "name": "Read", "input": {}},
+            ]}),
+            Message(type="user", message={"role": "user", "content": [{"type": "tool_result", "content": "data"}]}),
+            Message(type="assistant", message={"role": "assistant", "content": [{"type": "text", "text": "Done"}]}),
+        ]
+        with patch.object(sdk, "get_session_messages", return_value=messages, create=True) as reading:
+            self.assertEqual(bridge_module.read_session("session-1", "/tmp/project", 2), {
+                "type": "history", "total": 4,
+                "entries": [{"role": "tool", "text": "Read"}, {"role": "assistant", "text": "Done"}],
+            })
+            reading.assert_called_once_with("session-1", directory="/tmp/project")
+
     async def test_glm_uses_zai_credentials_and_keeps_directory(self):
         events = []
         with patch.dict(bridge_module.os.environ, {"ZAI_API_KEY": "test-zai-key", "GLM_MODEL": "glm-test"}), \

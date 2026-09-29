@@ -16,6 +16,13 @@ class ClaudeBridge;
 class GeminiBridge;
 class AntigravityBridge;
 class QTreeWidget;
+class QTreeWidgetItem;
+
+struct ChatEntry
+{
+    QString role;
+    QString text;
+};
 
 class MainWindow : public QMainWindow
 {
@@ -69,6 +76,12 @@ private:
     void handleServerRequest(const QString &method, const QJsonValue &id, const QJsonObject &params);
     void appendText(const QString &text);
     void appendLine(const QString &text);
+    void appendChatText(const QString &provider, const QString &text);
+    void showChatPreview(QTreeWidgetItem *item);
+    void showLiveChat(const QString &provider, const QString &path);
+    void loadHistory(bool reset);
+    void showHistory(const QList<ChatEntry> &entries, bool hasMore, const QString &notice = {});
+    void updateChatHeader();
     void updateStatus();
 
     QString codexProgram_;
@@ -95,7 +108,10 @@ private:
     ClaudeBridge *glm_;
     GeminiBridge *gemini_;
     AntigravityBridge *antigravity_;
-    QPlainTextEdit *output_;
+    QPlainTextEdit *chatView_;
+    QPlainTextEdit *log_;
+    QLabel *chatHeader_;
+    QPushButton *loadEarlierButton_;
     QLineEdit *input_;
     QPushButton *sendButton_;
     QPushButton *stopButton_;
@@ -123,6 +139,18 @@ private:
     QSet<QString> expandedProviders_;
     qint64 activeConversationWatermark_ = 0;
     int currentProvider_ = 0;
+    QString viewProvider_;
+    QString viewId_;
+    QString viewPath_;
+    QString viewTitle_;
+    QList<ChatEntry> historyEntries_;
+    QString codexHistoryCursor_;
+    qint64 codexHistoryRequest_ = 0;
+    quint64 historyGeneration_ = 0;
+    int historyLimit_ = 0;
+    int historyTotal_ = 0;
+    bool viewLive_ = false;
+    bool pendingCodexHistory_ = false;
     int syncPages_ = 0;
     qint64 nextRequestId_ = 1;
     bool initialized_ = false;

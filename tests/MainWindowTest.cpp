@@ -6,6 +6,7 @@
 #include <QComboBox>
 #include <QDialog>
 #include <QDialogButtonBox>
+#include <QLabel>
 #include <QLineEdit>
 #include <QPlainTextEdit>
 #include <QPushButton>
@@ -143,7 +144,9 @@ for line in sys.stdin:
     MainWindow window(fakeServer, directory.path());
     window.show();
     auto *input = window.findChild<QLineEdit *>("commandInput");
-    auto *output = window.findChild<QPlainTextEdit *>("output");
+    auto *output = window.findChild<QPlainTextEdit *>("log");
+    auto *chat = window.findChild<QPlainTextEdit *>("chatView");
+    QVERIFY(chat);
     QVERIFY(input);
     QVERIFY(output);
     auto *stopButton = window.findChild<QPushButton *>("stopButton");
@@ -162,8 +165,9 @@ for line in sys.stdin:
     QTest::keyClicks(input, "test");
     QTest::keyClick(input, Qt::Key_Return);
     QTRY_VERIFY(output->toPlainText().contains("[Connected to Codex]"));
-    QTRY_VERIFY(output->toPlainText().contains("Codex: Hello from App Server"));
-    QCOMPARE(output->toPlainText().count("Hello from App Server"), 1);
+    QTRY_VERIFY(chat->toPlainText().contains("Codex: Hello from App Server"));
+    QCOMPARE(chat->toPlainText().count("Hello from App Server"), 1);
+    QVERIFY(!output->toPlainText().contains("Hello from App Server"));
 
     QTest::keyClicks(input, "long response");
     QTest::keyClick(input, Qt::Key_Return);
@@ -221,7 +225,9 @@ for line in sys.stdin:
     MainWindow window("/nonexistent/codex", directory.path(), python, fakeBridge);
     window.show();
     auto *input = window.findChild<QLineEdit *>("commandInput");
-    auto *output = window.findChild<QPlainTextEdit *>("output");
+    auto *output = window.findChild<QPlainTextEdit *>("log");
+    auto *chat = window.findChild<QPlainTextEdit *>("chatView");
+    QVERIFY(chat);
     auto *stopButton = window.findChild<QPushButton *>("stopButton");
     auto *sendButton = window.findChild<QPushButton *>("sendButton");
     QVERIFY(input);
@@ -244,7 +250,7 @@ for line in sys.stdin:
 
     QTest::keyClicks(input, "hello");
     QTest::keyClick(input, Qt::Key_Return);
-    QTRY_VERIFY(output->toPlainText().contains("Claude: Hello from Claude"));
+    QTRY_VERIFY(chat->toPlainText().contains("Claude: Hello from Claude"));
 
     QTest::keyClicks(input, "long response");
     QTest::keyClick(input, Qt::Key_Return);
@@ -300,14 +306,16 @@ for line in sys.stdin:
     MainWindow window("/nonexistent/codex", directory.path(), python, fakeBridge);
     window.show();
     auto *input = window.findChild<QLineEdit *>("commandInput");
-    auto *output = window.findChild<QPlainTextEdit *>("output");
+    auto *output = window.findChild<QPlainTextEdit *>("log");
+    auto *chat = window.findChild<QPlainTextEdit *>("chatView");
+    QVERIFY(chat);
     QVERIFY(input);
     QVERIFY(output);
     startChat(window, 2, directory.path());
     QTRY_VERIFY(output->toPlainText().contains("[Connected to GLM via Claude Agent SDK]"));
     QTest::keyClicks(input, "hello");
     QTest::keyClick(input, Qt::Key_Return);
-    QTRY_VERIFY(output->toPlainText().contains("GLM: Hello from GLM"));
+    QTRY_VERIFY(chat->toPlainText().contains("GLM: Hello from GLM"));
 }
 
 void MainWindowTest::antigravityConversationResumesAndPersists()
@@ -345,7 +353,9 @@ print(json.dumps({"event": "result", "result": {
     const QString indexPath = directory.filePath("codex-conversations.json");
     MainWindow window("/nonexistent/codex", directory.path(), {}, {}, "gemini", nullptr, indexPath, fakeAgy);
     auto *input = window.findChild<QLineEdit *>("commandInput");
-    auto *output = window.findChild<QPlainTextEdit *>("output");
+    auto *output = window.findChild<QPlainTextEdit *>("log");
+    auto *chat = window.findChild<QPlainTextEdit *>("chatView");
+    QVERIFY(chat);
     auto *tree = window.findChild<QTreeWidget *>("conversationTree");
     QVERIFY(input && output && tree);
     startChat(window, 4, directory.path());
@@ -354,11 +364,11 @@ print(json.dumps({"event": "result", "result": {
     QTRY_VERIFY(output->toPlainText().contains("Usage: agy"));
     input->setText("first");
     QTest::keyClick(input, Qt::Key_Return);
-    QTRY_VERIFY(output->toPlainText().contains("Antigravity: first answered"));
+    QTRY_VERIFY(chat->toPlainText().contains("Antigravity: first answered"));
     QTRY_VERIFY(QFileInfo(directory.filePath("antigravity-conversations.json")).exists());
     input->setText("second");
     QTest::keyClick(input, Qt::Key_Return);
-    QTRY_VERIFY(output->toPlainText().contains("Antigravity: second answered"));
+    QTRY_VERIFY(chat->toPlainText().contains("Antigravity: second answered"));
     for (int i = 0; i < tree->topLevelItemCount(); ++i) {
         if (tree->topLevelItem(i)->text(0) == "Antigravity") {
             tree->topLevelItem(i)->setExpanded(true);
@@ -400,7 +410,9 @@ else:
     MainWindow window("/nonexistent/codex", directory.path(), {}, {}, fakeGemini);
     window.show();
     auto *input = window.findChild<QLineEdit *>("commandInput");
-    auto *output = window.findChild<QPlainTextEdit *>("output");
+    auto *output = window.findChild<QPlainTextEdit *>("log");
+    auto *chat = window.findChild<QPlainTextEdit *>("chatView");
+    QVERIFY(chat);
     auto *stopButton = window.findChild<QPushButton *>("stopButton");
     QVERIFY(input);
     QVERIFY(output);
@@ -411,10 +423,10 @@ else:
     QTRY_VERIFY(output->toPlainText().contains("Usage: gemini"));
     QTest::keyClicks(input, "first");
     QTest::keyClick(input, Qt::Key_Return);
-    QTRY_VERIFY(output->toPlainText().contains("Gemini: first answered"));
+    QTRY_VERIFY(chat->toPlainText().contains("Gemini: first answered"));
     QTest::keyClicks(input, "second");
     QTest::keyClick(input, Qt::Key_Return);
-    QTRY_VERIFY(output->toPlainText().contains("Gemini: second answered"));
+    QTRY_VERIFY(chat->toPlainText().contains("Gemini: second answered"));
     QTest::keyClicks(input, "long");
     QTest::keyClick(input, Qt::Key_Return);
     QTRY_VERIFY(stopButton->isEnabled());
@@ -452,8 +464,22 @@ for line in sys.stdin:
         result = {"data": page, "nextCursor": str(next_offset) if next_offset < len(items) else None}
         with open(os.path.join(folder, "requests.log"), "a") as log:
             log.write(("archived" if params["archived"] else "active") + "\n")
-    elif method == "thread/resume":
-        result = {"thread": {"id": request["params"]["threadId"]}}
+    elif method == "thread/items/list":
+        params = request["params"]
+        assert params["threadId"] == "new-102" and params["sortDirection"] == "desc"
+        def user(text):
+            return {"turnId": "t", "item": {"type": "userMessage", "id": text, "content": [{"type": "text", "text": text}]}}
+        def agent(text):
+            return {"turnId": "t", "item": {"type": "agentMessage", "id": text, "text": text}}
+        if params.get("cursor") == "older":
+            result = {"data": [agent("Old answer"), user("Old question")], "nextCursor": None}
+        else:
+            command = {"turnId": "t", "item": {"type": "commandExecution", "id": "c", "command": "ls"}}
+            result = {"data": [agent("Latest answer"), command, user("Latest question")], "nextCursor": "older"}
+    elif method == "turn/start":
+        with open(os.path.join(folder, "requests.log"), "a") as log:
+            log.write("turn\n")
+        continue
     else:
         continue
     print(json.dumps({"id": request["id"], "result": result}), flush=True)
@@ -486,7 +512,7 @@ for line in sys.stdin:
         MainWindow window(fakeServer, directory.path(), {}, {}, "gemini", nullptr, indexPath);
         window.show();
         auto *tree = window.findChild<QTreeWidget *>("conversationTree");
-        auto *output = window.findChild<QPlainTextEdit *>("output");
+        auto *output = window.findChild<QPlainTextEdit *>("log");
         QVERIFY(tree);
         QVERIFY(output);
         QCOMPARE(tree->topLevelItemCount(), 5);
@@ -513,7 +539,7 @@ for line in sys.stdin:
         MainWindow window(fakeServer, directory.path(), {}, {}, "gemini", nullptr, indexPath);
         window.show();
         auto *tree = window.findChild<QTreeWidget *>("conversationTree");
-        auto *output = window.findChild<QPlainTextEdit *>("output");
+        auto *output = window.findChild<QPlainTextEdit *>("log");
         QVERIFY(tree);
         QVERIFY(output);
         QVERIFY(output->toPlainText().contains("[Cached Codex conversations: 6]"));
@@ -525,10 +551,10 @@ for line in sys.stdin:
         auto *folder = tree->topLevelItem(0)->child(0);
         QVERIFY(folder);
         QVERIFY(folder->childCount() >= 1);
-        auto *chat = folder->child(0);
-        QVERIFY(chat->text(0).size() <= 72);
-        QVERIFY(chat->toolTip(0).contains(QString(199, 'N')));
-        QVERIFY(!chat->toolTip(0).contains(QString(200, 'N')));
+        auto *chatItem = folder->child(0);
+        QVERIFY(chatItem->text(0).size() <= 72);
+        QVERIFY(chatItem->toolTip(0).contains(QString(199, 'N')));
+        QVERIFY(!chatItem->toolTip(0).contains(QString(200, 'N')));
         QFile index(indexPath);
         QVERIFY(index.open(QIODevice::ReadOnly));
         const QJsonArray saved = QJsonDocument::fromJson(index.readAll()).object().value("threads").toArray();
@@ -540,9 +566,34 @@ for line in sys.stdin:
             }
         }
         QVERIFY(foundPreview);
-        QTest::mouseClick(tree->viewport(), Qt::LeftButton, {}, tree->visualItemRect(chat).center());
-        QTest::mouseDClick(tree->viewport(), Qt::LeftButton, {}, tree->visualItemRect(chat).center());
-        QTRY_VERIFY(output->toPlainText().contains("[Resumed Codex conversation: new-102]"));
+        auto *chat = window.findChild<QPlainTextEdit *>("chatView");
+        auto *header = window.findChild<QLabel *>("chatHeader");
+        auto *loadEarlier = window.findChild<QPushButton *>("loadEarlierButton");
+        auto *input = window.findChild<QLineEdit *>("commandInput");
+        auto *sendButton = window.findChild<QPushButton *>("sendButton");
+        QVERIFY(chat && header && loadEarlier && input && sendButton);
+        QTest::mouseClick(tree->viewport(), Qt::LeftButton, {}, tree->visualItemRect(chatItem).center());
+        QTest::mouseDClick(tree->viewport(), Qt::LeftButton, {}, tree->visualItemRect(chatItem).center());
+        QTRY_VERIFY(chat->toPlainText().contains("Codex: Latest answer"));
+        const QString latest = chat->toPlainText();
+        QVERIFY(latest.indexOf("You: Latest question") < latest.indexOf("[Codex tool: $ ls]"));
+        QVERIFY(latest.indexOf("[Codex tool: $ ls]") < latest.indexOf("Codex: Latest answer"));
+        QVERIFY(!latest.contains("Old question"));
+        QVERIFY(header->text().contains("read-only preview"));
+        QVERIFY(!sendButton->isEnabled());
+        QVERIFY(loadEarlier->isVisible());
+        QTest::mouseClick(loadEarlier, Qt::LeftButton);
+        QTRY_VERIFY(chat->toPlainText().contains("Codex: Old answer"));
+        const QString full = chat->toPlainText();
+        QVERIFY(full.indexOf("You: Old question") < full.indexOf("Codex: Old answer"));
+        QVERIFY(full.indexOf("Codex: Old answer") < full.indexOf("You: Latest question"));
+        QVERIFY(!loadEarlier->isVisible());
+        input->setText("write something");
+        QTest::keyClick(input, Qt::Key_Return);
+        QVERIFY(output->toPlainText().contains("[The displayed chat is a read-only preview."));
+        QVERIFY(log.open(QIODevice::ReadOnly));
+        QVERIFY(!QString::fromUtf8(log.readAll()).contains("turn\n"));
+        log.close();
     }
 }
 
@@ -558,6 +609,15 @@ void MainWindowTest::claudeSessionMetadataRefreshesExistingIndex()
     script.write(R"PY(import json
 import sys
 
+if "--read-session" in sys.argv:
+    assert sys.argv[sys.argv.index("--read-session") + 1] == "claude-1"
+    limit = int(sys.argv[sys.argv.index("--limit") + 1])
+    entries = []
+    for i in range(21):
+        entries += [{"role": "user", "text": f"Question {i}"}, {"role": "assistant", "text": f"Answer {i}"}]
+    entries.append({"role": "tool", "text": "Read"})
+    print(json.dumps({"type": "history", "entries": entries[-limit:], "total": len(entries)}), flush=True)
+    sys.exit(0)
 if "--list-sessions" in sys.argv:
     print(json.dumps({"type": "sessions", "sessions": [{
         "id": "claude-1", "cwd": sys.argv[sys.argv.index("--cwd") + 1],
@@ -579,16 +639,31 @@ if "--list-sessions" in sys.argv:
                       directory.filePath("codex-conversations.json"));
     window.show();
     auto *tree = window.findChild<QTreeWidget *>("conversationTree");
-    auto *output = window.findChild<QPlainTextEdit *>("output");
+    auto *output = window.findChild<QPlainTextEdit *>("log");
     QVERIFY(tree);
     QVERIFY(output);
     tree->topLevelItem(1)->setExpanded(true);
     QTRY_VERIFY(output->toPlainText().contains("[Claude sessions discovered: 1]"));
-    auto *chat = tree->topLevelItem(1)->child(0)->child(0);
-    QCOMPARE(chat->text(0), QString("Updated title"));
-    QVERIFY(chat->toolTip(0).contains("Modified:"));
-    QVERIFY(chat->toolTip(0).contains("Git branch: main"));
-    QVERIFY(chat->toolTip(0).contains("First prompt: First question"));
+    auto *chatItem = tree->topLevelItem(1)->child(0)->child(0);
+    QCOMPARE(chatItem->text(0), QString("Updated title"));
+    QVERIFY(chatItem->toolTip(0).contains("Modified:"));
+    QVERIFY(chatItem->toolTip(0).contains("Git branch: main"));
+    QVERIFY(chatItem->toolTip(0).contains("First prompt: First question"));
+    tree->setCurrentItem(chatItem);
+    auto *chat = window.findChild<QPlainTextEdit *>("chatView");
+    auto *loadEarlier = window.findChild<QPushButton *>("loadEarlierButton");
+    QVERIFY(chat && loadEarlier);
+    QTRY_VERIFY(chat->toPlainText().contains("Claude: Answer 20"));
+    QVERIFY(chat->toPlainText().contains("[Claude tool: Read]"));
+    QVERIFY(!chat->toPlainText().contains("Question 0"));
+    QVERIFY(loadEarlier->isVisible());
+    QTest::mouseClick(loadEarlier, Qt::LeftButton);
+    QTRY_VERIFY(chat->toPlainText().contains("You: Question 2"));
+    QVERIFY(!chat->toPlainText().contains("Question 0"));
+    QVERIFY(loadEarlier->isVisible());
+    QTest::mouseClick(loadEarlier, Qt::LeftButton);
+    QTRY_VERIFY(chat->toPlainText().contains("You: Question 0"));
+    QVERIFY(!loadEarlier->isVisible());
     QVERIFY(index.open(QIODevice::ReadOnly));
     const QJsonArray saved = QJsonDocument::fromJson(index.readAll()).object().value("threads").toArray();
     QCOMPARE(saved.size(), 1);
@@ -615,7 +690,7 @@ void MainWindowTest::missingGeminiCliReportsOneDiscoveryError()
         MainWindow window("/bin/true", directory.path(), {}, {}, program, nullptr, index.fileName());
         window.show();
         auto *tree = window.findChild<QTreeWidget *>("conversationTree");
-        auto *output = window.findChild<QPlainTextEdit *>("output");
+        auto *output = window.findChild<QPlainTextEdit *>("log");
         QVERIFY(tree);
         QVERIFY(output);
         tree->topLevelItem(2)->setExpanded(true);
@@ -643,7 +718,7 @@ with Path(__file__).with_name("gemini-scans.log").open("a") as log:
         MainWindow window("/bin/true", directory.path(), {}, {}, scanner.fileName(), nullptr, index.fileName());
         window.show();
         auto *tree = window.findChild<QTreeWidget *>("conversationTree");
-        auto *output = window.findChild<QPlainTextEdit *>("output");
+        auto *output = window.findChild<QPlainTextEdit *>("log");
         QVERIFY(tree && output);
         tree->topLevelItem(2)->setExpanded(true);
         const QString logPath = directory.filePath("gemini-scans.log");
@@ -672,7 +747,14 @@ void MainWindowTest::geminiListsSessionsFromAllProjects()
         if (!file.open(QIODevice::WriteOnly)) return false;
         file.write(QJsonDocument(QJsonObject{{"sessionId", id}, {"kind", "main"},
                                          {"startTime", "2026-09-29T10:00:00Z"}}).toJson(QJsonDocument::Compact) + "\n");
-        file.write(QJsonDocument(QJsonObject{{"type", "user"}, {"content", prompt}}).toJson(QJsonDocument::Compact) + "\n");
+        file.write(QJsonDocument(QJsonObject{{"type", "user"}, {"id", "u1"}, {"content", prompt}}).toJson(QJsonDocument::Compact) + "\n");
+        file.write(QJsonDocument(QJsonObject{{"type", "gemini"}, {"id", "g1"}, {"content", "Draft answer"}})
+                       .toJson(QJsonDocument::Compact) + "\n");
+        file.write(QJsonDocument(QJsonObject{{"$set", QJsonObject{{"lastUpdated", "2026-09-29T10:01:00Z"}}}})
+                       .toJson(QJsonDocument::Compact) + "\n");
+        file.write(QJsonDocument(QJsonObject{{"type", "gemini"}, {"id", "g1"}, {"content", "Updated answer"},
+                                         {"toolCalls", QJsonArray{QJsonObject{{"name", "read_file"}}}}})
+                       .toJson(QJsonDocument::Compact) + "\n");
         return true;
     };
     QVERIFY(writeSession("a", "session-a", "First project prompt"));
@@ -681,7 +763,7 @@ void MainWindowTest::geminiListsSessionsFromAllProjects()
     MainWindow window("/bin/true", projectA, {}, {}, directory.filePath("missing-gemini"), nullptr,
                       directory.filePath("codex-conversations.json"), "agy", geminiData);
     auto *tree = window.findChild<QTreeWidget *>("conversationTree");
-    auto *output = window.findChild<QPlainTextEdit *>("output");
+    auto *output = window.findChild<QPlainTextEdit *>("log");
     QVERIFY(tree && output);
     tree->topLevelItem(2)->setExpanded(true);
     QTRY_VERIFY(output->toPlainText().contains("[Gemini sessions discovered: 2]"));
@@ -694,6 +776,19 @@ void MainWindowTest::geminiListsSessionsFromAllProjects()
         found.insert(folder->child(0)->data(0, Qt::UserRole + 1).toString());
     }
     QCOMPARE(found, QSet<QString>({"session-a", "session-b"}));
+    QTreeWidgetItem *sessionA = nullptr;
+    for (int i = 0; i < root->childCount(); ++i) {
+        if (root->child(i)->child(0)->data(0, Qt::UserRole + 1).toString() == "session-a") sessionA = root->child(i)->child(0);
+    }
+    QVERIFY(sessionA);
+    tree->setCurrentItem(sessionA);
+    auto *chat = window.findChild<QPlainTextEdit *>("chatView");
+    QVERIFY(chat);
+    const QString history = chat->toPlainText();
+    QVERIFY(history.contains("You: First project prompt"));
+    QVERIFY(history.contains("Gemini: Updated answer"));
+    QVERIFY(!history.contains("Draft answer"));
+    QVERIFY(history.contains("[Gemini tool: read_file]"));
 
     const QString indexPath = directory.filePath("gemini-conversations.json");
     QFile index(indexPath);

@@ -318,13 +318,49 @@ def list_local_sessions(directories):
     return sessions
 
 
+def message_entries(message):
+    """Converts one SDK session message into simple chat entries for the Qt client."""
+    payload = message.message if isinstance(message.message, dict) else {}
+    content = payload.get("content")
+    if isinstance(content, str):
+        return [{"role": message.type, "text": content}] if content.strip() else []
+    entries = []
+    for block in content if isinstance(content, list) else []:
+        if not isinstance(block, dict):
+            continue
+        kind = block.get("type")
+        if kind == "text" and block.get("text", "").strip():
+            entries.append({"role": message.type, "text": block["text"]})
+        elif kind == "tool_use":
+            entries.append({"role": "tool", "text": block.get("name", "tool")})
+    return entries
+
+
+def read_session(session_id, directory, limit):
+    from claude_agent_sdk import get_session_messages
+
+    entries = []
+    for message in get_session_messages(session_id, directory=directory):
+        entries.extend(message_entries(message))
+    return {"type": "history", "entries": entries[-limit:] if limit > 0 else entries, "total": len(entries)}
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Claude Agent SDK bridge for agentdeskt")
     parser.add_argument("--cwd", required=True)
     parser.add_argument("--provider", choices=("claude", "glm"), default="claude")
     parser.add_argument("--list-sessions", action="store_true")
     parser.add_argument("--directories", default="[]")
+    parser.add_argument("--read-session")
+    parser.add_argument("--limit", type=int, default=20)
     args = parser.parse_args()
+    if args.read_session:
+        try:
+            send(read_session(args.read_session, args.cwd, args.limit))
+        except Exception as exc:
+            send({"type": "error", "message": f"Could not read Claude Agent SDK session: {exc}"})
+            raise SystemExit(1)
+        raise SystemExit(0)
     if args.list_sessions:
         try:
             directories = json.loads(args.directories)
