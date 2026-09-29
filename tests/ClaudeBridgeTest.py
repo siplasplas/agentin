@@ -65,10 +65,13 @@ spec.loader.exec_module(bridge_module)
 class ClaudeBridgeTest(unittest.IsolatedAsyncioTestCase):
     async def test_lists_all_claude_sessions_without_local_index(self):
         session = Message(session_id="session-1", cwd="/tmp/project", custom_title=None,
-                          summary="Project chat", first_prompt="Hello", created_at=1000)
+                          summary="Project chat", first_prompt="Hello", created_at=1000,
+                          last_modified=2000, file_size=1234, git_branch="main", tag="saved")
         with patch.object(sdk, "list_sessions", return_value=[session], create=True) as listing:
             self.assertEqual(bridge_module.list_local_sessions([]), [{
                 "id": "session-1", "cwd": "/tmp/project", "title": "Project chat", "createdAt": 1,
+                "lastModified": 2, "fileSize": 1234, "customTitle": None,
+                "summary": "Project chat", "firstPrompt": "Hello", "gitBranch": "main", "tag": "saved",
             }])
             listing.assert_called_once_with(directory=None)
 

@@ -27,7 +27,11 @@ private slots:
     void claudeConversationAndStop();
     void glmConversation();
     void geminiConversationAndDirectories();
+    void antigravityConversationResumesAndPersists();
     void codexConversationIndexSurvivesRestart();
+    void claudeSessionMetadataRefreshesExistingIndex();
+    void missingGeminiCliReportsOneDiscoveryError();
+    void geminiListsSessionsFromAllProjects();
 };
 
 void MainWindowTest::codexExecutableFromEnvironment()
@@ -324,6 +328,67 @@ for line in sys.stdin:
     QTRY_VERIFY(output->toPlainText().contains("[GLM directory available: " + extraDirectory.path() + "]"));
 }
 
+void MainWindowTest::antigravityConversationResumesAndPersists()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString fakeAgy = directory.filePath("agy");
+    QFile script(fakeAgy);
+    QVERIFY(script.open(QIODevice::WriteOnly | QIODevice::Text));
+    script.write(R"PY(#!/usr/bin/env python3
+import json
+import sys
+
+args = sys.argv[1:]
+if "--help" in args:
+    print("Usage: agy --prompt TEXT --conversation ID", flush=True)
+    raise SystemExit(0)
+assert args[:2] == ["--output-format", "stream-json"]
+prompt = args[args.index("--prompt") + 1]
+if prompt == "second":
+    assert args[args.index("--conversation") + 1] == "agy-test-id"
+else:
+    assert "--conversation" not in args
+print(json.dumps({"event": "init", "conversation_id": "agy-test-id"}), flush=True)
+print(json.dumps({"event": "step_update", "step_update": {
+    "step_type": "agent_response", "state": "DONE", "text_delta": prompt + " answered"
+}}), flush=True)
+print(json.dumps({"event": "result", "result": {
+    "conversation_id": "agy-test-id", "status": "SUCCESS", "response": prompt + " answered"
+}}), flush=True)
+)PY");
+    script.close();
+    QVERIFY(script.setPermissions(QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner));
+
+    const QString indexPath = directory.filePath("codex-conversations.json");
+    MainWindow window("/nonexistent/codex", directory.path(), {}, {}, "gemini", nullptr, indexPath, fakeAgy);
+    auto *provider = window.findChild<QComboBox *>("providerSelect");
+    auto *input = window.findChild<QLineEdit *>("commandInput");
+    auto *output = window.findChild<QPlainTextEdit *>("output");
+    auto *tree = window.findChild<QTreeWidget *>("conversationTree");
+    QVERIFY(provider && input && output && tree);
+    QCOMPARE(provider->count(), 5);
+    provider->setCurrentIndex(4);
+    input->setText("help");
+    QTest::keyClick(input, Qt::Key_Return);
+    QTRY_VERIFY(output->toPlainText().contains("Usage: agy"));
+    input->setText("first");
+    QTest::keyClick(input, Qt::Key_Return);
+    QTRY_VERIFY(output->toPlainText().contains("Antigravity: first answered"));
+    QTRY_VERIFY(QFileInfo(directory.filePath("antigravity-conversations.json")).exists());
+    input->setText("second");
+    QTest::keyClick(input, Qt::Key_Return);
+    QTRY_VERIFY(output->toPlainText().contains("Antigravity: second answered"));
+    for (int i = 0; i < tree->topLevelItemCount(); ++i) {
+        if (tree->topLevelItem(i)->text(0) == "Antigravity") {
+            tree->topLevelItem(i)->setExpanded(true);
+            QTRY_COMPARE(tree->topLevelItem(i)->childCount(), 1);
+            QCOMPARE(tree->topLevelItem(i)->child(0)->child(0)->data(0, Qt::UserRole + 1).toString(),
+                     QString("agy-test-id"));
+        }
+    }
+}
+
 void MainWindowTest::geminiConversationAndDirectories()
 {
     QTemporaryDir directory;
@@ -455,7 +520,7 @@ for line in sys.stdin:
         auto *output = window.findChild<QPlainTextEdit *>("output");
         QVERIFY(tree);
         QVERIFY(output);
-        QCOMPARE(tree->topLevelItemCount(), 4);
+        QCOMPARE(tree->topLevelItemCount(), 5);
         QCOMPARE(tree->topLevelItem(0)->text(0), QString("Codex"));
         for (int i = 0; i < tree->topLevelItemCount(); ++i) {
             QCOMPARE(tree->topLevelItem(i)->childIndicatorPolicy(), QTreeWidgetItem::ShowIndicator);
@@ -510,6 +575,172 @@ for line in sys.stdin:
         QTest::mouseDClick(tree->viewport(), Qt::LeftButton, {}, tree->visualItemRect(chat).center());
         QTRY_VERIFY(output->toPlainText().contains("[Resumed Codex conversation: new-102]"));
     }
+}
+
+void MainWindowTest::claudeSessionMetadataRefreshesExistingIndex()
+{
+    const QString python = QStandardPaths::findExecutable("python3");
+    if (python.isEmpty()) QSKIP("Python 3 is unavailable");
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString scriptPath = directory.filePath("fake-claude.py");
+    QFile script(scriptPath);
+    QVERIFY(script.open(QIODevice::WriteOnly | QIODevice::Text));
+    script.write(R"PY(import json
+import sys
+
+if "--list-sessions" in sys.argv:
+    print(json.dumps({"type": "sessions", "sessions": [{
+        "id": "claude-1", "cwd": sys.argv[sys.argv.index("--cwd") + 1],
+        "title": "Updated title", "createdAt": 100, "lastModified": 200,
+        "fileSize": 1234, "customTitle": "Updated title", "summary": "A summary",
+        "firstPrompt": "First question", "gitBranch": "main", "tag": "work"
+    }]}), flush=True)
+)PY");
+    script.close();
+    QFile index(directory.filePath("claude-conversations.json"));
+    QVERIFY(index.open(QIODevice::WriteOnly));
+    const QJsonArray original{QJsonObject{{"provider", "Claude"}, {"id", "claude-1"},
+                                      {"cwd", directory.path()}, {"title", "Old title"},
+                                      {"createdAt", 100}}};
+    QVERIFY(index.write(QJsonDocument(QJsonObject{{"version", 1}, {"threads", original}}).toJson()) > 0);
+    index.close();
+
+    MainWindow window("/bin/true", directory.path(), python, scriptPath, "gemini", nullptr,
+                      directory.filePath("codex-conversations.json"));
+    window.show();
+    auto *tree = window.findChild<QTreeWidget *>("conversationTree");
+    auto *output = window.findChild<QPlainTextEdit *>("output");
+    QVERIFY(tree);
+    QVERIFY(output);
+    tree->topLevelItem(1)->setExpanded(true);
+    QTRY_VERIFY(output->toPlainText().contains("[Claude sessions discovered: 1]"));
+    auto *chat = tree->topLevelItem(1)->child(0)->child(0);
+    QCOMPARE(chat->text(0), QString("Updated title"));
+    QVERIFY(chat->toolTip(0).contains("Modified:"));
+    QVERIFY(chat->toolTip(0).contains("Git branch: main"));
+    QVERIFY(chat->toolTip(0).contains("First prompt: First question"));
+    QVERIFY(index.open(QIODevice::ReadOnly));
+    const QJsonArray saved = QJsonDocument::fromJson(index.readAll()).object().value("threads").toArray();
+    QCOMPARE(saved.size(), 1);
+    QCOMPARE(saved.first().toObject().value("fileSize").toInteger(), 1234);
+}
+
+void MainWindowTest::missingGeminiCliReportsOneDiscoveryError()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    QJsonArray threads;
+    for (int i = 0; i < 25; ++i) {
+        const QString path = directory.filePath(QString("project-%1").arg(i));
+        QVERIFY(QDir().mkpath(path));
+        threads.append(QJsonObject{{"id", QString("codex-%1").arg(i)}, {"cwd", path},
+                                   {"createdAt", i}});
+    }
+    QFile index(directory.filePath("codex-conversations.json"));
+    QVERIFY(index.open(QIODevice::WriteOnly));
+    QVERIFY(index.write(QJsonDocument(QJsonObject{{"version", 1}, {"threads", threads}}).toJson()) > 0);
+    index.close();
+
+    const auto verifyOneError = [&](const QString &program, const QString &prefix) {
+        MainWindow window("/bin/true", directory.path(), {}, {}, program, nullptr, index.fileName());
+        window.show();
+        auto *tree = window.findChild<QTreeWidget *>("conversationTree");
+        auto *output = window.findChild<QPlainTextEdit *>("output");
+        QVERIFY(tree);
+        QVERIFY(output);
+        tree->topLevelItem(2)->setExpanded(true);
+        QTRY_COMPARE(output->toPlainText().count(prefix), 1);
+        if (prefix == "[Gemini CLI is not installed") {
+            tree->topLevelItem(2)->setExpanded(false);
+            tree->topLevelItem(2)->setExpanded(true);
+            QCOMPARE(output->toPlainText().count(prefix), 1);
+        }
+    };
+    verifyOneError(directory.filePath("missing-gemini"), "[Gemini CLI is not installed");
+
+    QFile scanner(directory.filePath("fake-gemini"));
+    QVERIFY(scanner.open(QIODevice::WriteOnly));
+    scanner.write(R"PY(#!/usr/bin/env python3
+import os
+from pathlib import Path
+
+with Path(__file__).with_name("gemini-scans.log").open("a") as log:
+    log.write(os.getcwd() + "\n")
+)PY");
+    scanner.close();
+    QVERIFY(scanner.setPermissions(QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner));
+    {
+        MainWindow window("/bin/true", directory.path(), {}, {}, scanner.fileName(), nullptr, index.fileName());
+        window.show();
+        auto *tree = window.findChild<QTreeWidget *>("conversationTree");
+        auto *output = window.findChild<QPlainTextEdit *>("output");
+        QVERIFY(tree && output);
+        tree->topLevelItem(2)->setExpanded(true);
+        const QString logPath = directory.filePath("gemini-scans.log");
+        QTRY_VERIFY(output->toPlainText().contains("[Gemini sessions discovered:"));
+        QVERIFY(!QFileInfo::exists(logPath));
+    }
+}
+
+void MainWindowTest::geminiListsSessionsFromAllProjects()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString geminiData = directory.filePath("gemini-data");
+    const QString projectA = directory.filePath("project-a");
+    const QString projectB = directory.filePath("project-b");
+    QVERIFY(QDir().mkpath(projectA));
+    QVERIFY(QDir().mkpath(projectB));
+    QVERIFY(QDir().mkpath(geminiData + "/tmp/a/chats"));
+    QVERIFY(QDir().mkpath(geminiData + "/tmp/b/chats"));
+    QFile projects(geminiData + "/projects.json");
+    QVERIFY(projects.open(QIODevice::WriteOnly));
+    projects.write(QJsonDocument(QJsonObject{{"projects", QJsonObject{{projectA, "a"}, {projectB, "b"}}}}).toJson());
+    projects.close();
+    const auto writeSession = [&](const QString &slug, const QString &id, const QString &prompt) {
+        QFile file(geminiData + "/tmp/" + slug + "/chats/session-2026-09-29T10-00-" + id + ".jsonl");
+        if (!file.open(QIODevice::WriteOnly)) return false;
+        file.write(QJsonDocument(QJsonObject{{"sessionId", id}, {"kind", "main"},
+                                         {"startTime", "2026-09-29T10:00:00Z"}}).toJson(QJsonDocument::Compact) + "\n");
+        file.write(QJsonDocument(QJsonObject{{"type", "user"}, {"content", prompt}}).toJson(QJsonDocument::Compact) + "\n");
+        return true;
+    };
+    QVERIFY(writeSession("a", "session-a", "First project prompt"));
+    QVERIFY(writeSession("b", "session-b", "Second project prompt"));
+
+    MainWindow window("/bin/true", projectA, {}, {}, directory.filePath("missing-gemini"), nullptr,
+                      directory.filePath("codex-conversations.json"), "agy", geminiData);
+    auto *tree = window.findChild<QTreeWidget *>("conversationTree");
+    auto *output = window.findChild<QPlainTextEdit *>("output");
+    QVERIFY(tree && output);
+    tree->topLevelItem(2)->setExpanded(true);
+    QTRY_VERIFY(output->toPlainText().contains("[Gemini sessions discovered: 2]"));
+    QTreeWidgetItem *root = tree->topLevelItem(2);
+    QCOMPARE(root->childCount(), 2);
+    QSet<QString> found;
+    for (int i = 0; i < root->childCount(); ++i) {
+        QTreeWidgetItem *folder = root->child(i);
+        QCOMPARE(folder->childCount(), 1);
+        found.insert(folder->child(0)->data(0, Qt::UserRole + 1).toString());
+    }
+    QCOMPARE(found, QSet<QString>({"session-a", "session-b"}));
+
+    const QString indexPath = directory.filePath("gemini-conversations.json");
+    QFile index(indexPath);
+    QVERIFY(index.open(QIODevice::ReadOnly));
+    const QJsonArray saved = QJsonDocument::fromJson(index.readAll()).object().value("threads").toArray();
+    QCOMPARE(saved.size(), 2);
+    QSet<QString> savedIds;
+    for (const QJsonValue &value : saved) savedIds.insert(value.toObject().value("id").toString());
+    QCOMPARE(savedIds, found);
+
+    MainWindow reopened("/bin/true", projectA, {}, {}, directory.filePath("missing-gemini"), nullptr,
+                        directory.filePath("codex-conversations.json"), "agy", directory.filePath("empty-data"));
+    auto *reopenedTree = reopened.findChild<QTreeWidget *>("conversationTree");
+    QVERIFY(reopenedTree);
+    reopenedTree->topLevelItem(2)->setExpanded(true);
+    QCOMPARE(reopenedTree->topLevelItem(2)->childCount(), 2);
 }
 
 QTEST_MAIN(MainWindowTest)

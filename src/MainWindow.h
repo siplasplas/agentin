@@ -15,6 +15,7 @@ class QProcess;
 class QPushButton;
 class ClaudeBridge;
 class GeminiBridge;
+class AntigravityBridge;
 class QTreeWidget;
 
 class MainWindow : public QMainWindow
@@ -25,7 +26,8 @@ public:
     MainWindow(const QString &codexProgram, const QString &workingDirectory,
                const QString &claudePython = {}, const QString &claudeScript = {},
                const QString &geminiProgram = "gemini", QWidget *parent = nullptr,
-               const QString &codexIndexPath = {});
+               const QString &codexIndexPath = {}, const QString &antigravityProgram = "agy",
+               const QString &geminiDataDirectory = {});
     ~MainWindow() override;
 
 private:
@@ -36,6 +38,7 @@ private:
     void sendNextClaudePrompt();
     void sendNextGlmPrompt();
     void sendNextGeminiPrompt();
+    void sendNextAntigravityPrompt();
     Q_INVOKABLE void syncCodexConversations();
     void requestCodexConversationPage();
     void handleCodexConversationPage(const QJsonObject &result);
@@ -50,7 +53,6 @@ private:
     void resumeProviderConversation(const QString &provider, const QString &id, const QString &path);
     void fetchClaudeSessions();
     void fetchGeminiSessions();
-    QStringList knownDirectories() const;
     void refreshConversationTree();
     Q_INVOKABLE void newCodexConversation(const QString &path);
     Q_INVOKABLE void resumeCodexConversation(const QString &id, const QString &path);
@@ -77,9 +79,11 @@ private:
     QString claudePython_;
     QString claudeScript_;
     QString localIndexPath_;
+    QString geminiDataDirectory_;
     QString claudeWorkingDirectory_;
     QString glmWorkingDirectory_;
     QString geminiWorkingDirectory_;
+    QString antigravityWorkingDirectory_;
     QString claudeSessionId_;
     QString glmSessionId_;
     QString pendingClaudeResumeId_;
@@ -87,10 +91,12 @@ private:
     QString claudeFirstPrompt_;
     QString glmFirstPrompt_;
     QString geminiFirstPrompt_;
+    QString antigravityFirstPrompt_;
     QProcess *server_;
     ClaudeBridge *claude_;
     ClaudeBridge *glm_;
     GeminiBridge *gemini_;
+    AntigravityBridge *antigravity_;
     QComboBox *provider_;
     QPlainTextEdit *output_;
     QLineEdit *input_;
@@ -111,6 +117,7 @@ private:
     QStringList claudeQueuedPrompts_;
     QStringList glmQueuedPrompts_;
     QStringList geminiQueuedPrompts_;
+    QStringList antigravityQueuedPrompts_;
     QStringList claudeDirectories_;
     QStringList glmDirectories_;
     QStringList codexDirectories_;
@@ -120,7 +127,6 @@ private:
     QString syncCursor_;
     QHash<QString, QJsonObject> cachedCodexConversations_;
     QHash<QString, QJsonObject> localConversations_;
-    QHash<QString, QJsonObject> externalGeminiConversations_;
     QList<QProcess *> historyProcesses_;
     QHash<QString, QJsonObject> stagedCodexConversations_;
     QSet<QString> newCodexConversationIds_;
@@ -132,6 +138,7 @@ private:
     bool codexThreadOpening_ = false;
     bool syncingCodexConversations_ = false;
     bool syncingArchivedCodexConversations_ = false;
+    bool geminiExecutableChecked_ = false;
     bool busy_ = false;
     bool stopRequested_ = false;
     bool stopSent_ = false;
@@ -146,4 +153,7 @@ private:
     bool geminiBusy_ = false;
     bool geminiStopRequested_ = false;
     bool geminiTextStarted_ = false;
+    bool antigravityBusy_ = false;
+    bool antigravityStopRequested_ = false;
+    bool antigravityTextStarted_ = false;
 };

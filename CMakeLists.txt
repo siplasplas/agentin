@@ -16,6 +16,8 @@ add_executable(agentdeskt
     src/ClaudeBridge.h
     src/GeminiBridge.cpp
     src/GeminiBridge.h
+    src/AntigravityBridge.cpp
+    src/AntigravityBridge.h
     src/MainWindow.cpp
     src/MainWindow.h
 )
@@ -35,6 +37,8 @@ if(BUILD_TESTING)
         src/ClaudeBridge.h
         src/GeminiBridge.cpp
         src/GeminiBridge.h
+        src/AntigravityBridge.cpp
+        src/AntigravityBridge.h
         src/MainWindow.cpp
         src/MainWindow.h
     )

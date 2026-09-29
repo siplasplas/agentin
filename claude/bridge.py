@@ -285,6 +285,12 @@ async def main(cwd, provider="claude"):
 def list_local_sessions(directories):
     from claude_agent_sdk import list_sessions
 
+    def preview(value):
+        if not value:
+            return None
+        text = " ".join(value.split())
+        return text[:199] + "…" if len(text) > 200 else text
+
     sessions = []
     if not directories:
         directories = [None]
@@ -295,11 +301,19 @@ def list_local_sessions(directories):
             cwd = session.cwd or directory
             if not cwd:
                 continue
+            created_at = session.created_at or session.last_modified
             sessions.append({
                 "id": session.session_id,
                 "cwd": cwd,
-                "title": session.custom_title or session.summary or session.first_prompt or session.session_id,
-                "createdAt": int((session.created_at or session.last_modified) / 1000),
+                "title": preview(session.custom_title or session.summary or session.first_prompt) or session.session_id,
+                "createdAt": int(created_at / 1000),
+                "lastModified": int(session.last_modified / 1000),
+                "fileSize": session.file_size,
+                "customTitle": preview(session.custom_title),
+                "summary": preview(session.summary),
+                "firstPrompt": preview(session.first_prompt),
+                "gitBranch": session.git_branch,
+                "tag": session.tag,
             })
     return sessions
 

@@ -1,17 +1,18 @@
 # agentdeskt
 
-A Qt 6 desktop client for Codex, Claude, GLM, and Gemini. Select an
+A Qt 6 desktop client for Codex, Claude, GLM, Gemini, and Antigravity. Select an
 agent in the window, enter a message, and read streamed responses in one output
 pane. Codex uses the local `codex` executable and its existing sign-in and
 configuration. Claude and GLM run through a Python JSONL bridge to the Claude
-Agent SDK. Gemini runs through Gemini CLI in headless mode.
+Agent SDK. Gemini and Antigravity run through their respective CLIs in headless mode.
 
 ## Build and run
 
 Requires Qt 6 Widgets, CMake, a C++17 compiler, and an installed `codex` CLI
 for Codex. Claude requires Python 3, `claude-agent-sdk`, and a configured API
 key. GLM uses the same Python SDK with a Z.AI API key. Gemini requires an
-installed and authenticated Gemini CLI. The optional test also requires Qt 6
+installed and authenticated Gemini CLI. Antigravity requires an installed and
+authenticated `agy` CLI. The optional test also requires Qt 6
 Test and Python 3.
 
 ```sh
@@ -42,6 +43,16 @@ For Gemini, install and authenticate [Gemini CLI](https://geminicli.com/docs/get
 The application starts `gemini --output-format stream-json --prompt ...` for
 each turn and uses the session ID returned by Gemini CLI to resume the next
 turn. Use `--gemini /path/to/gemini` if it is not in `PATH`.
+Google no longer accepts personal Google account sign-in in Gemini CLI. Use a
+[Gemini API key](https://geminicli.com/docs/get-started/authentication/#use-gemini-api-key)
+or an eligible enterprise Gemini Code Assist account. Google's replacement for
+personal account terminal use is Antigravity CLI, available as a separate provider
+in this application.
+
+For Antigravity, install and sign in to [Antigravity CLI](https://antigravity.google/docs/cli/install/)
+interactively first. The application starts `agy --output-format stream-json
+--prompt ...` for each turn and uses `--conversation ID` for later turns. Pass
+`--antigravity /path/to/agy` if the executable is not in `PATH`.
 
 The client automatically uses `.venv/bin/python` when the build directory is
 directly inside this project. Otherwise pass `--claude-python /path/to/python`. Use
@@ -58,7 +69,7 @@ and `CODEX_BIN`. You can select an executable explicitly with
 The left pane groups chats by agent and working directory. Expanding Codex
 loads its conversations through App Server, including chats from Codex CLI,
 Codex desktop, and this application when they use the same local Codex data.
-Each of the four agent nodes has an expand control. Expanding Codex refreshes
+Each provider node has an expand control. Expanding Codex refreshes
 the list. The app saves a local JSON index in its application data directory;
 the first sync scans the full history and can take longer. Later syncs read
 new active chats from newest to oldest until they reach the saved boundary.
@@ -68,16 +79,28 @@ Chat previews are shortened in the tree; hover over one to read the longer store
 Codex previews in the local JSON index are limited to 200 characters.
 
 Expanding Claude lists SDK sessions across all Claude projects. Expanding
-Gemini asks Gemini CLI for sessions in known working directories. GLM shows chats
-recorded by this application; the Claude SDK's shared transcript location does
+Gemini reads the CLI's local `~/.gemini/projects.json` and session files under
+`~/.gemini/tmp/<project>/chats/` to list conversations across all Gemini
+projects. Discovery does not depend on the application's current directory or
+on Gemini CLI authentication. The working directory stored with a session is
+used when that session is resumed. Discovered sessions are saved in the local
+`gemini-conversations.json` index and reloaded on the next launch.
+GLM and Antigravity show chats recorded by this application. The Antigravity
+CLI documents resuming by ID but does not expose a machine-readable command to
+list all existing conversations. The Claude SDK's shared transcript location does
 not identify which endpoint produced an older external session. Claude, Gemini,
-and GLM chats started here are saved in separate `claude-conversations.json`,
-`gemini-conversations.json`, and `glm-conversations.json` files in the local
+GLM, and Antigravity chats started here are saved in separate `claude-conversations.json`,
+`gemini-conversations.json`, `glm-conversations.json`, and `antigravity-conversations.json` files in the local
 application data directory. The old `agent-conversations.json` file is ignored.
+Claude's local SDK list is separate from the chat history in a Claude web
+account. Available Claude metadata includes creation and modification times,
+transcript size, Git branch, tag, summary, and first prompt; hover over a chat
+to see its details.
 Deleting the Codex index makes the next Codex expansion scan its full history.
-Claude can rediscover SDK sessions. Gemini can rediscover sessions in known
-working directories. GLM entries created here need the local GLM index to
-remain available.
+Claude can rediscover SDK sessions. Gemini can rediscover locally saved CLI
+sessions across its projects. GLM entries created here need the local GLM index to
+remain available. Antigravity entries created here likewise need the local
+Antigravity index to remain available.
 
 Use **Conversations → New conversation in directory…** or type `new` to start
 a chat. Enter a directory path or choose one with **Browse…**. The **Create
@@ -104,6 +127,12 @@ directories. If [folder trust](https://geminicli.com/docs/cli/trusted-folders/)
 is enabled, trust the working folder in Gemini CLI before starting a headless
 conversation. Headless tool approvals follow Gemini CLI's configured policy;
 they are not shown as Qt approval dialogs.
+
+With Antigravity selected, `help` shows `agy --help`. The selected working
+directory is passed as the CLI process directory. The CLI does not document an
+extra directory flag, so the Add directory button is disabled for Antigravity.
+Headless mode uses the CLI's cached authentication and its configured permission
+policy; approval prompts are not shown as Qt dialogs.
 
 For Codex, Add writable directory adds a root to `sandboxPolicy.workspaceWrite.writableRoots`
 on future turns. The working directory remains included. Added directories
