@@ -63,6 +63,15 @@ spec.loader.exec_module(bridge_module)
 
 
 class ClaudeBridgeTest(unittest.IsolatedAsyncioTestCase):
+    async def test_lists_all_claude_sessions_without_local_index(self):
+        session = Message(session_id="session-1", cwd="/tmp/project", custom_title=None,
+                          summary="Project chat", first_prompt="Hello", created_at=1000)
+        with patch.object(sdk, "list_sessions", return_value=[session], create=True) as listing:
+            self.assertEqual(bridge_module.list_local_sessions([]), [{
+                "id": "session-1", "cwd": "/tmp/project", "title": "Project chat", "createdAt": 1,
+            }])
+            listing.assert_called_once_with(directory=None)
+
     async def test_glm_uses_zai_credentials_and_keeps_directory(self):
         events = []
         with patch.dict(bridge_module.os.environ, {"ZAI_API_KEY": "test-zai-key", "GLM_MODEL": "glm-test"}), \

@@ -33,6 +33,15 @@
 
 #include <algorithm>
 
+namespace {
+QString shortPreview(const QString &value)
+{
+    const QString singleLine = value.simplified();
+    constexpr int limit = 72;
+    return singleLine.size() > limit ? singleLine.left(limit - 1) + QChar(0x2026) : singleLine;
+}
+}
+
 MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirectory,
                        const QString &claudePython, const QString &claudeScript,
                        const QString &geminiProgram, QWidget *parent, const QString &codexIndexPath)
@@ -50,17 +59,12 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     claudeWorkingDirectory_ = workingDirectory_;
     glmWorkingDirectory_ = workingDirectory_;
     geminiWorkingDirectory_ = workingDirectory_;
-    localIndexPath_ = QDir(QFileInfo(codexIndexPath_).absolutePath()).filePath("agent-conversations.json");
+    localIndexPath_ = QDir(QFileInfo(codexIndexPath_).absolutePath()).filePath("claude-conversations.json");
     setWindowTitle("agentdeskt — Codex, Claude, GLM and Gemini");
     resize(850, 600);
     auto *conversationMenu = menuBar()->addMenu("Conversations");
     auto *newConversationAction = conversationMenu->addAction("New conversation in directory…");
     connect(newConversationAction, &QAction::triggered, this, &MainWindow::showNewConversationDialog);
-    auto *codexMenu = menuBar()->addMenu("Codex");
-    syncCodexAction_ = codexMenu->addAction("Sync conversations");
-    syncCodexAction_->setObjectName("syncCodexConversations");
-    connect(syncCodexAction_, &QAction::triggered, this, &MainWindow::syncCodexConversations);
-    syncCodexAction_->setEnabled(false);
 
     auto *central = new QWidget(this);
     auto *layout = new QVBoxLayout(central);
@@ -137,8 +141,9 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
         if (item->data(0, Qt::UserRole).toString() != "provider") return;
         const QString provider = item->text(0);
         expandedProviders_.insert(provider);
+        if (provider == "GLM") loadLocalConversations();
         refreshConversationTree();
-        if (provider == "Codex") syncCodexConversations();
+        if (provider == "Codex" && initialized_) syncCodexConversations();
         else if (provider == "Claude") fetchClaudeSessions();
         else if (provider == "Gemini") fetchGeminiSessions();
     });
@@ -723,15 +728,9 @@ void MainWindow::refreshConversationTree()
         auto *root = new QTreeWidgetItem(conversationTree_, {provider});
         roots.insert(provider, root);
         root->setData(0, Qt::UserRole, "provider");
+        root->setChildIndicatorPolicy(QTreeWidgetItem::ShowIndicator);
         if (!expandedProviders_.contains(provider)) continue;
         root->setExpanded(true);
-        const QString path = provider == "Codex" ? codexWorkingDirectory_
-            : (provider == "Claude" ? claudeWorkingDirectory_
-               : (provider == "GLM" ? glmWorkingDirectory_ : geminiWorkingDirectory_));
-        auto *directory = new QTreeWidgetItem(root, {QDir::toNativeSeparators(path)});
-        directory->setToolTip(0, path);
-        directory->setExpanded(true);
-        directories.insert(provider + '\n' + path, directory);
     }
     if (expandedProviders_.contains("Codex")) {
     QList<QJsonObject> threads = cachedCodexConversations_.values();
@@ -753,12 +752,14 @@ void MainWindow::refreshConversationTree()
         QString title = thread.value("name").toString();
         if (title.isEmpty()) title = thread.value("preview").toString();
         if (title.isEmpty()) title = id;
+        const QString fullTitle = title;
+        title = shortPreview(title);
         if (thread.value("archived").toBool()) title += " (archived)";
         auto *chat = new QTreeWidgetItem(directory, {title});
         chat->setData(0, Qt::UserRole, "codex-chat");
         chat->setData(0, Qt::UserRole + 1, id);
         chat->setData(0, Qt::UserRole + 2, path);
-        chat->setToolTip(0, id);
+        chat->setToolTip(0, fullTitle + "\n\n" + id);
     }
     if (!threadId_.isEmpty() && !cachedCodexConversations_.contains(threadId_)) {
         const QString key = "Codex\n" + codexWorkingDirectory_;
@@ -793,11 +794,11 @@ void MainWindow::refreshConversationTree()
             directories.insert(key, directory);
         }
         const QString title = thread.value("title").toString(id);
-        auto *chat = new QTreeWidgetItem(directory, {title});
+        auto *chat = new QTreeWidgetItem(directory, {shortPreview(title)});
         chat->setData(0, Qt::UserRole, provider);
         chat->setData(0, Qt::UserRole + 1, id);
         chat->setData(0, Qt::UserRole + 2, path);
-        chat->setToolTip(0, id);
+        chat->setToolTip(0, title + "\n\n" + id);
     }
     for (const QJsonObject &thread : externalGeminiConversations_) {
         if (!expandedProviders_.contains("Gemini")) break;
@@ -811,11 +812,12 @@ void MainWindow::refreshConversationTree()
             directory->setExpanded(true);
             directories.insert(key, directory);
         }
-        auto *chat = new QTreeWidgetItem(directory, {thread.value("title").toString(id)});
+        const QString title = thread.value("title").toString(id);
+        auto *chat = new QTreeWidgetItem(directory, {shortPreview(title)});
         chat->setData(0, Qt::UserRole, "Gemini");
         chat->setData(0, Qt::UserRole + 1, id);
         chat->setData(0, Qt::UserRole + 2, path);
-        chat->setToolTip(0, id);
+        chat->setToolTip(0, title + "\n\n" + id);
     }
 }
 
@@ -853,8 +855,6 @@ void MainWindow::fetchClaudeSessions()
     auto *process = new QProcess(this);
     historyProcesses_.append(process);
     process->setWorkingDirectory(workingDirectory_);
-    const QByteArray directories = QJsonDocument(QJsonArray::fromStringList(knownDirectories()))
-                                       .toJson(QJsonDocument::Compact);
     connect(process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this,
             [this, process](int exitCode, QProcess::ExitStatus status) {
         historyProcesses_.removeAll(process);
@@ -893,7 +893,7 @@ void MainWindow::fetchClaudeSessions()
         process->deleteLater();
     });
     process->start(claudePython_, {"-u", claudeScript_, "--cwd", workingDirectory_,
-                                   "--list-sessions", "--directories", QString::fromUtf8(directories)});
+                                   "--list-sessions", "--directories", "[]"});
 }
 
 void MainWindow::fetchGeminiSessions()
@@ -994,41 +994,54 @@ bool MainWindow::saveCodexConversationIndex()
 
 bool MainWindow::loadLocalConversations()
 {
-    QFile file(localIndexPath_);
-    if (!file.exists()) return false;
-    if (!file.open(QIODevice::ReadOnly)) {
-        appendLine("[Could not read agent conversation index: " + file.errorString() + "]");
-        return false;
-    }
-    const QJsonDocument document = QJsonDocument::fromJson(file.readAll());
-    if (!document.isObject() || document.object().value("version").toInt() != 1
-        || !document.object().value("threads").isArray()) {
-        appendLine("[Invalid agent conversation index]");
-        return false;
-    }
-    for (const QJsonValue &value : document.object().value("threads").toArray()) {
-        const QJsonObject thread = value.toObject();
-        const QString provider = thread.value("provider").toString();
-        const QString id = thread.value("id").toString();
-        if ((provider == "Claude" || provider == "Gemini" || provider == "GLM") && !id.isEmpty()) {
-            localConversations_.insert(provider + '\n' + id, thread);
+    const QDir directory(QFileInfo(localIndexPath_).absolutePath());
+    const QStringList files{"claude-conversations.json", "glm-conversations.json", "gemini-conversations.json"};
+    bool loaded = false;
+    for (const QString &name : files) {
+        const QString path = directory.filePath(name);
+        QFile file(path);
+        if (!file.exists()) continue;
+        if (!file.open(QIODevice::ReadOnly)) {
+            appendLine("[Could not read conversation index: " + file.errorString() + "]");
+            continue;
         }
+        const QJsonDocument document = QJsonDocument::fromJson(file.readAll());
+        if (!document.isObject() || document.object().value("version").toInt() != 1
+            || !document.object().value("threads").isArray()) {
+            appendLine("[Invalid conversation index: " + path + "]");
+            continue;
+        }
+        for (const QJsonValue &value : document.object().value("threads").toArray()) {
+            const QJsonObject thread = value.toObject();
+            const QString provider = thread.value("provider").toString();
+            const QString id = thread.value("id").toString();
+            if ((provider == "Claude" || provider == "Gemini" || provider == "GLM") && !id.isEmpty()) {
+                localConversations_.insert(provider + '\n' + id, thread);
+            }
+        }
+        loaded = true;
     }
-    return true;
+    return loaded;
 }
 
 bool MainWindow::saveLocalConversations()
 {
     if (!QDir().mkpath(QFileInfo(localIndexPath_).absolutePath())) return false;
-    QJsonArray threads;
-    for (const QJsonObject &thread : localConversations_) threads.append(thread);
-    QSaveFile file(localIndexPath_);
-    if (!file.open(QIODevice::WriteOnly)
-        || file.write(QJsonDocument(QJsonObject{{"version", 1}, {"threads", threads}})
-                          .toJson(QJsonDocument::Indented)) < 0
-        || !file.commit()) {
-        appendLine("[Could not save agent conversation index: " + file.errorString() + "]");
-        return false;
+    const QDir directory(QFileInfo(localIndexPath_).absolutePath());
+    const QStringList providers{"Claude", "GLM", "Gemini"};
+    for (const QString &provider : providers) {
+        QJsonArray threads;
+        for (const QJsonObject &thread : localConversations_) {
+            if (thread.value("provider").toString() == provider) threads.append(thread);
+        }
+        QSaveFile file(directory.filePath(provider.toLower() + "-conversations.json"));
+        if (!file.open(QIODevice::WriteOnly)
+            || file.write(QJsonDocument(QJsonObject{{"version", 1}, {"threads", threads}})
+                              .toJson(QJsonDocument::Indented)) < 0
+            || !file.commit()) {
+            appendLine("[Could not save " + provider + " conversation index: " + file.errorString() + "]");
+            return false;
+        }
     }
     return true;
 }
@@ -1614,5 +1627,4 @@ void MainWindow::updateStatus()
                              : "Give the selected agent access to another directory and its subfolders for this session.");
     addDirButton_->setEnabled(index == 0 ? !busy_ : (index == 1 ? (claudeReady_ && !claudeBusy_) : (index == 2 ? (glmReady_ && !glmBusy_) : !geminiBusy_)));
     provider_->setEnabled(!busy_ && !claudeBusy_ && !glmBusy_ && !geminiBusy_);
-    syncCodexAction_->setEnabled(initialized_ && !syncingCodexConversations_);
 }

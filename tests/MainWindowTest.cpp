@@ -427,18 +427,21 @@ for line in sys.stdin:
     script.close();
     QVERIFY(script.setPermissions(QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner));
 
+    const QString projectPath = directory.filePath("project");
+    QVERIFY(QDir().mkpath(projectPath));
     auto writeState = [&](bool includeNew) {
         QJsonArray active;
         if (includeNew) {
-            active.append(QJsonObject{{"id", "new-102"}, {"createdAt", 102}, {"cwd", directory.path()}, {"preview", "Newest"}});
-            active.append(QJsonObject{{"id", "new-101"}, {"createdAt", 101}, {"cwd", directory.path()}, {"preview", "New"}});
+            active.append(QJsonObject{{"id", "new-102"}, {"createdAt", 102}, {"cwd", projectPath},
+                                      {"preview", QString(100, 'N')}});
+            active.append(QJsonObject{{"id", "new-101"}, {"createdAt", 101}, {"cwd", projectPath}, {"preview", "New"}});
         }
         for (int date = 100; date >= 96; --date) {
             active.append(QJsonObject{{"id", QString("old-%1").arg(date)}, {"createdAt", date},
-                                       {"cwd", directory.path()}, {"preview", "Old conversation"}});
+                                       {"cwd", projectPath}, {"preview", "Old conversation"}});
         }
         QJsonArray archived{QJsonObject{{"id", "archived-1"}, {"createdAt", 50},
-                                        {"cwd", directory.path()}, {"preview", "Archived conversation"}}};
+                                        {"cwd", projectPath}, {"preview", "Archived conversation"}}};
         QFile state(directory.filePath("threads.json"));
         if (!state.open(QIODevice::WriteOnly)) return false;
         return state.write(QJsonDocument(QJsonObject{{"active", active}, {"archived", archived}}).toJson()) > 0;
@@ -452,11 +455,20 @@ for line in sys.stdin:
         auto *output = window.findChild<QPlainTextEdit *>("output");
         QVERIFY(tree);
         QVERIFY(output);
-        QTRY_VERIFY(window.findChild<QAction *>("syncCodexConversations")->isEnabled());
         QCOMPARE(tree->topLevelItemCount(), 4);
         QCOMPARE(tree->topLevelItem(0)->text(0), QString("Codex"));
+        for (int i = 0; i < tree->topLevelItemCount(); ++i) {
+            QCOMPARE(tree->topLevelItem(i)->childIndicatorPolicy(), QTreeWidgetItem::ShowIndicator);
+        }
+        QCOMPARE(tree->topLevelItem(0)->childCount(), 0);
+        tree->topLevelItem(1)->setExpanded(true);
+        QCOMPARE(tree->topLevelItem(1)->childCount(), 0);
+        tree->topLevelItem(3)->setExpanded(true);
+        QCOMPARE(tree->topLevelItem(3)->childCount(), 0);
         tree->topLevelItem(0)->setExpanded(true);
         QTRY_VERIFY(output->toPlainText().contains("[Codex conversations: 6 total, 6 new; fetched 4 pages]"));
+        QCOMPARE(tree->topLevelItem(0)->childCount(), 1);
+        QCOMPARE(tree->topLevelItem(0)->child(0)->text(0), projectPath);
         QVERIFY(QFileInfo::exists(indexPath));
     }
     QVERIFY(writeState(true));
@@ -471,7 +483,6 @@ for line in sys.stdin:
         QVERIFY(tree);
         QVERIFY(output);
         QVERIFY(output->toPlainText().contains("[Cached Codex conversations: 6]"));
-        QTRY_VERIFY(window.findChild<QAction *>("syncCodexConversations")->isEnabled());
         tree->topLevelItem(0)->setExpanded(true);
         QTRY_VERIFY(output->toPlainText().contains("[Codex conversations: 8 total, 2 new; fetched 3 pages]"));
         QVERIFY(log.open(QIODevice::ReadOnly));
@@ -481,6 +492,8 @@ for line in sys.stdin:
         QVERIFY(folder);
         QVERIFY(folder->childCount() >= 1);
         auto *chat = folder->child(0);
+        QVERIFY(chat->text(0).size() <= 72);
+        QVERIFY(chat->toolTip(0).contains(QString(100, 'N')));
         QTest::mouseClick(tree->viewport(), Qt::LeftButton, {}, tree->visualItemRect(chat).center());
         QTest::mouseDClick(tree->viewport(), Qt::LeftButton, {}, tree->visualItemRect(chat).center());
         QTRY_VERIFY(output->toPlainText().contains("[Resumed Codex conversation: new-102]"));

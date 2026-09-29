@@ -286,15 +286,20 @@ def list_local_sessions(directories):
     from claude_agent_sdk import list_sessions
 
     sessions = []
+    if not directories:
+        directories = [None]
     for directory in directories:
-        if not os.path.isdir(directory):
+        if directory is not None and not os.path.isdir(directory):
             continue
         for session in list_sessions(directory=directory):
+            cwd = session.cwd or directory
+            if not cwd:
+                continue
             sessions.append({
                 "id": session.session_id,
-                "cwd": session.cwd or directory,
+                "cwd": cwd,
                 "title": session.custom_title or session.summary or session.first_prompt or session.session_id,
-                "createdAt": int(session.created_at / 1000),
+                "createdAt": int((session.created_at or session.last_modified) / 1000),
             })
     return sessions
 

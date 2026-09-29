@@ -58,16 +58,25 @@ and `CODEX_BIN`. You can select an executable explicitly with
 The left pane groups chats by agent and working directory. Expanding Codex
 loads its conversations through App Server, including chats from Codex CLI,
 Codex desktop, and this application when they use the same local Codex data.
-The **Codex → Sync conversations** menu refreshes that list. The app saves a
-local JSON index in its application data directory and, on later syncs, reads
-new active chats from newest to oldest until it reaches the saved boundary.
+Each of the four agent nodes has an expand control. Expanding Codex refreshes
+the list. The app saves a local JSON index in its application data directory;
+the first sync scans the full history and can take longer. Later syncs read
+new active chats from newest to oldest until they reach the saved boundary.
 Archived chats are scanned separately. Double click a chat to resume it.
+Directories appear under an agent only when they contain a discovered chat.
+Chat previews are shortened in the tree; hover over one to read its full title.
 
-Expanding Claude lists SDK sessions for known working directories. Expanding
-Gemini asks Gemini CLI for sessions in those directories. GLM shows chats
+Expanding Claude lists SDK sessions across all Claude projects. Expanding
+Gemini asks Gemini CLI for sessions in known working directories. GLM shows chats
 recorded by this application; the Claude SDK's shared transcript location does
 not identify which endpoint produced an older external session. Claude, Gemini,
-and GLM chats started here are saved in a second local JSON index.
+and GLM chats started here are saved in separate `claude-conversations.json`,
+`gemini-conversations.json`, and `glm-conversations.json` files in the local
+application data directory. The old `agent-conversations.json` file is ignored.
+Deleting the Codex index makes the next Codex expansion scan its full history.
+Claude can rediscover SDK sessions. Gemini can rediscover sessions in known
+working directories. GLM entries created here need the local GLM index to
+remain available.
 
 Use **Conversations → New conversation in directory…** or type `new` to start
 a chat. Enter a directory path or choose one with **Browse…**. The **Create

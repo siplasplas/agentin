@@ -15,7 +15,6 @@ class QProcess;
 class QPushButton;
 class ClaudeBridge;
 class GeminiBridge;
-class QAction;
 class QTreeWidget;
 
 class MainWindow : public QMainWindow
@@ -103,7 +102,6 @@ private:
     QLabel *glmDirsLabel_;
     QLabel *geminiDirsLabel_;
     QLabel *codexDirsLabel_;
-    QAction *syncCodexAction_;
     QTreeWidget *conversationTree_;
     QByteArray readBuffer_;
     QHash<qint64, QString> pendingRequests_;
