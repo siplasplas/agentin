@@ -14,6 +14,7 @@ class QPlainTextEdit;
 class QProcess;
 class QPushButton;
 class ClaudeBridge;
+class GeminiBridge;
 
 class MainWindow : public QMainWindow
 {
@@ -21,7 +22,8 @@ class MainWindow : public QMainWindow
 
 public:
     MainWindow(const QString &codexProgram, const QString &workingDirectory,
-               const QString &claudePython = {}, const QString &claudeScript = {}, QWidget *parent = nullptr);
+               const QString &claudePython = {}, const QString &claudeScript = {},
+               const QString &geminiProgram = "gemini", QWidget *parent = nullptr);
     ~MainWindow() override;
 
 private:
@@ -30,8 +32,12 @@ private:
     void startThread();
     void sendNextPrompt();
     void sendNextClaudePrompt();
+    void sendNextGlmPrompt();
+    void sendNextGeminiPrompt();
     Q_INVOKABLE void addClaudeDirectory(const QString &path);
+    Q_INVOKABLE void addGlmDirectory(const QString &path);
     Q_INVOKABLE void addCodexDirectory(const QString &path);
+    Q_INVOKABLE void addGeminiDirectory(const QString &path);
     void requestStop();
     void sendStopIfPossible();
     qint64 sendRequest(const QString &method, const QJsonObject &params);
@@ -49,6 +55,8 @@ private:
     QString workingDirectory_;
     QProcess *server_;
     ClaudeBridge *claude_;
+    ClaudeBridge *glm_;
+    GeminiBridge *gemini_;
     QComboBox *provider_;
     QPlainTextEdit *output_;
     QLineEdit *input_;
@@ -57,6 +65,8 @@ private:
     QPushButton *addDirButton_;
     QLabel *status_;
     QLabel *claudeDirsLabel_;
+    QLabel *glmDirsLabel_;
+    QLabel *geminiDirsLabel_;
     QLabel *codexDirsLabel_;
     QByteArray readBuffer_;
     QHash<qint64, QString> pendingRequests_;
@@ -64,7 +74,10 @@ private:
     QSet<QString> streamedCommands_;
     QStringList queuedPrompts_;
     QStringList claudeQueuedPrompts_;
+    QStringList glmQueuedPrompts_;
+    QStringList geminiQueuedPrompts_;
     QStringList claudeDirectories_;
+    QStringList glmDirectories_;
     QStringList codexDirectories_;
     QString threadId_;
     QString activeTurnId_;
@@ -77,4 +90,11 @@ private:
     bool claudeBusy_ = false;
     bool claudeStopRequested_ = false;
     bool claudeTextStarted_ = false;
+    bool glmReady_ = false;
+    bool glmBusy_ = false;
+    bool glmStopRequested_ = false;
+    bool glmTextStarted_ = false;
+    bool geminiBusy_ = false;
+    bool geminiStopRequested_ = false;
+    bool geminiTextStarted_ = false;
 };

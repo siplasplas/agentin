@@ -14,6 +14,8 @@ add_executable(agentdeskt
     src/CodexLocator.h
     src/ClaudeBridge.cpp
     src/ClaudeBridge.h
+    src/GeminiBridge.cpp
+    src/GeminiBridge.h
     src/MainWindow.cpp
     src/MainWindow.h
 )
@@ -31,6 +33,8 @@ if(BUILD_TESTING)
         src/CodexLocator.h
         src/ClaudeBridge.cpp
         src/ClaudeBridge.h
+        src/GeminiBridge.cpp
+        src/GeminiBridge.h
         src/MainWindow.cpp
         src/MainWindow.h
     )

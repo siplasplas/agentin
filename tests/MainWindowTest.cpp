@@ -21,6 +21,8 @@ private slots:
     void desktopExecutableWithoutPath();
     void helpAndConversation();
     void claudeConversationAndStop();
+    void glmConversation();
+    void geminiConversationAndDirectories();
 };
 
 void MainWindowTest::codexExecutableFromEnvironment()
@@ -252,6 +254,115 @@ for line in sys.stdin:
     auto *directoriesLabel = window.findChild<QLabel *>("claudeDirectories");
     QVERIFY(directoriesLabel);
     QVERIFY(directoriesLabel->text().contains(extraDirectory.path()));
+}
+
+void MainWindowTest::glmConversation()
+{
+    const QString python = QStandardPaths::findExecutable("python3");
+    if (python.isEmpty()) QSKIP("Python 3 is unavailable");
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString fakeBridge = directory.filePath("fake-glm.py");
+    QFile script(fakeBridge);
+    QVERIFY(script.open(QIODevice::WriteOnly | QIODevice::Text));
+    script.write(R"PY(import json
+import sys
+
+assert sys.argv[sys.argv.index("--provider") + 1] == "glm"
+print(json.dumps({"type": "ready"}), flush=True)
+for line in sys.stdin:
+    request = json.loads(line)
+    if request["type"] == "prompt":
+        print(json.dumps({"type": "delta", "text": "Hello from GLM"}), flush=True)
+        print(json.dumps({"type": "complete", "status": "completed"}), flush=True)
+    elif request["type"] == "add_directory":
+        print(json.dumps({"type": "ready"}), flush=True)
+        print(json.dumps({"type": "directory_added", "path": request["path"]}), flush=True)
+    elif request["type"] == "shutdown":
+        break
+)PY");
+    script.close();
+    MainWindow window("/nonexistent/codex", directory.path(), python, fakeBridge);
+    window.show();
+    auto *provider = window.findChild<QComboBox *>("providerSelect");
+    auto *input = window.findChild<QLineEdit *>("commandInput");
+    auto *output = window.findChild<QPlainTextEdit *>("output");
+    QVERIFY(provider);
+    QVERIFY(input);
+    QVERIFY(output);
+    provider->setCurrentIndex(2);
+    QTRY_VERIFY(output->toPlainText().contains("[Connected to GLM via Claude Agent SDK]"));
+    QTest::keyClicks(input, "hello");
+    QTest::keyClick(input, Qt::Key_Return);
+    QTRY_VERIFY(output->toPlainText().contains("GLM: Hello from GLM"));
+    QTemporaryDir extraDirectory;
+    QVERIFY(extraDirectory.isValid());
+    QVERIFY(QMetaObject::invokeMethod(&window, "addGlmDirectory", Q_ARG(QString, extraDirectory.path())));
+    QTRY_VERIFY(output->toPlainText().contains("[GLM directory available: " + extraDirectory.path() + "]"));
+}
+
+void MainWindowTest::geminiConversationAndDirectories()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString fakeGemini = directory.filePath("fake-gemini");
+    QFile script(fakeGemini);
+    QVERIFY(script.open(QIODevice::WriteOnly | QIODevice::Text));
+    script.write(R"PY(#!/usr/bin/env python3
+import json
+import sys
+
+args = sys.argv[1:]
+if "--help" in args:
+    print("Usage: gemini [--include-directories DIR] [--resume ID]", flush=True)
+    sys.exit(0)
+if "--resume" in args:
+    assert args[args.index("--resume") + 1] == "gemini-test-session"
+if "--include-directories" in args:
+    directory = args[args.index("--include-directories") + 1]
+    assert directory
+prompt = args[args.index("--prompt") + 1]
+print(json.dumps({"type": "init", "session_id": "gemini-test-session", "model": "fake"}), flush=True)
+if prompt == "long":
+    import time
+    time.sleep(10)
+else:
+    print(json.dumps({"type": "message", "role": "assistant", "content": prompt + " answered", "delta": True}), flush=True)
+    print(json.dumps({"type": "result", "status": "success"}), flush=True)
+)PY");
+    script.close();
+    QVERIFY(script.setPermissions(QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner));
+    MainWindow window("/nonexistent/codex", directory.path(), {}, {}, fakeGemini);
+    window.show();
+    auto *provider = window.findChild<QComboBox *>("providerSelect");
+    auto *input = window.findChild<QLineEdit *>("commandInput");
+    auto *output = window.findChild<QPlainTextEdit *>("output");
+    auto *stopButton = window.findChild<QPushButton *>("stopButton");
+    QVERIFY(provider);
+    QVERIFY(input);
+    QVERIFY(output);
+    QVERIFY(stopButton);
+    provider->setCurrentIndex(3);
+    QTest::keyClicks(input, "help");
+    QTest::keyClick(input, Qt::Key_Return);
+    QTRY_VERIFY(output->toPlainText().contains("Usage: gemini"));
+    QTest::keyClicks(input, "first");
+    QTest::keyClick(input, Qt::Key_Return);
+    QTRY_VERIFY(output->toPlainText().contains("Gemini: first answered"));
+    QTemporaryDir extraDirectory;
+    QVERIFY(extraDirectory.isValid());
+    QVERIFY(QMetaObject::invokeMethod(&window, "addGeminiDirectory", Q_ARG(QString, extraDirectory.path())));
+    QTest::keyClicks(input, "second");
+    QTest::keyClick(input, Qt::Key_Return);
+    QTRY_VERIFY(output->toPlainText().contains("Gemini: second answered"));
+    auto *directoriesLabel = window.findChild<QLabel *>("geminiDirectories");
+    QVERIFY(directoriesLabel);
+    QVERIFY(directoriesLabel->text().contains(extraDirectory.path()));
+    QTest::keyClicks(input, "long");
+    QTest::keyClick(input, Qt::Key_Return);
+    QTRY_VERIFY(stopButton->isEnabled());
+    QTest::mouseClick(stopButton, Qt::LeftButton);
+    QTRY_VERIFY(output->toPlainText().contains("[Gemini response: interrupted]"));
 }
 
 QTEST_MAIN(MainWindowTest)

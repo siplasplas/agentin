@@ -5,9 +5,9 @@
 #include <QProcess>
 
 ClaudeBridge::ClaudeBridge(const QString &pythonProgram, const QString &scriptPath,
-                           const QString &workingDirectory, QObject *parent)
+                           const QString &workingDirectory, const QString &provider, QObject *parent)
     : QObject(parent), pythonProgram_(pythonProgram), scriptPath_(scriptPath),
-      workingDirectory_(workingDirectory), process_(new QProcess(this))
+      workingDirectory_(workingDirectory), provider_(provider), process_(new QProcess(this))
 {
     connect(process_, &QProcess::readyReadStandardOutput, this, [this] {
         buffer_ += process_->readAllStandardOutput();
@@ -23,13 +23,13 @@ ClaudeBridge::ClaudeBridge(const QString &pythonProgram, const QString &scriptPa
         if (!details.isEmpty()) emit error(details);
     });
     connect(process_, &QProcess::errorOccurred, this, [this](QProcess::ProcessError processError) {
-        emit error("Claude bridge process error: " + process_->errorString()
+        emit error(provider_.toUpper() + " bridge process error: " + process_->errorString()
                    + " (Python: " + pythonProgram_ + ")");
         if (processError == QProcess::FailedToStart) emit disconnected();
     });
     connect(process_, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this,
             [this](int code, QProcess::ExitStatus) {
-        emit error(QString("Claude bridge exited with code %1").arg(code));
+        emit error(QString("%1 bridge exited with code %2").arg(provider_.toUpper()).arg(code));
         emit disconnected();
     });
 }
@@ -58,7 +58,7 @@ void ClaudeBridge::start()
 {
     if (process_->state() != QProcess::NotRunning) return;
     process_->setWorkingDirectory(workingDirectory_);
-    process_->start(pythonProgram_, {"-u", scriptPath_, "--cwd", workingDirectory_});
+    process_->start(pythonProgram_, {"-u", scriptPath_, "--cwd", workingDirectory_, "--provider", provider_});
 }
 
 void ClaudeBridge::prompt(const QString &text)
@@ -102,7 +102,7 @@ void ClaudeBridge::handleLine(const QByteArray &line)
     QJsonParseError error;
     const QJsonDocument document = QJsonDocument::fromJson(line, &error);
     if (error.error != QJsonParseError::NoError || !document.isObject()) {
-        emit this->error("Invalid Claude bridge message: " + error.errorString());
+        emit this->error("Invalid " + provider_.toUpper() + " bridge message: " + error.errorString());
         return;
     }
     const QJsonObject message = document.object();

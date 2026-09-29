@@ -28,8 +28,9 @@ except ImportError as exc:
 
 
 class Bridge:
-    def __init__(self, cwd):
+    def __init__(self, cwd, provider="claude"):
         self.cwd = cwd
+        self.provider = provider
         self.client = None
         self.turn_task = None
         self.stop_requested = False
@@ -42,13 +43,32 @@ class Bridge:
         self.connected = False
 
     async def connect(self, resume=False):
-        options = ClaudeAgentOptions(
-            cwd=self.cwd,
-            add_dirs=self.additional_dirs,
-            resume=self.session_id if resume else None,
-            include_partial_messages=True,
-            can_use_tool=self.can_use_tool,
-        )
+        settings = {
+            "cwd": self.cwd,
+            "add_dirs": self.additional_dirs,
+            "resume": self.session_id if resume else None,
+            "include_partial_messages": True,
+            "can_use_tool": self.can_use_tool,
+        }
+        if self.provider == "glm":
+            api_key = os.environ.get("ZAI_API_KEY")
+            if not api_key:
+                raise RuntimeError("Set ZAI_API_KEY to use GLM through the Z.AI Coding Plan")
+            model = os.environ.get("GLM_MODEL", "glm-5.3")
+            settings.update({
+                "model": model,
+                "setting_sources": ["project", "local"],
+                "env": {
+                    "ANTHROPIC_AUTH_TOKEN": api_key,
+                    "ANTHROPIC_API_KEY": "",
+                    "ANTHROPIC_BASE_URL": "https://api.z.ai/api/anthropic",
+                    "ANTHROPIC_DEFAULT_OPUS_MODEL": model,
+                    "ANTHROPIC_DEFAULT_SONNET_MODEL": model,
+                    "ANTHROPIC_DEFAULT_HAIKU_MODEL": model,
+                    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+                },
+            })
+        options = ClaudeAgentOptions(**settings)
         self.client = ClaudeSDKClient(options=options)
         self.connected = False
         await self.client.connect()
@@ -126,7 +146,7 @@ class Bridge:
         except Exception as exc:
             status = "failed"
             details = str(exc)
-            send({"type": "error", "message": f"Claude turn failed: {exc}"})
+            send({"type": "error", "message": f"{self.provider.upper()} turn failed: {exc}"})
         finally:
             self.resolve_pending()
             self.turn_task = None
@@ -136,7 +156,7 @@ class Bridge:
         kind = command.get("type")
         if kind == "prompt":
             if self.turn_task is not None:
-                send({"type": "error", "message": "Claude is already responding"})
+                send({"type": "error", "message": f"{self.provider.upper()} is already responding"})
                 return
             text = command.get("text", "").strip()
             if text:
@@ -148,10 +168,10 @@ class Bridge:
                 try:
                     await self.client.interrupt()
                 except Exception as exc:
-                    send({"type": "error", "message": f"Could not interrupt Claude: {exc}"})
+                    send({"type": "error", "message": f"Could not interrupt {self.provider.upper()}: {exc}"})
         elif kind == "new":
             if self.turn_task is not None:
-                send({"type": "error", "message": "Wait for Claude to finish before starting a new conversation"})
+                send({"type": "error", "message": f"Wait for {self.provider.upper()} to finish before starting a new conversation"})
                 return
             await self.client.disconnect()
             self.connected = False
@@ -159,7 +179,7 @@ class Bridge:
             await self.connect()
         elif kind == "add_directory":
             if self.turn_task is not None:
-                send({"type": "error", "message": "Wait for Claude to finish before adding a directory"})
+                send({"type": "error", "message": f"Wait for {self.provider.upper()} to finish before adding a directory"})
                 return
             raw_path = command.get("path")
             path = os.path.realpath(raw_path) if isinstance(raw_path, str) and raw_path else ""
@@ -198,8 +218,8 @@ async def read_commands(queue):
             send({"type": "error", "message": f"Invalid JSON command: {exc}"})
 
 
-async def main(cwd):
-    bridge = Bridge(cwd)
+async def main(cwd, provider="claude"):
+    bridge = Bridge(cwd, provider)
     queue = asyncio.Queue()
     reader = asyncio.create_task(read_commands(queue))
     try:
@@ -211,11 +231,11 @@ async def main(cwd):
             try:
                 await bridge.handle(command)
             except Exception as exc:
-                send({"type": "error", "message": f"Claude bridge error: {exc}"})
+                send({"type": "error", "message": f"{provider.upper()} bridge error: {exc}"})
                 if not bridge.connected:
                     return 1
     except Exception as exc:
-        send({"type": "error", "message": f"Could not connect to Claude: {exc}"})
+        send({"type": "error", "message": f"Could not connect to {provider.upper()}: {exc}"})
         return 1
     finally:
         bridge.resolve_pending()
@@ -237,5 +257,6 @@ async def main(cwd):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Claude Agent SDK bridge for agentdeskt")
     parser.add_argument("--cwd", required=True)
+    parser.add_argument("--provider", choices=("claude", "glm"), default="claude")
     args = parser.parse_args()
-    raise SystemExit(asyncio.run(main(args.cwd)))
+    raise SystemExit(asyncio.run(main(args.cwd, args.provider)))

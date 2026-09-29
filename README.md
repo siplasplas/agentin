@@ -1,15 +1,18 @@
 # agentdeskt
 
-A Qt 6 desktop client for Codex App Server and Claude Agent SDK. Select an
+A Qt 6 desktop client for Codex, Claude, GLM, and Gemini. Select an
 agent in the window, enter a message, and read streamed responses in one output
 pane. Codex uses the local `codex` executable and its existing sign-in and
-configuration. Claude runs through a small Python JSONL bridge.
+configuration. Claude and GLM run through a Python JSONL bridge to the Claude
+Agent SDK. Gemini runs through Gemini CLI in headless mode.
 
 ## Build and run
 
 Requires Qt 6 Widgets, CMake, a C++17 compiler, and an installed `codex` CLI
 for Codex. Claude requires Python 3, `claude-agent-sdk`, and a configured API
-key. The optional test also requires Qt 6 Test and Python 3.
+key. GLM uses the same Python SDK with a Z.AI API key. Gemini requires an
+installed and authenticated Gemini CLI. The optional test also requires Qt 6
+Test and Python 3.
 
 ```sh
 cmake -S . -B build
@@ -26,6 +29,20 @@ python3 -m venv .venv
 ANTHROPIC_API_KEY=your-key ./build/agentdeskt -C /path/to/project
 ```
 
+For GLM, install the same SDK and set `ZAI_API_KEY` to your Z.AI Coding Plan
+key. The GLM bridge connects to Z.AI's Anthropic-compatible endpoint. Set
+`GLM_MODEL` to override the default `glm-5.3` model. Claude and GLM keep
+separate processes and conversations.
+
+```sh
+ZAI_API_KEY=your-zai-key ./build/agentdeskt -C /path/to/project
+```
+
+For Gemini, install and authenticate [Gemini CLI](https://geminicli.com/docs/get-started/).
+The application starts `gemini --output-format stream-json --prompt ...` for
+each turn and uses the session ID returned by Gemini CLI to resume the next
+turn. Use `--gemini /path/to/gemini` if it is not in `PATH`.
+
 The client automatically uses `.venv/bin/python` when the build directory is
 directly inside this project. Otherwise pass `--claude-python /path/to/python`. Use
 `--claude-bridge /path/to/bridge.py` when running an executable from another
@@ -40,17 +57,25 @@ Type `help` (or `/help`) in the command field to see the available commands.
 With Codex selected, it shows the complete output of `codex app-server --help`
 and explains that the client uses direct stdio mode. CLI subcommands shown in
 that output are reference information and are not chat messages.
-With Claude selected, it explains the SDK workflow
+With Claude or GLM selected, it explains the SDK workflow
 and shows `claude --help` when the Claude CLI is installed. Use the Add directory
-button to give Claude access to an additional folder in the current session.
+button to give that agent access to an additional folder in the current session.
 The directory is passed to the SDK using `add_dirs`; it is not saved as a global
 Claude Code trust setting. CLI options are shown for reference; this window
 communicates through the SDK. Claude Code's interactive slash commands are
 listed in the [Claude Code commands reference](https://code.claude.com/docs/en/commands).
+See [Z.AI's Claude Code setup](https://docs.z.ai/devpack/tool/claude) for GLM.
+
+With Gemini selected, `help` shows `gemini --help`. Add directory passes
+`--include-directories` on future turns. Gemini CLI supports up to five extra
+directories. If [folder trust](https://geminicli.com/docs/cli/trusted-folders/)
+is enabled, trust the working folder in Gemini CLI before starting a headless
+conversation. Headless tool approvals follow Gemini CLI's configured policy;
+they are not shown as Qt approval dialogs.
 
 For Codex, Add writable directory adds a root to `sandboxPolicy.workspaceWrite.writableRoots`
-on future turns. The working directory remains included. Both providers include
-ordinary subdirectories of an added folder; other permission rules and
+on future turns. The working directory remains included. Added directories
+include ordinary subdirectories; other permission rules and
 protected paths may still apply. Additional directories are kept only while
 this application is open.
 The client also supports `new`, `clear`, `stop`, and `quit`. Any other text is

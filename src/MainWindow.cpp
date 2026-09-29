@@ -1,4 +1,5 @@
 #include "ClaudeBridge.h"
+#include "GeminiBridge.h"
 #include "MainWindow.h"
 
 #include <QComboBox>
@@ -21,24 +22,36 @@
 #include <QWidget>
 
 MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirectory,
-                       const QString &claudePython, const QString &claudeScript, QWidget *parent)
+                       const QString &claudePython, const QString &claudeScript,
+                       const QString &geminiProgram, QWidget *parent)
     : QMainWindow(parent), codexProgram_(codexProgram), workingDirectory_(workingDirectory),
-      server_(new QProcess(this)), claude_(new ClaudeBridge(claudePython, claudeScript, workingDirectory, this))
+      server_(new QProcess(this)),
+      claude_(new ClaudeBridge(claudePython, claudeScript, workingDirectory, "claude", this)),
+      glm_(new ClaudeBridge(claudePython, claudeScript, workingDirectory, "glm", this)),
+      gemini_(new GeminiBridge(geminiProgram, workingDirectory, this))
 {
-    setWindowTitle("agentdeskt — Codex and Claude");
+    setWindowTitle("agentdeskt — Codex, Claude, GLM and Gemini");
     resize(850, 600);
 
     auto *central = new QWidget(this);
     auto *layout = new QVBoxLayout(central);
     provider_ = new QComboBox(central);
     provider_->setObjectName("providerSelect");
-    provider_->addItems({"Codex", "Claude"});
+    provider_->addItems({"Codex", "Claude", "GLM", "Gemini"});
     addDirButton_ = new QPushButton("Add directory…", central);
     addDirButton_->setObjectName("addDirectoryButton");
     claudeDirsLabel_ = new QLabel("Additional Claude directories: none", central);
     claudeDirsLabel_->setObjectName("claudeDirectories");
     claudeDirsLabel_->setWordWrap(true);
     claudeDirsLabel_->setVisible(false);
+    glmDirsLabel_ = new QLabel("Additional GLM directories: none", central);
+    glmDirsLabel_->setObjectName("glmDirectories");
+    glmDirsLabel_->setWordWrap(true);
+    glmDirsLabel_->setVisible(false);
+    geminiDirsLabel_ = new QLabel("Additional Gemini directories: none", central);
+    geminiDirsLabel_->setObjectName("geminiDirectories");
+    geminiDirsLabel_->setWordWrap(true);
+    geminiDirsLabel_->setVisible(false);
     codexDirsLabel_ = new QLabel("Additional writable Codex directories: none", central);
     codexDirsLabel_->setObjectName("codexDirectories");
     codexDirsLabel_->setWordWrap(true);
@@ -68,6 +81,8 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     providerRow->addStretch();
     layout->addLayout(providerRow);
     layout->addWidget(claudeDirsLabel_);
+    layout->addWidget(glmDirsLabel_);
+    layout->addWidget(geminiDirsLabel_);
     layout->addWidget(codexDirsLabel_);
     layout->addWidget(status_);
     layout->addWidget(output_, 1);
@@ -78,18 +93,25 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     connect(sendButton_, &QPushButton::clicked, this, &MainWindow::submitCommand);
     connect(stopButton_, &QPushButton::clicked, this, &MainWindow::requestStop);
     connect(addDirButton_, &QPushButton::clicked, this, [this] {
-        const bool forClaude = provider_->currentIndex() == 1;
+        const int index = provider_->currentIndex();
         const QString path = QFileDialog::getExistingDirectory(
-            this, forClaude ? "Add directory for Claude" : "Add writable directory for Codex", workingDirectory_);
+            this, index == 0 ? "Add writable directory for Codex"
+                             : (index == 1 ? "Add directory for Claude" : (index == 2 ? "Add directory for GLM" : "Add directory for Gemini")),
+            workingDirectory_);
         if (!path.isEmpty()) {
-            if (forClaude) addClaudeDirectory(path);
-            else addCodexDirectory(path);
+            if (index == 0) addCodexDirectory(path);
+            else if (index == 1) addClaudeDirectory(path);
+            else if (index == 2) addGlmDirectory(path);
+            else addGeminiDirectory(path);
         }
     });
     connect(provider_, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int index) {
-        appendLine(index == 0 ? "[Codex selected]" : "[Claude selected]");
+        appendLine("[" + provider_->itemText(index) + " selected]");
         if (index == 1 && !claudeReady_) claude_->start();
+        if (index == 2 && !glmReady_) glm_->start();
         claudeDirsLabel_->setVisible(index == 1);
+        glmDirsLabel_->setVisible(index == 2);
+        geminiDirsLabel_->setVisible(index == 3);
         codexDirsLabel_->setVisible(index == 0);
         updateStatus();
     });
@@ -173,6 +195,104 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
         claudeDirsLabel_->setText("Additional Claude directories: none");
         updateStatus();
     });
+    connect(glm_, &ClaudeBridge::ready, this, [this] {
+        glmReady_ = true;
+        appendLine("[Connected to GLM via Claude Agent SDK]");
+        updateStatus();
+        sendNextGlmPrompt();
+    });
+    connect(glm_, &ClaudeBridge::textDelta, this, [this](const QString &text) {
+        if (!glmTextStarted_) {
+            appendText("\nGLM: ");
+            glmTextStarted_ = true;
+        }
+        appendText(text);
+    });
+    connect(glm_, &ClaudeBridge::toolStarted, this, [this](const QString &name, const QJsonObject &input) {
+        appendLine("\n[GLM tool: " + name + "] "
+                   + QString::fromUtf8(QJsonDocument(input).toJson(QJsonDocument::Compact)));
+    });
+    connect(glm_, &ClaudeBridge::completed, this, [this](const QString &state, const QString &details) {
+        if (glmTextStarted_) appendText("\n");
+        if (state != "completed") appendLine("[GLM response: " + state + (details.isEmpty() ? "" : ": " + details) + "]");
+        glmBusy_ = false;
+        glmStopRequested_ = false;
+        glmTextStarted_ = false;
+        updateStatus();
+        sendNextGlmPrompt();
+    });
+    connect(glm_, &ClaudeBridge::approvalRequested, this,
+            [this](int id, const QString &tool, const QJsonObject &input) {
+        const QString details = QString::fromUtf8(QJsonDocument(input).toJson(QJsonDocument::Indented));
+        const auto answer = QMessageBox::question(this, "Approve GLM action",
+                                                   tool + "\n\n" + details + "\nAllow this action?",
+                                                   QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+        glm_->answerApproval(id, answer == QMessageBox::Yes);
+    });
+    connect(glm_, &ClaudeBridge::questionsRequested, this, [this](int id, const QJsonArray &questions) {
+        QJsonObject answers;
+        bool allAccepted = true;
+        for (const QJsonValue &value : questions) {
+            const QJsonObject question = value.toObject();
+            const QString text = question.value("question").toString();
+            const QString title = question.value("header").toString("GLM question");
+            const QJsonArray options = question.value("options").toArray();
+            bool accepted = false;
+            QString reply;
+            if (question.value("multiSelect").toBool() || options.isEmpty()) {
+                reply = QInputDialog::getText(this, title, text, QLineEdit::Normal, {}, &accepted);
+            } else {
+                QStringList labels;
+                for (const QJsonValue &option : options) labels.append(option.toObject().value("label").toString());
+                reply = QInputDialog::getItem(this, title, text, labels, 0, false, &accepted);
+            }
+            if (!accepted) { allAccepted = false; break; }
+            answers.insert(text, reply);
+        }
+        glm_->answerQuestions(id, answers, allAccepted);
+    });
+    connect(glm_, &ClaudeBridge::directoryAdded, this, [this](const QString &path) {
+        if (!glmDirectories_.contains(path) && QDir::cleanPath(path) != QDir::cleanPath(workingDirectory_)) {
+            glmDirectories_.append(path);
+        }
+        glmDirsLabel_->setText("Additional GLM directories: "
+                               + (glmDirectories_.isEmpty() ? "none" : glmDirectories_.join(", ")));
+        appendLine("[GLM directory available: " + path + "]");
+        glmReady_ = true;
+        updateStatus();
+    });
+    connect(glm_, &ClaudeBridge::error, this, [this](const QString &message) { appendLine("[GLM] " + message); });
+    connect(glm_, &ClaudeBridge::disconnected, this, [this] {
+        glmReady_ = false;
+        glmBusy_ = false;
+        glmStopRequested_ = false;
+        glmDirectories_.clear();
+        glmDirsLabel_->setText("Additional GLM directories: none");
+        updateStatus();
+    });
+    connect(gemini_, &GeminiBridge::textDelta, this, [this](const QString &text) {
+        if (!geminiTextStarted_) {
+            appendText("\nGemini: ");
+            geminiTextStarted_ = true;
+        }
+        appendText(text);
+    });
+    connect(gemini_, &GeminiBridge::toolStarted, this, [this](const QString &name, const QJsonObject &input) {
+        appendLine("\n[Gemini tool: " + name + "] "
+                   + QString::fromUtf8(QJsonDocument(input).toJson(QJsonDocument::Compact)));
+    });
+    connect(gemini_, &GeminiBridge::error, this, [this](const QString &message) {
+        appendLine("[Gemini] " + message);
+    });
+    connect(gemini_, &GeminiBridge::completed, this, [this](const QString &state, const QString &details) {
+        if (geminiTextStarted_) appendText("\n");
+        if (state != "completed") appendLine("[Gemini response: " + state + (details.isEmpty() ? "" : ": " + details) + "]");
+        geminiBusy_ = false;
+        geminiStopRequested_ = false;
+        geminiTextStarted_ = false;
+        updateStatus();
+        sendNextGeminiPrompt();
+    });
     connect(server_, &QProcess::started, this, [this] {
         sendRequest("initialize", {{"clientInfo", QJsonObject{
             {"name", "agentdeskt"}, {"title", "agentdeskt Qt"}, {"version", "0.1.0"}}}});
@@ -223,6 +343,9 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
 
 MainWindow::~MainWindow()
 {
+    disconnect(claude_, nullptr, this, nullptr);
+    disconnect(glm_, nullptr, this, nullptr);
+    disconnect(gemini_, nullptr, this, nullptr);
     if (server_->state() != QProcess::NotRunning) {
         server_->terminate();
         if (!server_->waitForFinished(1000)) {
@@ -244,6 +367,26 @@ void MainWindow::submitCommand()
     } else if (local == "clear" || local == "/clear") {
         output_->clear();
     } else if (local == "new" || local == "/new") {
+        if (provider_->currentIndex() == 3) {
+            if (geminiBusy_) appendLine("[Wait for Gemini to finish or enter stop.]");
+            else {
+                geminiQueuedPrompts_.clear();
+                gemini_->resetConversation();
+                appendLine("[Starting a new Gemini conversation]");
+            }
+            return;
+        }
+        if (provider_->currentIndex() == 2) {
+            if (glmBusy_) appendLine("[Wait for GLM to finish or enter stop.]");
+            else if (glmReady_) {
+                glmQueuedPrompts_.clear();
+                glmReady_ = false;
+                glm_->resetConversation();
+                appendLine("[Starting a new GLM conversation]");
+                updateStatus();
+            } else appendLine("[GLM is not connected.]");
+            return;
+        }
         if (provider_->currentIndex() == 1) {
             if (claudeBusy_) appendLine("[Wait for Claude to finish or enter stop.]");
             else if (claudeReady_) {
@@ -269,6 +412,19 @@ void MainWindow::submitCommand()
     } else if (local == "quit" || local == "/quit" || local == "exit") {
         close();
     } else {
+        if (provider_->currentIndex() == 3) {
+            appendLine("You (Gemini): " + command);
+            geminiQueuedPrompts_.append(command);
+            sendNextGeminiPrompt();
+            return;
+        }
+        if (provider_->currentIndex() == 2) {
+            appendLine("You (GLM): " + command);
+            glmQueuedPrompts_.append(command);
+            if (!glmReady_) glm_->start();
+            sendNextGlmPrompt();
+            return;
+        }
         if (provider_->currentIndex() == 1) {
             appendLine("You (Claude): " + command);
             claudeQueuedPrompts_.append(command);
@@ -289,6 +445,8 @@ void MainWindow::submitCommand()
 void MainWindow::showHelp()
 {
     const bool claudeSelected = provider_->currentIndex() == 1;
+    const bool glmSelected = provider_->currentIndex() == 2;
+    const bool geminiSelected = provider_->currentIndex() == 3;
     appendLine("Commands:");
     appendLine("  help       show this help and installed agent options");
     appendLine("  new        start a new conversation");
@@ -299,7 +457,35 @@ void MainWindow::showHelp()
     QString helpProgram;
     QStringList helpArguments;
     QString helpName;
-    if (claudeSelected) {
+    if (geminiSelected) {
+        appendLine("Gemini CLI headless mode:");
+        appendLine("  Send messages with Enter or Send to Gemini.");
+        appendLine("  Each response streams JSON events; later messages resume the same session.");
+        appendLine("  Use Add directory to include a folder and its subfolders for future turns (maximum five).");
+        appendLine("  Authenticate Gemini CLI before using this window.");
+        appendLine("  If folder trust is enabled, trust the working folder in Gemini CLI first.");
+        appendLine("  Headless mode: https://geminicli.com/docs/cli/headless/");
+        appendLine("Installed Gemini CLI commands and options:");
+        helpProgram = gemini_->program();
+        helpArguments = {"--help"};
+        helpName = "Gemini CLI";
+    } else if (glmSelected) {
+        appendLine("GLM via Z.AI and Claude Agent SDK:");
+        appendLine("  Send messages with Enter or Send to GLM.");
+        appendLine("  Use Add directory to include a folder and its subfolders for this session.");
+        appendLine("  Tool approvals and questions appear in dialogs.");
+        appendLine("  Requires claude-agent-sdk and ZAI_API_KEY; GLM_MODEL is optional.");
+        appendLine("  GLM setup: https://docs.z.ai/devpack/tool/claude");
+        appendLine("  Claude Code slash commands: https://code.claude.com/docs/en/commands");
+        appendLine("Installed Claude CLI options (reference; GLM uses the SDK):");
+        helpProgram = QStandardPaths::findExecutable("claude");
+        helpArguments = {"--help"};
+        helpName = "Claude CLI";
+        if (helpProgram.isEmpty()) {
+            appendLine("[Claude CLI is not installed or not in PATH.]\n");
+            return;
+        }
+    } else if (claudeSelected) {
         appendLine("Claude Agent SDK:");
         appendLine("  Send a message with Enter or the Send to Claude button.");
         appendLine("  Use Add directory to give Claude access to a folder and its subfolders for this session.");
@@ -359,6 +545,43 @@ void MainWindow::addClaudeDirectory(const QString &path)
     updateStatus();
 }
 
+void MainWindow::addGlmDirectory(const QString &path)
+{
+    if (path.isEmpty()) return;
+    const QFileInfo directory(QDir(workingDirectory_).absoluteFilePath(path));
+    if (!directory.isDir()) {
+        appendLine("[Directory does not exist: " + directory.absoluteFilePath() + "]");
+        return;
+    }
+    if (!glmReady_ || glmBusy_) {
+        appendLine("[Wait for GLM to be ready before adding a directory.]");
+        return;
+    }
+    glmReady_ = false;
+    glm_->addDirectory(directory.canonicalFilePath());
+    appendLine("[Adding GLM directory: " + directory.canonicalFilePath() + "]");
+    updateStatus();
+}
+
+void MainWindow::addGeminiDirectory(const QString &path)
+{
+    if (path.isEmpty()) return;
+    const QFileInfo directory(QDir(workingDirectory_).absoluteFilePath(path));
+    if (!directory.isDir()) {
+        appendLine("[Directory does not exist: " + directory.absoluteFilePath() + "]");
+        return;
+    }
+    const QString canonicalPath = directory.canonicalFilePath();
+    if (canonicalPath != QDir(workingDirectory_).canonicalPath() && !gemini_->addDirectory(canonicalPath)) {
+        appendLine("[Gemini CLI supports up to five additional directories.]");
+        return;
+    }
+    const QStringList directories = gemini_->directories();
+    geminiDirsLabel_->setText("Additional Gemini directories: "
+                               + (directories.isEmpty() ? "none" : directories.join(", ")));
+    appendLine("[Gemini directory available for future turns: " + canonicalPath + "]");
+}
+
 void MainWindow::addCodexDirectory(const QString &path)
 {
     if (path.isEmpty()) return;
@@ -383,6 +606,26 @@ void MainWindow::sendNextClaudePrompt()
     claudeStopRequested_ = false;
     claudeTextStarted_ = false;
     claude_->prompt(claudeQueuedPrompts_.takeFirst());
+    updateStatus();
+}
+
+void MainWindow::sendNextGlmPrompt()
+{
+    if (!glmReady_ || glmBusy_ || glmQueuedPrompts_.isEmpty()) return;
+    glmBusy_ = true;
+    glmStopRequested_ = false;
+    glmTextStarted_ = false;
+    glm_->prompt(glmQueuedPrompts_.takeFirst());
+    updateStatus();
+}
+
+void MainWindow::sendNextGeminiPrompt()
+{
+    if (geminiBusy_ || geminiQueuedPrompts_.isEmpty()) return;
+    geminiBusy_ = true;
+    geminiStopRequested_ = false;
+    geminiTextStarted_ = false;
+    gemini_->prompt(geminiQueuedPrompts_.takeFirst());
     updateStatus();
 }
 
@@ -415,6 +658,26 @@ void MainWindow::sendNextPrompt()
 
 void MainWindow::requestStop()
 {
+    if (provider_->currentIndex() == 3) {
+        if (!geminiBusy_) appendLine("[No active Gemini response.]");
+        else if (!geminiStopRequested_) {
+            geminiStopRequested_ = true;
+            appendLine("[Interrupting Gemini response]");
+            gemini_->interrupt();
+            updateStatus();
+        }
+        return;
+    }
+    if (provider_->currentIndex() == 2) {
+        if (!glmBusy_) appendLine("[No active GLM response.]");
+        else if (!glmStopRequested_) {
+            glmStopRequested_ = true;
+            appendLine("[Interrupting GLM response]");
+            glm_->interrupt();
+            updateStatus();
+        }
+        return;
+    }
     if (provider_->currentIndex() == 1) {
         if (!claudeBusy_) appendLine("[No active Claude response.]");
         else if (!claudeStopRequested_) {
@@ -644,7 +907,16 @@ void MainWindow::appendLine(const QString &text)
 void MainWindow::updateStatus()
 {
     QString state;
-    if (provider_->currentIndex() == 1) {
+    if (provider_->currentIndex() == 3) {
+        state = geminiBusy_ ? "Gemini is responding…" : "Gemini ready";
+        stopButton_->setEnabled(geminiBusy_ && !geminiStopRequested_);
+    } else if (provider_->currentIndex() == 2) {
+        if (glmBusy_) state = "GLM is responding…";
+        else if (glmReady_) state = "GLM ready";
+        else if (glm_->isRunning()) state = "Connecting to GLM via Claude Agent SDK…";
+        else state = "GLM bridge is not running";
+        stopButton_->setEnabled(glmBusy_ && !glmStopRequested_);
+    } else if (provider_->currentIndex() == 1) {
         if (claudeBusy_) state = "Claude is responding…";
         else if (claudeReady_) state = "Claude ready";
         else if (claude_->isRunning()) state = "Connecting to Claude Agent SDK…";
@@ -658,11 +930,12 @@ void MainWindow::updateStatus()
         stopButton_->setEnabled(busy_ && !stopRequested_);
     }
     status_->setText(state + "  •  " + QDir::toNativeSeparators(workingDirectory_));
-    sendButton_->setText(provider_->currentIndex() == 1 ? "Send to Claude" : "Send to Codex");
-    addDirButton_->setText(provider_->currentIndex() == 1 ? "Add directory…" : "Add writable directory…");
-    addDirButton_->setToolTip(provider_->currentIndex() == 1
-                             ? "Give Claude access to another directory and its subfolders for this session."
-                             : "Give Codex write access to another directory and its subfolders for future turns.");
-    addDirButton_->setEnabled(provider_->currentIndex() == 1 ? (claudeReady_ && !claudeBusy_) : !busy_);
-    provider_->setEnabled(!busy_ && !claudeBusy_);
+    const int index = provider_->currentIndex();
+    sendButton_->setText(index == 0 ? "Send to Codex" : (index == 1 ? "Send to Claude" : (index == 2 ? "Send to GLM" : "Send to Gemini")));
+    addDirButton_->setText(index == 0 ? "Add writable directory…" : "Add directory…");
+    addDirButton_->setToolTip(index == 0
+                             ? "Give Codex write access to another directory and its subfolders for future turns."
+                             : "Give the selected agent access to another directory and its subfolders for this session.");
+    addDirButton_->setEnabled(index == 0 ? !busy_ : (index == 1 ? (claudeReady_ && !claudeBusy_) : (index == 2 ? (glmReady_ && !glmBusy_) : !geminiBusy_)));
+    provider_->setEnabled(!busy_ && !claudeBusy_ && !glmBusy_ && !geminiBusy_);
 }

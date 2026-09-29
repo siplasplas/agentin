@@ -63,6 +63,28 @@ spec.loader.exec_module(bridge_module)
 
 
 class ClaudeBridgeTest(unittest.IsolatedAsyncioTestCase):
+    async def test_glm_uses_zai_credentials_and_keeps_directory(self):
+        events = []
+        with patch.dict(bridge_module.os.environ, {"ZAI_API_KEY": "test-zai-key", "GLM_MODEL": "glm-test"}), \
+             patch.object(bridge_module, "send", events.append):
+            bridge = bridge_module.Bridge("/tmp/project", "glm")
+            await bridge.connect()
+            options = bridge.client.options
+            self.assertEqual(options.model, "glm-test")
+            self.assertEqual(options.env["ANTHROPIC_AUTH_TOKEN"], "test-zai-key")
+            self.assertEqual(options.env["ANTHROPIC_BASE_URL"], "https://api.z.ai/api/anthropic")
+            self.assertEqual(options.setting_sources, ["project", "local"])
+            extra_directory = str(Path(__file__).resolve().parent)
+            await bridge.handle({"type": "add_directory", "path": extra_directory})
+            self.assertEqual(bridge.client.options.add_dirs, [extra_directory])
+            self.assertEqual(events[-1], {"type": "directory_added", "path": extra_directory})
+
+    async def test_glm_requires_zai_credentials(self):
+        with patch.dict(bridge_module.os.environ, {}, clear=True):
+            bridge = bridge_module.Bridge("/tmp/project", "glm")
+            with self.assertRaisesRegex(RuntimeError, "ZAI_API_KEY"):
+                await bridge.connect()
+
     async def test_stream_approval_and_new_conversation(self):
         events = []
         with patch.object(bridge_module, "send", events.append):

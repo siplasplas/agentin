@@ -13,7 +13,8 @@ class ClaudeBridge : public QObject
 
 public:
     ClaudeBridge(const QString &pythonProgram, const QString &scriptPath,
-                 const QString &workingDirectory, QObject *parent = nullptr);
+                 const QString &workingDirectory, const QString &provider,
+                 QObject *parent = nullptr);
     ~ClaudeBridge() override;
     bool isRunning() const;
     void start();
@@ -42,6 +43,7 @@ private:
     QString pythonProgram_;
     QString scriptPath_;
     QString workingDirectory_;
+    QString provider_;
     QProcess *process_;
     QByteArray buffer_;
 };
