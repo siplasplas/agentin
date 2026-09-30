@@ -36,11 +36,20 @@ CodexAgent::CodexAgent(CodexConnection *connection, const QString &workingDirect
     connect(connection, &CodexConnection::stateChanged, this, &AgentBackend::stateChanged);
     connect(connection, &CodexConnection::connected, this, [this] {
         if (historyPending_) loadHistory(historyThreadId_, {}, false);
+        // After a restart the chat continues its thread; a queued message waits until it is open.
+        if (!reopenThreadId_.isEmpty()) {
+            const QString id = reopenThreadId_;
+            reopenThreadId_.clear();
+            const QStringList queued = queuedPrompts_;
+            resumeConversation(id, workingDirectory_);
+            queuedPrompts_ = queued;
+        }
         // A message sent while the server was still starting waits for a thread.
         if (!queuedPrompts_.isEmpty() && threadId_.isEmpty()) startThread();
     });
     connect(connection, &CodexConnection::disconnected, this, [this] {
         const bool working = busy_ || threadOpening_ || !queuedPrompts_.isEmpty();
+        if (!threadId_.isEmpty()) reopenThreadId_ = threadId_;
         threadOpening_ = false;
         threadId_.clear();
         queuedPrompts_.clear();

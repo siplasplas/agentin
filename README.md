@@ -293,6 +293,11 @@ cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
+If the Codex App Server exits while it was working, agentdeskt starts it again
+after a growing delay (1 s, 2 s, 4 s and so on, at most 30 s) and each Codex tab
+reopens its thread; the turn that was running is reported as failed. After more
+than five exits within five minutes it is left stopped.
+
 The Codex client uses JSONL over stdin/stdout (`codex app-server --stdio`). See the
 [OpenAI Docs for Codex App Server](https://learn.chatgpt.com/docs/app-server)
 for the protocol. The Claude bridge also uses JSONL over stdin/stdout and calls

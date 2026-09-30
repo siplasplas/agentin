@@ -102,4 +102,6 @@ private:
     bool syncing_ = false;
     bool syncingArchived_ = false;
     bool syncWhenConnected_ = false;
+    // Times of unexpected exits, to stop restarting a server that keeps failing.
+    QList<qint64> crashTimes_;
 };

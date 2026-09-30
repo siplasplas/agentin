@@ -58,6 +58,8 @@ private:
     QPointer<CodexConnection> connection_;
     QString workingDirectory_;
     QString threadId_;
+    // The thread to reopen when the App Server has been restarted.
+    QString reopenThreadId_;
     QString activeTurnId_;
     QString model_;
     QString effort_;

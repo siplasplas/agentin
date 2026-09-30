@@ -10,6 +10,7 @@
 #include <QJsonDocument>
 #include <QProcess>
 #include <QSaveFile>
+#include <QTimer>
 
 #include <algorithm>
 
@@ -73,6 +74,7 @@ CodexConnection::CodexConnection(const QString &program, const QString &workingD
             stagedConversations_.clear();
             emit message("[Codex conversation sync stopped: server disconnected]");
         }
+        const bool wasConnected = initialized_;
         initialized_ = false;
         pendingRequests_.clear();
         threads_.clear();
@@ -80,6 +82,20 @@ CodexConnection::CodexConnection(const QString &program, const QString &workingD
         emit disconnected();
         emit conversationsChanged();
         emit message(QString("[Server exited with code %1]").arg(code));
+        // A server that was working is started again after a growing delay; chats reopen their
+        // threads once it is connected. One that keeps failing is left stopped.
+        if (wasConnected) {
+            const qint64 now = QDateTime::currentMSecsSinceEpoch();
+            crashTimes_.append(now);
+            while (!crashTimes_.isEmpty() && now - crashTimes_.first() > 5 * 60 * 1000) crashTimes_.removeFirst();
+            if (crashTimes_.size() > 5) {
+                emit message("[The Codex App Server keeps exiting, so it is not restarted. Restart agentdeskt to try again.]");
+            } else {
+                const int delay = qMin(30, 1 << (crashTimes_.size() - 1));
+                emit message(QString("[Restarting the Codex App Server in %1 s]").arg(delay));
+                QTimer::singleShot(delay * 1000, this, &CodexConnection::start);
+            }
+        }
         emit stateChanged();
     });
 }
