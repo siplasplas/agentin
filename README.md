@@ -247,12 +247,15 @@ sentences; other voices speak English. The voice and its pace are chosen and tri
 in **Settings → Notifications…**; a slowness above 1 (1.3 by default) speaks
 slower and usually clearer. Without a voice program the sound files play.
 
-**View → Provider limits** shows an account panel independent of the selected
-conversation. It is visible by default; visibility is saved in settings. Each
-provider's weekly limits appear before its five-hour limits, including separate
-model-family windows when reported. Rows show the remaining percentage and the
-reset time in local time. A missing percentage or reset is explicitly marked as
-not reported, including placeholder weekly/five-hour rows when no data exists.
+**View → Provider limits** shows account limits for the selected conversation's
+provider. Switching chats switches the panel; unsupported providers and unreported
+windows do not add placeholder rows. It is visible by default, and visibility is
+saved in settings. Weekly limits appear before five-hour limits, including separate
+model-family windows when reported. Rows show the provider, window, remaining
+percentage, local reset time and pacing. Missing fields within a reported window
+are marked as not reported. Drag the divider below the panel to resize it, even
+to less than half a row. Its default height is about one and a half rows; the chosen
+height is saved. Column headings are hidden to keep the panel compact.
 
 Green means the consumed percentage is strictly below the fraction of the window
 that has elapsed. Yellow means it is equal or greater: for example, after one day
@@ -265,8 +268,9 @@ After a reported reset passes, it shows **Awaiting updated limits**, without
 assuming that a fresh quota is available.
 
 Which windows exist depends on the plan. Codex reads them from the App Server
-when it connects (`account/rateLimits/read`) and updates them as the server
-reports changes. Claude reports limits through SDK events while it answers. The
+when its conversation is selected and the panel is visible (`account/rateLimits/read`),
+and updates the snapshot as the server reports changes. Explicit reads are deferred
+while another provider is selected or the panel is hidden. Claude reports limits through SDK events while it answers. The
 bridge reads both typed limit fields and per-window `unifiedWindows` snapshots
 preserved in the SDK's raw data, when available. This also supports events where
 the top-level percentage is omitted during normal use. The panel uses the last

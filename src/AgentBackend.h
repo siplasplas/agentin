@@ -152,6 +152,8 @@ public:
     // Account usage limits as far as the agent reports them.
     virtual QList<UsageLimit> usageLimits() const { return {}; }
     virtual bool supportsUsageLimits() const { return false; }
+    // Enable explicit account-limit reads only for the visible provider panel.
+    virtual void setUsageLimitsActive(bool active) { Q_UNUSED(active); }
     // Model and effort that new chats start with, from the application options; empty means the
     // agent's own default.
     QString defaultModel() const { return defaultModel_; }

@@ -299,13 +299,25 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     statusRow->addWidget(muteSounds_);
     statusRow->addWidget(newChatButton_);
     layout->addLayout(statusRow);
-    layout->addWidget(usage_);
-    connect(usageVisibleAction_, &QAction::toggled, this, [this](bool visible) {
-        usage_->setVisible(visible);
-        if (visible) updateUsage();
+    usageSplitter_ = new QSplitter(Qt::Vertical, central);
+    usageSplitter_->setObjectName("usageSplitter");
+    usageSplitter_->setHandleWidth(6);
+    usageSplitter_->addWidget(usage_);
+    usageSplitter_->addWidget(tabs_);
+    usageSplitter_->setChildrenCollapsible(false);
+    usageSplitter_->setStretchFactor(0, 0);
+    usageSplitter_->setStretchFactor(1, 1);
+    usageSplitter_->setSizes({usage_->sizeHint().height(), 600});
+    connect(usageSplitter_, &QSplitter::splitterMoved, this, [this] {
+        usagePanelHeight_ = usageSplitter_->sizes().value(0);
         saveSettings();
     });
-    layout->addWidget(tabs_, 1);
+    connect(usageVisibleAction_, &QAction::toggled, this, [this](bool visible) {
+        usage_->setVisible(visible);
+        updateUsage();
+        saveSettings();
+    });
+    layout->addWidget(usageSplitter_, 1);
     layout->addLayout(inputRow);
     auto *chatSplitter = new QSplitter(Qt::Horizontal, this);
     conversationTree_ = new QTreeWidget(chatSplitter);
@@ -658,6 +670,8 @@ void MainWindow::loadSettings()
         usageVisibleAction_->setChecked(visible);
         usage_->setVisible(visible);
     }
+    usagePanelHeight_ = qMax(1, settings.value("usagePanelHeight").toInt(usage_->sizeHint().height()));
+    usageSplitter_->setSizes({usagePanelHeight_, 600});
     updateUsage();
     {
         // Loading must not save the settings before all of them are read.
@@ -705,6 +719,7 @@ void MainWindow::saveSettings()
                                                          {"lastAudioDirectory", lastAudioDirectory_},
                                                          {"audioDurationVisible", audioDurationVisible_},
                                                          {"showUsageLimits", usageVisibleAction_->isChecked()},
+                                                         {"usagePanelHeight", usagePanelHeight_},
                                                          {"glmModels", QJsonArray::fromStringList(glm_->extraModels())},
                                                          {"agents", agents}})
                           .toJson(QJsonDocument::Indented)) < 0
@@ -1620,14 +1635,15 @@ void MainWindow::showEnterAction(bool sends)
     enterIndicator_->setAccessibleName(sends ? "Enter sends" : "Enter starts a new line");
 }
 
-// Account limits belong to providers and remain visible when the selected chat changes.
+// Account snapshots follow the selected provider; only that provider is asked for fresh limits.
 void MainWindow::updateUsage()
 {
+    const ChatTab *tab = currentTab();
+    AgentProvider *selected = tab && usageVisibleAction_->isChecked() ? tab->provider() : nullptr;
     QList<ProviderLimits> limits;
-    for (AgentProvider *listed : providers_) {
-        const QList<UsageLimit> windows = listed->usageLimits();
-        if (listed->supportsUsageLimits() || !windows.isEmpty()) limits.append({listed->name(), windows});
-    }
+    for (AgentProvider *listed : providers_)
+        listed->setUsageLimitsActive(listed == selected);
+    if (selected) limits.append({selected->name(), selected->usageLimits()});
     usage_->setLimits(limits);
 }
 

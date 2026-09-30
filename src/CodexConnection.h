@@ -39,6 +39,7 @@ public:
     QList<AgentModel> models() const override { return models_; }
     bool supportsUsageLimits() const override { return true; }
     QList<UsageLimit> usageLimits() const override;
+    void setUsageLimitsActive(bool active) override;
     AgentBackend *createChat(const QString &workingDirectory, QObject *parent) override;
 
     void start();
@@ -94,6 +95,7 @@ private:
     QList<AgentModel> models_;
     QList<AgentModel> stagedModels_;
     QMap<QString, QList<UsageLimit>> rateLimits_;
+    bool usageLimitsActive_ = false;
     QHash<QString, QJsonObject> cachedConversations_;
     QHash<QString, QJsonObject> stagedConversations_;
     QSet<QString> newConversationIds_;

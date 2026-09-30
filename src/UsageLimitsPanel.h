@@ -24,7 +24,7 @@ struct ProviderLimits
     QList<UsageLimit> windows;
 };
 
-// Account limits across providers; independent of the selected or even open conversations.
+// Account snapshots for the selected conversation provider.
 class UsageLimitsPanel : public QWidget
 {
     Q_OBJECT
@@ -32,6 +32,7 @@ public:
     explicit UsageLimitsPanel(QWidget *parent = nullptr);
     void setLimits(const QList<ProviderLimits> &limits);
     void refresh(qint64 now);
+    QSize sizeHint() const override;
 
 private:
     QList<ProviderLimits> limits_;

@@ -39,7 +39,7 @@ CodexConnection::CodexConnection(const QString &program, const QString &workingD
             sendJson({{"method", "initialized"}, {"params", QJsonObject{}}});
             emit connected();
             requestModels({});
-            requestRateLimits();
+            if (usageLimitsActive_) requestRateLimits();
             if (syncWhenConnected_) {
                 syncWhenConnected_ = false;
                 syncConversations();
@@ -149,6 +149,13 @@ void CodexConnection::requestModels(const QString &cursor)
         models_ = stagedModels_;
         emit modelsChanged();
     });
+}
+
+void CodexConnection::setUsageLimitsActive(bool active)
+{
+    if (usageLimitsActive_ == active) return;
+    usageLimitsActive_ = active;
+    if (active && initialized_) requestRateLimits();
 }
 
 void CodexConnection::requestRateLimits()

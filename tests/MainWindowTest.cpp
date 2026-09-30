@@ -28,7 +28,11 @@
 #include <QTimer>
 #include <QTreeWidget>
 #include <QStandardPaths>
+#include <QSplitter>
+#include <QTabWidget>
 #include <QtTest>
+
+static void startChat(MainWindow &window, const QString &provider, const QString &path);
 
 class MainWindowTest : public QObject
 {
@@ -117,17 +121,31 @@ void MainWindowTest::providerLimitsPanelAndVisibility()
         for (ClaudeProvider *candidate : window.findChildren<ClaudeProvider *>())
             if (candidate->name() == "Claude") claude = candidate;
         QVERIFY(claude);
-        // No conversation exists: the provider event alone updates the panel.
+        // A background provider snapshot must not appear in the selected Codex chat.
         const qint64 now = QDateTime::currentSecsSinceEpoch();
         const qint64 reset = now + 6 * 24 * 60 * 60;
         claude->updateUsage({{"limit", "seven_day"}, {"utilization", 0.2}, {"resetsAt", reset}, {"status", "allowed"}});
+        QCOMPARE(tree->topLevelItemCount(), 0);
+        startChat(window, "Claude", directory.path());
+        QCOMPARE(tree->topLevelItemCount(), 1);
+        QVERIFY(tree->isHeaderHidden());
+        auto *splitter = window.findChild<QSplitter *>("usageSplitter");
+        QVERIFY(splitter);
+        QVERIFY(splitter->handle(1)->isVisible());
+        QTRY_VERIFY(panel->height() > 0);
+        QVERIFY(panel->height() < tree->fontMetrics().height() * 3);
+        const int total = splitter->sizes().value(0) + splitter->sizes().value(1);
+        splitter->setSizes({5, total - 5});
+        QTRY_VERIFY(panel->height() <= 5);
+        splitter->setSizes({100, total - 100});
+        QTRY_VERIFY(panel->height() >= 90);
+        QVERIFY(QMetaObject::invokeMethod(splitter, "splitterMoved", Q_ARG(int, 100), Q_ARG(int, 1)));
         QTreeWidgetItem *weekly = nullptr;
         for (int i = 0; i < tree->topLevelItemCount(); ++i) {
             auto *item = tree->topLevelItem(i);
             if (item->text(0) == "Claude" && item->text(1) == "Week") {
                 weekly = item;
-                QVERIFY(i + 1 < tree->topLevelItemCount());
-                QCOMPARE(tree->topLevelItem(i + 1)->text(1), QString("5 h"));
+                QCOMPARE(tree->topLevelItemCount(), 1);
             }
         }
         QVERIFY(weekly);
@@ -141,6 +159,12 @@ void MainWindowTest::providerLimitsPanelAndVisibility()
         claude->updateUsage({{"limit", "seven_day"}, {"resetsAt", reset + 7 * 24 * 60 * 60}, {"status", "allowed"}});
         QCOMPARE(weekly->text(2), QString("Not reported"));
         QCOMPARE(weekly->data(4, Qt::UserRole).toInt(), int(UsagePace::Unknown));
+        auto *tabs = window.findChild<QTabWidget *>("chatTabs");
+        QVERIFY(tabs);
+        tabs->setCurrentIndex(0);
+        QCOMPARE(tree->topLevelItemCount(), 0);
+        tabs->setCurrentIndex(1);
+        QCOMPARE(tree->topLevelItemCount(), 1);
         visible->trigger();
         QVERIFY(!visible->isChecked());
         QVERIFY(panel->isHidden());
@@ -153,9 +177,14 @@ void MainWindowTest::providerLimitsPanelAndVisibility()
     QVERIFY(visible && panel);
     QVERIFY(!visible->isChecked());
     QVERIFY(panel->isHidden());
+    restarted.show();
     visible->trigger();
     QVERIFY(visible->isChecked());
     QVERIFY(!panel->isHidden());
+    QTRY_COMPARE(panel->height(), 100);
+    QFile savedSettings(directory.filePath("settings.json"));
+    QVERIFY(savedSettings.open(QIODevice::ReadOnly));
+    QCOMPARE(QJsonDocument::fromJson(savedSettings.readAll()).object().value("usagePanelHeight").toInt(), 100);
 }
 
 void MainWindowTest::audioChooserPathsAndLastDirectory()

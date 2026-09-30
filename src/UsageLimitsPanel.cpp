@@ -64,6 +64,9 @@ UsageLimitsPanel::UsageLimitsPanel(QWidget *parent) : QWidget(parent), tree_(new
     layout->setContentsMargins(0, 0, 0, 0);
     tree_->setObjectName("usageLimitsTree");
     tree_->setHeaderLabels({"Provider", "Window", "Remaining", "Resets", "Pace / break"});
+    tree_->setHeaderHidden(true);
+    tree_->setMinimumHeight(0);
+    tree_->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Ignored);
     tree_->setRootIsDecorated(false);
     tree_->setSelectionMode(QAbstractItemView::NoSelection);
     tree_->setFocusPolicy(Qt::NoFocus);
@@ -71,14 +74,21 @@ UsageLimitsPanel::UsageLimitsPanel(QWidget *parent) : QWidget(parent), tree_(new
     tree_->header()->setSectionResizeMode(QHeaderView::ResizeToContents);
     tree_->header()->setStretchLastSection(true);
     layout->addWidget(tree_);
-    setMinimumHeight(80);
-    setMaximumHeight(180);
+    setMinimumHeight(1);
+    setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Ignored);
     auto *timer = new QTimer(this);
     timer->setInterval(1000);
     connect(timer, &QTimer::timeout, this, [this] {
         if (isVisible()) refresh(QDateTime::currentSecsSinceEpoch());
     });
     timer->start();
+}
+
+QSize UsageLimitsPanel::sizeHint() const
+{
+    // Leave half of a second row visible to suggest that more windows can be revealed.
+    const int rowHeight = tree_->fontMetrics().height() + 4;
+    return QSize(500, rowHeight * 3 / 2 + 2 * tree_->frameWidth());
 }
 
 void UsageLimitsPanel::setLimits(const QList<ProviderLimits> &limits)
@@ -92,18 +102,6 @@ void UsageLimitsPanel::refresh(qint64 now)
     int row = 0;
     for (const ProviderLimits &provider : limits_) {
         QList<UsageLimit> windows = provider.windows;
-        // Empty entries explicitly mean not reported; they never imply available quota.
-        for (qint64 minutes : {qint64(7 * 24 * 60), qint64(5 * 60)}) {
-            const bool exists = std::any_of(windows.cbegin(), windows.cend(), [minutes](const UsageLimit &limit) {
-                return limit.windowMinutes == minutes;
-            });
-            if (!exists) {
-                UsageLimit missing;
-                missing.id = "unreported-" + QString::number(minutes);
-                missing.windowMinutes = minutes;
-                windows.append(missing);
-            }
-        }
         std::sort(windows.begin(), windows.end(), [](const UsageLimit &a, const UsageLimit &b) {
             return a.windowMinutes == b.windowMinutes ? a.id < b.id : a.windowMinutes > b.windowMinutes;
         });

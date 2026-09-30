@@ -18,6 +18,7 @@ class GeminiProvider;
 class MessageInput;
 class Notifier;
 class QToolButton;
+class QSplitter;
 class MruTabWidget;
 class QCheckBox;
 class QComboBox;
@@ -131,6 +132,8 @@ private:
     QPushButton *newChatButton_;
     QLabel *status_;
     UsageLimitsPanel *usage_;
+    QSplitter *usageSplitter_;
+    int usagePanelHeight_ = 0;
     QAction *usageVisibleAction_;
     QTreeWidget *conversationTree_;
     QSet<QString> expandedProviders_;
