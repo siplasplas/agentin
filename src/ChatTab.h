@@ -30,6 +30,8 @@ public:
     QString headerText() const;
     bool isLive() const { return live_; }
     bool hasMoreHistory() const { return hasMore_; }
+    // The user's messages in this conversation as far as loaded, oldest first, for recalling them.
+    QStringList userMessages() const { return historyMessages_ + sentMessages_; }
 
     // Live chat in the agent's directory; the conversation starts with the first message.
     void startDraft();
@@ -47,6 +49,7 @@ signals:
     // Title, header, live state or agent state changed.
     void changed();
     void textAppended();
+    void userMessagesChanged();
     // The agent needs an answer in a dialog, so the tab should be shown first.
     void activateRequested();
 
@@ -64,6 +67,8 @@ private:
     QString path_;
     QString title_;
     QString liveTranscript_;
+    QStringList historyMessages_;
+    QStringList sentMessages_;
     QString lockNotice_;
     bool live_ = false;
     bool hasMore_ = false;

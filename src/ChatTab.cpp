@@ -48,6 +48,9 @@ bool ChatTab::startNew(const QString &workingDirectory)
     title_ = "New chat";
     live_ = true;
     liveTranscript_.clear();
+    historyMessages_.clear();
+    sentMessages_.clear();
+    emit userMessagesChanged();
     document_->clear();
     emit changed();
     return true;
@@ -70,6 +73,9 @@ void ChatTab::showPreview(AgentProvider *provider, const QString &id, const QStr
     pendingAttach_ = false;
     hasMore_ = false;
     liveTranscript_.clear();
+    historyMessages_.clear();
+    sentMessages_.clear();
+    emit userMessagesChanged();
     document_->setPlainText("Loading the latest messages…");
     emit changed();
     agent_->loadHistory(id_, path_, false);
@@ -117,6 +123,8 @@ bool ChatTab::send(const QString &text)
         emit changed();
     }
     appendText("\nYou: " + text + '\n');
+    sentMessages_.append(text);
+    emit userMessagesChanged();
     return true;
 }
 
@@ -195,15 +203,22 @@ void ChatTab::showHistory(const QList<ChatEntry> &entries, bool hasMore, const Q
 {
     const QString name = provider_->name();
     QStringList blocks;
+    historyMessages_.clear();
     for (const ChatEntry &entry : entries) {
-        if (entry.role == "user") blocks.append("You: " + entry.text);
-        else if (entry.role == "tool") blocks.append("[" + name + " tool: " + entry.text + "]");
-        else blocks.append(name + ": " + entry.text);
+        if (entry.role == "user") {
+            historyMessages_.append(entry.text);
+            blocks.append("You: " + entry.text);
+        } else if (entry.role == "tool") {
+            blocks.append("[" + name + " tool: " + entry.text + "]");
+        } else {
+            blocks.append(name + ": " + entry.text);
+        }
     }
     if (!notice.isEmpty()) blocks.append("[" + notice + "]");
     else if (blocks.isEmpty()) blocks.append("[This conversation has no messages to show.]");
     document_->setPlainText(blocks.join("\n\n") + '\n' + (live_ ? liveTranscript_ : QString()));
     hasMore_ = hasMore;
+    emit userMessagesChanged();
     emit changed();
     emit textAppended();
 }

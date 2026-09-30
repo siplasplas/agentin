@@ -190,6 +190,14 @@ directory is passed as the CLI process directory. Headless mode uses the CLI's c
 policy; approval prompts are not shown as Qt dialogs.
 
 The client also supports `new`, `clear` (clears the log), `stop`, and `quit`.
+The message field grows with its text: Enter sends and Shift+Enter starts a new
+line. Up and Down move between lines and, on the first or last line, recall the
+previous or next message you wrote in the current tab's conversation; Page Up
+and Page Down always recall messages. After the newest message, the text you
+typed before browsing comes back. The messages come from the conversation's
+loaded history and from what you sent in the tab, so no separate history is
+stored; older messages become available after **Show earlier messages**.
+
 Any other text is sent to the chat in the current tab when it is not a read-only
 preview. Messages entered while a response is in progress are queued. Requests to
 approve an action or answer a question switch to their tab and appear in a

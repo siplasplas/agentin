@@ -4,6 +4,7 @@
 #include "CodexConnection.h"
 #include "GeminiAgent.h"
 #include "MainWindow.h"
+#include "MessageInput.h"
 
 #include <QComboBox>
 #include <QDateTime>
@@ -131,7 +132,7 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     effortInput_ = new QComboBox(central);
     effortInput_->setObjectName("effortSelect");
     effortInput_->setToolTip("Reasoning effort for the next messages in this chat");
-    input_ = new QLineEdit(central);
+    input_ = new MessageInput(central);
     input_->setObjectName("commandInput");
     sendButton_ = new QPushButton("Send", central);
     sendButton_->setObjectName("sendButton");
@@ -242,7 +243,7 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
 
     connect(modelInput_, QOverload<int>::of(&QComboBox::activated), this, &MainWindow::chooseModel);
     connect(effortInput_, QOverload<int>::of(&QComboBox::activated), this, &MainWindow::chooseModel);
-    connect(input_, &QLineEdit::returnPressed, this, &MainWindow::submitCommand);
+    connect(input_, &MessageInput::submitted, this, &MainWindow::submitCommand);
     connect(sendButton_, &QPushButton::clicked, this, &MainWindow::submitCommand);
     connect(stopButton_, &QPushButton::clicked, this, &MainWindow::requestStop);
     connect(newChatButton_, &QPushButton::clicked, this, &MainWindow::showNewConversationDialog);
@@ -286,7 +287,7 @@ MainWindow::~MainWindow()
 
 void MainWindow::submitCommand()
 {
-    const QString command = input_->text().trimmed();
+    const QString command = input_->toPlainText().trimmed();
     if (command.isEmpty()) return;
     input_->clear();
     const QString local = command.toLower();
@@ -630,6 +631,9 @@ QWidget *MainWindow::addChatTab(AgentProvider *selected, const QString &workingD
         chatView_->ensureCursorVisible();
     });
     connect(tab, &ChatTab::activateRequested, this, [this, page] { tabs_->setCurrentWidget(page); });
+    connect(tab, &ChatTab::userMessagesChanged, this, [this, page, tab] {
+        if (tabs_->currentWidget() == page) input_->setHistory(tab->userMessages());
+    });
     tabs_->addTab(page, selected->name());
     updateTab(page);
     return page;
@@ -649,6 +653,7 @@ void MainWindow::showCurrentTab()
 {
     QWidget *page = tabs_->currentWidget();
     ChatTab *tab = chatTab(page);
+    input_->setHistory(tab ? tab->userMessages() : QStringList());
     if (!tab) {
         chatPanel_->hide();
         chatPanel_->setParent(this);

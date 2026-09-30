@@ -34,6 +34,8 @@ add_executable(agentdeskt
     src/ProcessLocks.h
     src/MainWindow.cpp
     src/MainWindow.h
+    src/MessageInput.cpp
+    src/MessageInput.h
 )
 target_link_libraries(agentdeskt PRIVATE Qt6::Widgets qt-extra)
 target_include_directories(agentdeskt PRIVATE src)
@@ -66,6 +68,8 @@ if(BUILD_TESTING)
         src/ProcessLocks.h
         src/MainWindow.cpp
         src/MainWindow.h
+        src/MessageInput.cpp
+        src/MessageInput.h
     )
     target_link_libraries(agentdeskt_test PRIVATE Qt6::Widgets Qt6::Test qt-extra)
     target_include_directories(agentdeskt_test PRIVATE src)

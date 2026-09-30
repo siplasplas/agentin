@@ -146,7 +146,7 @@ for line in sys.stdin:
 
     MainWindow window(fakeServer, directory.path());
     window.show();
-    auto *input = window.findChild<QLineEdit *>("commandInput");
+    auto *input = window.findChild<QPlainTextEdit *>("commandInput");
     auto *output = window.findChild<QPlainTextEdit *>("log");
     auto *chat = window.findChild<QPlainTextEdit *>("chatView");
     QVERIFY(chat);
@@ -227,7 +227,7 @@ for line in sys.stdin:
 
     MainWindow window("/nonexistent/codex", directory.path(), python, fakeBridge);
     window.show();
-    auto *input = window.findChild<QLineEdit *>("commandInput");
+    auto *input = window.findChild<QPlainTextEdit *>("commandInput");
     auto *output = window.findChild<QPlainTextEdit *>("log");
     auto *chat = window.findChild<QPlainTextEdit *>("chatView");
     QVERIFY(chat);
@@ -308,7 +308,7 @@ for line in sys.stdin:
     script.close();
     MainWindow window("/nonexistent/codex", directory.path(), python, fakeBridge);
     window.show();
-    auto *input = window.findChild<QLineEdit *>("commandInput");
+    auto *input = window.findChild<QPlainTextEdit *>("commandInput");
     auto *output = window.findChild<QPlainTextEdit *>("log");
     auto *chat = window.findChild<QPlainTextEdit *>("chatView");
     QVERIFY(chat);
@@ -355,21 +355,21 @@ print(json.dumps({"event": "result", "result": {
 
     const QString indexPath = directory.filePath("codex-conversations.json");
     MainWindow window("/nonexistent/codex", directory.path(), {}, {}, "gemini", nullptr, indexPath, fakeAgy);
-    auto *input = window.findChild<QLineEdit *>("commandInput");
+    auto *input = window.findChild<QPlainTextEdit *>("commandInput");
     auto *output = window.findChild<QPlainTextEdit *>("log");
     auto *chat = window.findChild<QPlainTextEdit *>("chatView");
     QVERIFY(chat);
     auto *tree = window.findChild<QTreeWidget *>("conversationTree");
     QVERIFY(input && output && tree);
     startChat(window, "Antigravity", directory.path());
-    input->setText("help");
+    input->setPlainText("help");
     QTest::keyClick(input, Qt::Key_Return);
     QTRY_VERIFY(output->toPlainText().contains("Usage: agy"));
-    input->setText("first");
+    input->setPlainText("first");
     QTest::keyClick(input, Qt::Key_Return);
     QTRY_VERIFY(chat->toPlainText().contains("Antigravity: first answered"));
     QTRY_VERIFY(QFileInfo(directory.filePath("antigravity-conversations.json")).exists());
-    input->setText("second");
+    input->setPlainText("second");
     QTest::keyClick(input, Qt::Key_Return);
     QTRY_VERIFY(chat->toPlainText().contains("Antigravity: second answered"));
     for (int i = 0; i < tree->topLevelItemCount(); ++i) {
@@ -412,7 +412,7 @@ else:
     QVERIFY(script.setPermissions(QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner));
     MainWindow window("/nonexistent/codex", directory.path(), {}, {}, fakeGemini);
     window.show();
-    auto *input = window.findChild<QLineEdit *>("commandInput");
+    auto *input = window.findChild<QPlainTextEdit *>("commandInput");
     auto *output = window.findChild<QPlainTextEdit *>("log");
     auto *chat = window.findChild<QPlainTextEdit *>("chatView");
     QVERIFY(chat);
@@ -578,7 +578,7 @@ for line in sys.stdin:
         auto *chat = window.findChild<QPlainTextEdit *>("chatView");
         auto *header = window.findChild<QLabel *>("chatHeader");
         auto *loadEarlier = window.findChild<QPushButton *>("loadEarlierButton");
-        auto *input = window.findChild<QLineEdit *>("commandInput");
+        auto *input = window.findChild<QPlainTextEdit *>("commandInput");
         auto *sendButton = window.findChild<QPushButton *>("sendButton");
         QVERIFY(chat && header && loadEarlier && input && sendButton);
         QTest::mouseClick(tree->viewport(), Qt::LeftButton, {}, tree->visualItemRect(chatItem).center());
@@ -596,7 +596,7 @@ for line in sys.stdin:
         QVERIFY(full.indexOf("You: Old question") < full.indexOf("Codex: Old answer"));
         QVERIFY(full.indexOf("Codex: Old answer") < full.indexOf("You: Latest question"));
         QVERIFY(!loadEarlier->isVisible());
-        input->setText("write something");
+        input->setPlainText("write something");
         QTest::keyClick(input, Qt::Key_Return);
         QVERIFY(output->toPlainText().contains("[The displayed chat is a read-only preview."));
         QVERIFY(log.open(QIODevice::ReadOnly));
@@ -620,7 +620,7 @@ for line in sys.stdin:
         QTRY_VERIFY(chat->toPlainText().contains("Codex: Latest answer"));
         QVERIFY(!header->text().contains("read-only"));
         QVERIFY(output->toPlainText().contains("[Resumed Codex conversation: new-102]"));
-        input->setText("continue here");
+        input->setPlainText("continue here");
         QTest::keyClick(input, Qt::Key_Return);
         QTRY_VERIFY(chat->toPlainText().contains("You: continue here"));
         QVERIFY(chat->toPlainText().contains("You: Latest question"));
@@ -916,7 +916,7 @@ for line in sys.stdin:
     auto *chat = window.findChild<QPlainTextEdit *>("chatView");
     auto *output = window.findChild<QPlainTextEdit *>("log");
     auto *header = window.findChild<QLabel *>("chatHeader");
-    auto *input = window.findChild<QLineEdit *>("commandInput");
+    auto *input = window.findChild<QPlainTextEdit *>("commandInput");
     auto *sendButton = window.findChild<QPushButton *>("sendButton");
     QVERIFY(tree && chat && output && header && input && sendButton);
     tree->topLevelItem(1)->setExpanded(true);
@@ -936,7 +936,7 @@ for line in sys.stdin:
     QTRY_VERIFY(sendButton->isEnabled());
     QVERIFY(!header->text().contains("locked"));
     QVERIFY(!header->text().contains("read-only"));
-    input->setText("more");
+    input->setPlainText("more");
     QTest::keyClick(input, Qt::Key_Return);
     QTRY_VERIFY(chat->toPlainText().contains("Claude: Continued"));
     const QString transcript = chat->toPlainText();

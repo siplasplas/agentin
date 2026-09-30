@@ -11,6 +11,7 @@ class ChatTab;
 class ClaudeProvider;
 class CodexConnection;
 class GeminiProvider;
+class MessageInput;
 class MruTabWidget;
 class QComboBox;
 class QLabel;
@@ -81,7 +82,7 @@ private:
     QComboBox *effortInput_;
     // What the model controls last showed; rebuilding them would close an open drop-down list.
     QString modelControlsState_;
-    QLineEdit *input_;
+    MessageInput *input_;
     QPushButton *sendButton_;
     QPushButton *stopButton_;
     QPushButton *newChatButton_;
