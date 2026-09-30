@@ -13,8 +13,8 @@ class MessageInput : public QPlainTextEdit
 
 public:
     enum class EnterPolicy {
-        // Enter sends unless the user typed a line break in this message: a single line, a pasted text
-        // or a recalled message is sent, while a message written over several lines gets new lines.
+        // Enter sends only text the user did not type, that is a recalled message or pasted text
+        // left unchanged; while the user types, Enter starts a new line and Ctrl+Enter sends.
         Smart,
         Send,
         NewLine,
@@ -39,7 +39,6 @@ private:
     bool onLastLine() const;
     void recall(int step);
     void submit();
-    void insertLineBreak();
     void fitHeight();
 
     QStringList history_;
@@ -47,6 +46,6 @@ private:
     qsizetype position_ = 0;
     QString draft_;
     EnterPolicy enterPolicy_ = EnterPolicy::Smart;
-    // The user typed a line break in the current text; line breaks from pasting or recalling do not count.
-    bool typedLineBreak_ = false;
+    // The user changed the current text with the keyboard; pasting and recalling do not count.
+    bool typed_ = false;
 };

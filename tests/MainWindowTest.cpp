@@ -158,7 +158,7 @@ for line in sys.stdin:
     QVERIFY(!window.findChild<QComboBox *>("providerSelect"));
 
     QTest::keyClicks(input, "help");
-    QTest::keyClick(input, Qt::Key_Return);
+    QTest::keyClick(input, Qt::Key_Return, Qt::ControlModifier);
     QVERIFY(output->toPlainText().contains("Commands:"));
     QTRY_VERIFY(output->toPlainText().contains("Codex connection: codex app-server --stdio"));
     QTRY_VERIFY(output->toPlainText().contains("--stdio  Use stdio transport"));
@@ -166,22 +166,22 @@ for line in sys.stdin:
     QVERIFY(!output->toPlainText().contains("[Connected to Codex]"));
 
     QTest::keyClicks(input, "test");
-    QTest::keyClick(input, Qt::Key_Return);
+    QTest::keyClick(input, Qt::Key_Return, Qt::ControlModifier);
     QTRY_VERIFY(output->toPlainText().contains("[Connected to Codex]"));
     QTRY_VERIFY(chat->toPlainText().contains("Codex: Hello from App Server"));
     QCOMPARE(chat->toPlainText().count("Hello from App Server"), 1);
     QVERIFY(!output->toPlainText().contains("Hello from App Server"));
 
     QTest::keyClicks(input, "long response");
-    QTest::keyClick(input, Qt::Key_Return);
+    QTest::keyClick(input, Qt::Key_Return, Qt::ControlModifier);
     QTRY_VERIFY(stopButton->isEnabled());
     QTest::mouseClick(stopButton, Qt::LeftButton);
     QTRY_VERIFY(output->toPlainText().contains("[Codex response: interrupted]"));
 
     QTest::keyClicks(input, "long race");
-    QTest::keyClick(input, Qt::Key_Return);
+    QTest::keyClick(input, Qt::Key_Return, Qt::ControlModifier);
     QTest::keyClicks(input, "stop");
-    QTest::keyClick(input, Qt::Key_Return);
+    QTest::keyClick(input, Qt::Key_Return, Qt::ControlModifier);
     QTRY_VERIFY(output->toPlainText().count("[Codex response: interrupted]") == 2);
 }
 
@@ -244,7 +244,7 @@ for line in sys.stdin:
     const QByteArray previousPath = qgetenv("PATH");
     qputenv("PATH", directory.path().toLocal8Bit());
     QTest::keyClicks(input, "help");
-    QTest::keyClick(input, Qt::Key_Return);
+    QTest::keyClick(input, Qt::Key_Return, Qt::ControlModifier);
     if (previousPath.isNull()) qunsetenv("PATH");
     else qputenv("PATH", previousPath);
     QVERIFY(output->toPlainText().contains("Claude Agent SDK:"));
@@ -252,11 +252,11 @@ for line in sys.stdin:
     QTRY_VERIFY(output->toPlainText().contains("Usage: claude [OPTIONS]"));
 
     QTest::keyClicks(input, "hello");
-    QTest::keyClick(input, Qt::Key_Return);
+    QTest::keyClick(input, Qt::Key_Return, Qt::ControlModifier);
     QTRY_VERIFY(chat->toPlainText().contains("Claude: Hello from Claude"));
 
     QTest::keyClicks(input, "long response");
-    QTest::keyClick(input, Qt::Key_Return);
+    QTest::keyClick(input, Qt::Key_Return, Qt::ControlModifier);
     QTRY_VERIFY(stopButton->isEnabled());
     QTest::mouseClick(stopButton, Qt::LeftButton);
     QTRY_VERIFY(output->toPlainText().contains("[Claude response: interrupted]"));
@@ -278,7 +278,7 @@ for line in sys.stdin:
         buttons->button(QDialogButtonBox::Ok)->click();
     });
     QTest::keyClicks(input, "new");
-    QTest::keyClick(input, Qt::Key_Return);
+    QTest::keyClick(input, Qt::Key_Return, Qt::ControlModifier);
     QVERIFY(rejectedMissingDirectory);
     QTRY_VERIFY(output->toPlainText().count("[Connected to Claude Agent SDK]") == 2);
 }
@@ -317,7 +317,7 @@ for line in sys.stdin:
     startChat(window, "GLM", directory.path());
     QTRY_VERIFY(output->toPlainText().contains("[Connected to GLM via Claude Agent SDK]"));
     QTest::keyClicks(input, "hello");
-    QTest::keyClick(input, Qt::Key_Return);
+    QTest::keyClick(input, Qt::Key_Return, Qt::ControlModifier);
     QTRY_VERIFY(chat->toPlainText().contains("GLM: Hello from GLM"));
 }
 
@@ -363,14 +363,14 @@ print(json.dumps({"event": "result", "result": {
     QVERIFY(input && output && tree);
     startChat(window, "Antigravity", directory.path());
     input->setPlainText("help");
-    QTest::keyClick(input, Qt::Key_Return);
+    QTest::keyClick(input, Qt::Key_Return, Qt::ControlModifier);
     QTRY_VERIFY(output->toPlainText().contains("Usage: agy"));
     input->setPlainText("first");
-    QTest::keyClick(input, Qt::Key_Return);
+    QTest::keyClick(input, Qt::Key_Return, Qt::ControlModifier);
     QTRY_VERIFY(chat->toPlainText().contains("Antigravity: first answered"));
     QTRY_VERIFY(QFileInfo(directory.filePath("antigravity-conversations.json")).exists());
     input->setPlainText("second");
-    QTest::keyClick(input, Qt::Key_Return);
+    QTest::keyClick(input, Qt::Key_Return, Qt::ControlModifier);
     QTRY_VERIFY(chat->toPlainText().contains("Antigravity: second answered"));
     for (int i = 0; i < tree->topLevelItemCount(); ++i) {
         if (tree->topLevelItem(i)->text(0) == "Antigravity") {
@@ -422,16 +422,16 @@ else:
     QVERIFY(stopButton);
     startChat(window, "Gemini", directory.path());
     QTest::keyClicks(input, "help");
-    QTest::keyClick(input, Qt::Key_Return);
+    QTest::keyClick(input, Qt::Key_Return, Qt::ControlModifier);
     QTRY_VERIFY(output->toPlainText().contains("Usage: gemini"));
     QTest::keyClicks(input, "first");
-    QTest::keyClick(input, Qt::Key_Return);
+    QTest::keyClick(input, Qt::Key_Return, Qt::ControlModifier);
     QTRY_VERIFY(chat->toPlainText().contains("Gemini: first answered"));
     QTest::keyClicks(input, "second");
-    QTest::keyClick(input, Qt::Key_Return);
+    QTest::keyClick(input, Qt::Key_Return, Qt::ControlModifier);
     QTRY_VERIFY(chat->toPlainText().contains("Gemini: second answered"));
     QTest::keyClicks(input, "long");
-    QTest::keyClick(input, Qt::Key_Return);
+    QTest::keyClick(input, Qt::Key_Return, Qt::ControlModifier);
     QTRY_VERIFY(stopButton->isEnabled());
     QTest::mouseClick(stopButton, Qt::LeftButton);
     QTRY_VERIFY(output->toPlainText().contains("[Gemini response: interrupted]"));
@@ -597,7 +597,7 @@ for line in sys.stdin:
         QVERIFY(full.indexOf("Codex: Old answer") < full.indexOf("You: Latest question"));
         QVERIFY(!loadEarlier->isVisible());
         input->setPlainText("write something");
-        QTest::keyClick(input, Qt::Key_Return);
+        QTest::keyClick(input, Qt::Key_Return, Qt::ControlModifier);
         QVERIFY(output->toPlainText().contains("[The displayed chat is a read-only preview."));
         QVERIFY(log.open(QIODevice::ReadOnly));
         QVERIFY(!QString::fromUtf8(log.readAll()).contains("turn\n"));
@@ -621,7 +621,7 @@ for line in sys.stdin:
         QVERIFY(!header->text().contains("read-only"));
         QVERIFY(output->toPlainText().contains("[Resumed Codex conversation: new-102]"));
         input->setPlainText("continue here");
-        QTest::keyClick(input, Qt::Key_Return);
+        QTest::keyClick(input, Qt::Key_Return, Qt::ControlModifier);
         QTRY_VERIFY(chat->toPlainText().contains("You: continue here"));
         QVERIFY(chat->toPlainText().contains("You: Latest question"));
         const auto requested = [&log] {
@@ -937,7 +937,7 @@ for line in sys.stdin:
     QVERIFY(!header->text().contains("locked"));
     QVERIFY(!header->text().contains("read-only"));
     input->setPlainText("more");
-    QTest::keyClick(input, Qt::Key_Return);
+    QTest::keyClick(input, Qt::Key_Return, Qt::ControlModifier);
     QTRY_VERIFY(chat->toPlainText().contains("Claude: Continued"));
     const QString transcript = chat->toPlainText();
     QVERIFY(transcript.indexOf("Claude: Saved answer") < transcript.indexOf("You: more"));

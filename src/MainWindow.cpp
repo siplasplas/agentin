@@ -411,7 +411,7 @@ void MainWindow::showOptionsDialog()
     auto *enterForm = new QFormLayout;
     auto *enterInput = new QComboBox(&dialog);
     enterInput->setObjectName("enterKeyPolicy");
-    enterInput->addItem("Send, unless you typed a line break in the message",
+    enterInput->addItem("New line while typing; send a recalled or pasted message",
                         QVariant::fromValue(int(MessageInput::EnterPolicy::Smart)));
     enterInput->addItem("Always send", QVariant::fromValue(int(MessageInput::EnterPolicy::Send)));
     enterInput->addItem("Always start a new line", QVariant::fromValue(int(MessageInput::EnterPolicy::NewLine)));
@@ -730,7 +730,7 @@ void MainWindow::updateStatus()
         sendButton_->setText("Send");
         sendButton_->setEnabled(false);
         stopButton_->setEnabled(false);
-        input_->setPlaceholderText("Type help or new, then press Enter");
+        input_->setPlaceholderText("Type help or new, then press Ctrl+Enter");
         updateModelControls();
         updateUsage();
         return;
@@ -745,7 +745,7 @@ void MainWindow::updateStatus()
     stopButton_->setEnabled(agent->canInterrupt());
     sendButton_->setText("Send to " + tab->provider()->name());
     sendButton_->setEnabled(tab->isLive());
-    input_->setPlaceholderText(tab->isLive() ? "Message or help; Shift+Enter starts a new line, Ctrl+Enter sends"
+    input_->setPlaceholderText(tab->isLive() ? "Message or help, then Ctrl+Enter to send"
                                              : "Read-only preview. Type help, new or clear, then press Enter");
     updateModelControls();
     updateUsage();

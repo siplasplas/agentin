@@ -191,9 +191,10 @@ policy; approval prompts are not shown as Qt dialogs.
 
 The client also supports `new`, `clear` (clears the log), `stop`, and `quit`.
 The message field grows with its text. Shift+Enter always starts a new line and
-Ctrl+Enter always sends. By default Enter sends unless you typed a line break in
-the message yourself: a single line, pasted text or a recalled message is sent,
-while in a message you are writing over several lines Enter adds another line.
+Ctrl+Enter always sends. By default Enter starts a new line while you type, even
+in a single line, so a message is not sent by accident; Enter sends only text you
+did not type, that is a recalled message or pasted text left unchanged. Any
+change made with the keyboard switches Enter back to a new line.
 **Settings → Options…** can make Enter always send or always start a new line;
 the choice is saved as `enterKey` in `settings.json`. Up and Down move between lines and, on the first or last line, recall the
 previous or next message you wrote in the current tab's conversation; Page Up
