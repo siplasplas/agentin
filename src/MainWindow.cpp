@@ -1,6 +1,7 @@
 #include "AntigravityAgent.h"
 #include "ApprovalRules.h"
 #include "ChatTab.h"
+#include "ChatView.h"
 #include "ClaudeAgent.h"
 #include "CodexConnection.h"
 #include "GeminiAgent.h"
@@ -24,8 +25,10 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QFormLayout>
+#include <QFontDialog>
 #include <QHBoxLayout>
 #include <QJsonArray>
+#include <QInputDialog>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QLabel>
@@ -129,6 +132,32 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     auto *settingsMenu = menuBar()->addMenu("Settings");
     auto *optionsAction = settingsMenu->addAction("Options…");
     connect(optionsAction, &QAction::triggered, this, &MainWindow::showOptionsDialog);
+    auto *fontAction = settingsMenu->addAction("Chat font…");
+    connect(fontAction, &QAction::triggered, this, [this] {
+        bool accepted = false;
+        const QFont chosen = QFontDialog::getFont(&accepted, chatView_->font(), this, "Chat font");
+        if (accepted) {
+            applyChatFont(chosen);
+            saveSettings();
+        }
+    });
+    auto *fontSizeAction = settingsMenu->addAction("Chat font size…");
+    connect(fontSizeAction, &QAction::triggered, this, [this] {
+        QInputDialog dialog(this);
+        dialog.setWindowTitle("Chat font size");
+        dialog.setLabelText("Size in points:");
+        dialog.setInputMode(QInputDialog::DoubleInput);
+        dialog.setDoubleRange(6.0, 72.0);
+        dialog.setDoubleDecimals(1);
+        dialog.setDoubleStep(0.5);
+        dialog.setDoubleValue(chatView_->font().pointSizeF());
+        if (dialog.exec() == QDialog::Accepted) {
+            QFont font = chatView_->font();
+            font.setPointSizeF(dialog.doubleValue());
+            applyChatFont(font);
+            saveSettings();
+        }
+    });
     auto *notificationsAction = settingsMenu->addAction("Notifications…");
     connect(notificationsAction, &QAction::triggered, this, &MainWindow::showNotificationsDialog);
     auto *approvalsAction = settingsMenu->addAction("Approvals…");
@@ -184,7 +213,7 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     loadEarlierButton_ = new QPushButton("Show earlier messages", chatPanel_);
     loadEarlierButton_->setObjectName("loadEarlierButton");
     loadEarlierButton_->setVisible(false);
-    chatView_ = new QPlainTextEdit(chatPanel_);
+    chatView_ = new ChatView(chatPanel_);
     chatView_->setObjectName("chatView");
     chatView_->setReadOnly(true);
     chatView_->setLineWrapMode(QPlainTextEdit::WidgetWidth);
@@ -533,6 +562,10 @@ void MainWindow::loadSettings()
     QFile file(QDir(dataDirectory_).filePath("settings.json"));
     const QJsonObject settings = file.open(QIODevice::ReadOnly) ? QJsonDocument::fromJson(file.readAll()).object()
                                                                 : QJsonObject();
+    QFont chatFont("Monospace", 10);
+    chatFont.setStyleHint(QFont::TypeWriter);
+    if (settings.value("chatFont").isString()) chatFont.fromString(settings.value("chatFont").toString());
+    applyChatFont(chatFont);
     const QJsonObject agents = settings.value("agents").toObject();
     for (AgentProvider *listed : providers_) {
         const QJsonObject options = agents.value(listed->name()).toObject();
@@ -558,6 +591,17 @@ void MainWindow::loadSettings()
                                                     : MessageInput::EnterPolicy::Smart));
 }
 
+void MainWindow::applyChatFont(const QFont &font)
+{
+    chatView_->setFont(font);
+    input_->setFont(font);
+    log_->setFont(font);
+    emptyDocument_->setDefaultFont(font);
+    for (int i = 0; i < tabs_->count(); ++i) {
+        if (ChatTab *tab = chatTab(tabs_->widget(i))) tab->document()->setDefaultFont(font);
+    }
+}
+
 void MainWindow::saveSettings()
 {
     const MessageInput::EnterPolicy policy = input_->enterPolicy();
@@ -572,6 +616,7 @@ void MainWindow::saveSettings()
         || file.write(QJsonDocument(QJsonObject{{"version", 1}, {"enterKey", enterKey},
                                                          {"enterSendsUpTo", input_->shortMessageLength()},
                                                          {"undoAfterSend", undoAfterSend_},
+                                                         {"chatFont", chatView_->font().toString()},
                                                          {"notifications", notifier_->settings().toJson()},
                                                          {"glmModels", QJsonArray::fromStringList(glm_->extraModels())},
                                                          {"agents", agents}})
@@ -1083,6 +1128,7 @@ QWidget *MainWindow::addChatTab(AgentProvider *selected, const QString &workingD
     layout->setContentsMargins(0, 0, 0, 0);
     auto *tab = new ChatTab(selected, workingDirectory, page);
     tab->setTurnLocks(turnLocks_);
+    tab->document()->setDefaultFont(chatView_->font());
     connect(tab, &ChatTab::logMessage, this, &MainWindow::appendLine);
     connect(tab, &ChatTab::changed, this, [this, page] { updateTab(page); });
     connect(tab, &ChatTab::textAppended, this, [this, page] {
@@ -1090,6 +1136,7 @@ QWidget *MainWindow::addChatTab(AgentProvider *selected, const QString &workingD
             tabs_->setTabAttention(page, true);
             return;
         }
+        chatView_->refreshTools();
         chatView_->moveCursor(QTextCursor::End);
         chatView_->ensureCursorVisible();
     });
@@ -1145,6 +1192,8 @@ void MainWindow::showCurrentTab()
         }
         if (chatView_->document() != tab->document()) {
             chatView_->setDocument(tab->document());
+            tab->document()->setDefaultFont(chatView_->font());
+            chatView_->refreshTools();
             chatView_->moveCursor(QTextCursor::End);
             chatView_->ensureCursorVisible();
         }

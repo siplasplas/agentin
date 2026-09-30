@@ -18,6 +18,8 @@ add_executable(agentdeskt
     src/AgentBackend.h
     src/ApprovalRules.cpp
     src/ApprovalRules.h
+    src/ChatView.cpp
+    src/ChatView.h
     src/ChatTab.cpp
     src/ChatTab.h
     src/CodexAgent.cpp
@@ -58,6 +60,8 @@ if(BUILD_TESTING)
         src/AgentBackend.h
         src/ApprovalRules.cpp
         src/ApprovalRules.h
+        src/ChatView.cpp
+        src/ChatView.h
         src/ChatTab.cpp
         src/ChatTab.h
         src/CodexAgent.cpp

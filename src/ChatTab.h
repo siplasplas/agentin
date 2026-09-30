@@ -101,6 +101,9 @@ signals:
 private:
     void setAgent(AgentBackend *agent);
     void appendText(const QString &text);
+    void appendToolText(const QString &text);
+    int toolGroup_ = 0;
+    int nextToolGroup_ = 0;
     void showHistory(const QList<ChatEntry> &entries, bool hasMore, const QString &notice);
     void finishQuestions();
     // Hands the next message to the agent once the previous turn has ended and the directory is free.

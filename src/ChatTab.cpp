@@ -1,4 +1,5 @@
 #include "ChatTab.h"
+#include "ChatView.h"
 
 #include "TurnLocks.h"
 
@@ -168,6 +169,7 @@ bool ChatTab::startNew(const QString &workingDirectory)
     title_ = "New chat";
     live_ = true;
     liveTranscript_.clear();
+    toolGroup_ = 0;
     turnUsage_ = {};
     conversationUsage_ = {};
     conversationUsageFromAgent_ = false;
@@ -196,6 +198,7 @@ void ChatTab::showPreview(AgentProvider *provider, const QString &id, const QStr
     pendingAttach_ = false;
     hasMore_ = false;
     liveTranscript_.clear();
+    toolGroup_ = 0;
     turnUsage_ = {};
     conversationUsage_ = {};
     conversationUsageFromAgent_ = false;
@@ -271,11 +274,24 @@ void ChatTab::setAgent(AgentBackend *agent)
     connect(agent, &AgentBackend::messageDelta, this, &ChatTab::appendText);
     connect(agent, &AgentBackend::messageFinished, this, [this] { appendText("\n"); });
     connect(agent, &AgentBackend::toolStarted, this, [this, name](const QString &tool, const QString &details) {
-        appendText("\n[" + name + " tool: " + tool + "] " + details + '\n');
+        toolGroup_ = 0;
+        appendText("\n[" + name + " tool: " + tool + "] " + details.simplified().left(120) + '\n');
+        toolGroup_ = ++nextToolGroup_;
+        QTextBlock header = document_->lastBlock().previous();
+        auto *data = new ToolBlockData;
+        data->group = toolGroup_;
+        data->header = true;
+        header.setUserData(data);
+        if (details != details.simplified().left(120)) appendToolText(details + '\n');
+        else emit textAppended();
     });
-    connect(agent, &AgentBackend::toolOutput, this, &ChatTab::appendText);
+    connect(agent, &AgentBackend::toolOutput, this, &ChatTab::appendToolText);
     connect(agent, &AgentBackend::toolFinished, this, [this](const QString &tool, const QString &status) {
-        appendText("\n[" + tool + ": " + status + "]\n");
+        // Keep the final status visible even while the output is folded.
+        appendToolText("\n");
+        toolGroup_ = 0;
+        document_->lastBlock().setUserData(nullptr);
+        appendText("[" + tool + ": " + status + "]\n");
     });
     connect(agent, &AgentBackend::turnCompleted, this, [this, name](const QString &status, const QString &details) {
         // Requests of a finished turn can no longer be answered.
@@ -366,24 +382,85 @@ void ChatTab::appendText(const QString &text)
     emit textAppended();
 }
 
+void ChatTab::appendToolText(const QString &text)
+{
+    if (!live_ || text.isEmpty()) return;
+    if (!toolGroup_) {
+        appendText(text);
+        return;
+    }
+    const int start = document_->characterCount() - 1;
+    // Tag before announcing the update so the view never displays the full output briefly.
+    liveTranscript_ += text;
+    QTextCursor cursor(document_);
+    cursor.movePosition(QTextCursor::End);
+    cursor.insertText(text);
+    for (QTextBlock block = document_->findBlock(start); block.isValid(); block = block.next()) {
+        auto *data = new ToolBlockData;
+        data->group = toolGroup_;
+        block.setUserData(data);
+    }
+    emit textAppended();
+}
+
 void ChatTab::showHistory(const QList<ChatEntry> &entries, bool hasMore, const QString &notice)
 {
+    struct SavedToolBlock { int offset; int group; bool header; bool collapsed; };
+    QList<SavedToolBlock> saved;
+    const int oldPrefix = document_->characterCount() - 1 - liveTranscript_.size();
+    if (live_) {
+        for (QTextBlock block = document_->begin(); block.isValid(); block = block.next()) {
+            auto *data = dynamic_cast<ToolBlockData *>(block.userData());
+            if (data && block.position() >= oldPrefix)
+                saved.append({block.position() - oldPrefix, data->group, data->header, data->collapsed});
+        }
+    }
     const QString name = provider_->name();
     QStringList blocks;
+    QList<int> historyTools;
     historyMessages_.clear();
     for (const ChatEntry &entry : entries) {
         if (entry.role == "user") {
             historyMessages_.append(entry.text);
             blocks.append("You: " + entry.text);
         } else if (entry.role == "tool") {
-            blocks.append("[" + name + " tool: " + entry.text + "]");
+            historyTools.append(blocks.size());
+            const QString heading = entry.text.section('\n', 0, 0).left(120);
+            blocks.append("[" + name + " tool: " + heading + "]"
+                          + (entry.text == heading ? QString() : "\n" + entry.text));
         } else {
             blocks.append(name + ": " + entry.text);
         }
     }
     if (!notice.isEmpty()) blocks.append("[" + notice + "]");
     else if (blocks.isEmpty()) blocks.append("[This conversation has no messages to show.]");
-    document_->setPlainText(blocks.join("\n\n") + '\n' + (live_ ? liveTranscript_ : QString()));
+    const QString prefix = blocks.join("\n\n") + '\n';
+    document_->setPlainText(prefix + (live_ ? liveTranscript_ : QString()));
+    int offset = 0;
+    for (int i = 0; i < blocks.size(); ++i) {
+        if (historyTools.contains(i)) {
+            const int group = ++nextToolGroup_;
+            const int end = offset + blocks.at(i).size();
+            bool header = true;
+            for (QTextBlock block = document_->findBlock(offset); block.isValid() && block.position() < end;
+                 block = block.next()) {
+                auto *data = new ToolBlockData;
+                data->group = group;
+                data->header = header;
+                block.setUserData(data);
+                header = false;
+            }
+        }
+        offset += blocks.at(i).size() + 2;
+    }
+    for (const SavedToolBlock &item : saved) {
+        QTextBlock block = document_->findBlock(prefix.size() + item.offset);
+        auto *data = new ToolBlockData;
+        data->group = item.group;
+        data->header = item.header;
+        data->collapsed = item.collapsed;
+        block.setUserData(data);
+    }
     hasMore_ = hasMore;
     emit userMessagesChanged();
     emit changed();

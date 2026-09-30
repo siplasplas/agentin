@@ -9,6 +9,7 @@
 class AgentProvider;
 class AntigravityProvider;
 class ChatTab;
+class ChatView;
 class ClaudeProvider;
 class CodexConnection;
 class GeminiProvider;
@@ -55,6 +56,7 @@ private:
     void loadSettings();
     void saveSettings();
     void showOptionsDialog();
+    void applyChatFont(const QFont &font);
     void showApprovalsDialog();
     void showNotificationsDialog();
     void showMuteState();
@@ -96,7 +98,7 @@ private:
     QWidget *chatPanel_;
     QLabel *chatHeader_;
     QPushButton *loadEarlierButton_;
-    QPlainTextEdit *chatView_;
+    ChatView *chatView_;
     QTextDocument *emptyDocument_;
     // Shows the current tab's waiting approval or question below the chat.
     QWidget *requestPanel_;
