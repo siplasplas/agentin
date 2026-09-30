@@ -312,7 +312,8 @@ void MainWindow::submitCommand()
 {
     const QString command = input_->toPlainText().trimmed();
     if (command.isEmpty()) return;
-    input_->clear();
+    // Clearing is undoable, so Ctrl+Z brings a sent message back for editing.
+    input_->replaceText({});
     const QString local = command.toLower();
 
     if (local == "help" || local == "/help") {

@@ -28,7 +28,16 @@ void MessageInput::setHistory(const QStringList &messages)
     const bool browsing = position_ < history_.size();
     history_ = messages;
     position_ = history_.size();
-    if (browsing) setPlainText(draft_);
+    if (browsing) replaceText(draft_);
+}
+
+void MessageInput::replaceText(const QString &text)
+{
+    QTextCursor cursor(document());
+    cursor.beginEditBlock();
+    cursor.select(QTextCursor::Document);
+    cursor.insertText(text);
+    cursor.endEditBlock();
 }
 
 void MessageInput::keyPressEvent(QKeyEvent *event)
@@ -133,7 +142,7 @@ void MessageInput::recall(int step)
     if (target < 0 || target > history_.size()) return;
     if (position_ == history_.size()) draft_ = toPlainText();
     position_ = target;
-    setPlainText(position_ == history_.size() ? draft_ : history_.at(position_));
+    replaceText(position_ == history_.size() ? draft_ : history_.at(position_));
     typed_ = false;
     updateEnterAction();
     moveCursor(step < 0 ? QTextCursor::End : QTextCursor::Start);

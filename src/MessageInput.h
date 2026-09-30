@@ -33,6 +33,8 @@ public:
 
     // Earlier messages of the conversation, oldest first. Resets browsing.
     void setHistory(const QStringList &messages);
+    // Replaces the text as one edit that Ctrl+Z can undo, unlike setPlainText() and clear().
+    void replaceText(const QString &text);
 
 signals:
     void submitted();
