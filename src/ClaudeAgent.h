@@ -69,7 +69,7 @@ private:
     QHash<int, int> pendingQuestionCounts_;
     QList<QProcess *> helperProcesses_;
     quint64 historyGeneration_ = 0;
-    int historyLimit_ = 0;
+    HistoryPages history_;
     bool ready_ = false;
     bool busy_ = false;
     bool stopRequested_ = false;

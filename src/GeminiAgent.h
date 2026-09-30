@@ -57,7 +57,7 @@ private:
     QString errorDetails_;
     QStringList queuedPrompts_;
     QHash<QString, QString> sessionFiles_;
-    int historyLimit_ = 0;
+    HistoryPages history_;
     bool executableChecked_ = false;
     bool busy_ = false;
     bool stopRequested_ = false;

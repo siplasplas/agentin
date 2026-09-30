@@ -13,6 +13,25 @@ struct ChatEntry
     QString text;
 };
 
+// A conversation read in full once and revealed page by page from its end, for agents whose
+// history source cannot be paged.
+struct HistoryPages
+{
+    QString id;
+    QList<ChatEntry> entries;
+    qsizetype shown = 0;
+
+    void reset(const QString &conversation, const QList<ChatEntry> &all, qsizetype page)
+    {
+        id = conversation;
+        entries = all;
+        shown = qMin(page, all.size());
+    }
+    void showMore(qsizetype page) { shown = qMin(shown + page, entries.size()); }
+    QList<ChatEntry> visible() const { return entries.mid(entries.size() - shown); }
+    bool hasMore() const { return shown < entries.size(); }
+};
+
 struct AgentQuestion
 {
     QString id;

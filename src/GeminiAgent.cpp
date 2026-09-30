@@ -256,9 +256,16 @@ void GeminiAgent::interrupt()
     emit stateChanged();
 }
 
+// Older pages come from the entries read when the chat was opened, so turns written to the
+// session file since then are not shown twice next to the live transcript.
 void GeminiAgent::loadHistory(const QString &id, const QString &, bool older)
 {
-    historyLimit_ = older ? historyLimit_ + kHistoryPageSize : kHistoryPageSize;
+    if (older && history_.id == id) {
+        history_.showMore(kHistoryPageSize);
+        emit historyLoaded(id, history_.visible(), history_.hasMore(), {});
+        return;
+    }
+    history_ = {};
     QString filePath = sessionFiles_.value(id, index_.value(id).value("file").toString());
     if (!QFileInfo(filePath).isFile()) {
         discoverSessions();
@@ -268,9 +275,8 @@ void GeminiAgent::loadHistory(const QString &id, const QString &, bool older)
         emit historyLoaded(id, {}, false, "The Gemini session file was not found.");
         return;
     }
-    const QList<ChatEntry> entries = readHistory(filePath);
-    const QList<ChatEntry> tail = entries.mid(qMax(0, entries.size() - historyLimit_));
-    emit historyLoaded(id, tail, entries.size() > tail.size(), {});
+    history_.reset(id, readHistory(filePath), kHistoryPageSize);
+    emit historyLoaded(id, history_.visible(), history_.hasMore(), {});
 }
 
 QList<QJsonObject> GeminiAgent::discoverSessions()

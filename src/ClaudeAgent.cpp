@@ -262,16 +262,21 @@ void ClaudeAgent::interrupt()
     emit stateChanged();
 }
 
-// The bridge returns the last historyLimit_ entries; older requests widen that window.
+// The SDK always parses the whole transcript, so it is read once and older pages come from memory.
 void ClaudeAgent::loadHistory(const QString &id, const QString &workingDirectory, bool older)
 {
     const quint64 generation = ++historyGeneration_;
-    historyLimit_ = older ? historyLimit_ + kHistoryPageSize : kHistoryPageSize;
+    if (older && history_.id == id) {
+        history_.showMore(kHistoryPageSize);
+        emit historyLoaded(id, history_.visible(), history_.hasMore(), {});
+        return;
+    }
+    history_ = {};
     if (pythonProgram_.isEmpty() || scriptPath_.isEmpty()) {
         emit historyLoaded(id, {}, false, "The Claude Agent SDK bridge is not configured.");
         return;
     }
-    runHelper({"--read-session", id, "--limit", QString::number(historyLimit_)}, workingDirectory,
+    runHelper({"--read-session", id, "--limit", "0"}, workingDirectory,
               [this, generation, id](QProcess *process, bool started) {
         if (generation != historyGeneration_) return;
         if (!started) {
@@ -292,7 +297,8 @@ void ClaudeAgent::loadHistory(const QString &id, const QString &workingDirectory
             const QJsonObject entry = value.toObject();
             entries.append({entry.value("role").toString(), entry.value("text").toString()});
         }
-        emit historyLoaded(id, entries, result.value("total").toInt() > entries.size(), {});
+        history_.reset(id, entries, kHistoryPageSize);
+        emit historyLoaded(id, history_.visible(), history_.hasMore(), {});
     });
 }
 

@@ -589,11 +589,7 @@ void MainWindow::openChat(const QString &provider, const QString &id, const QStr
 void MainWindow::loadHistory(bool reset)
 {
     for (AgentBackend *agent : agents_) agent->cancelHistory();
-    AgentBackend *viewed = agent(providerIndex(viewProvider_));
-    if (!viewed) return;
-    // Claude, GLM and Gemini reload the whole tail, which already contains this session's live turns.
-    if (!reset && viewed != codex_) liveTranscript_.clear();
-    viewed->loadHistory(viewId_, viewPath_, !reset);
+    if (AgentBackend *viewed = agent(providerIndex(viewProvider_))) viewed->loadHistory(viewId_, viewPath_, !reset);
 }
 
 void MainWindow::showHistory(const QList<ChatEntry> &entries, bool hasMore, const QString &notice)
