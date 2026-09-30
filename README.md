@@ -165,6 +165,14 @@ input, cached and output tokens. For agents other than Codex, the conversation
 figure covers the turns sent from the tab. Antigravity's statistics are read
 where its result event carries them.
 
+**Settings → Notifications…** sets desktop notifications and sounds (WAV, MP3 or
+OGG files, played with ffplay, mpv, pw-play or paplay, whichever is installed).
+A finished or failed turn notifies only when it took at least a set time (5
+minutes by default). An agent that waits for an approval or an answer is always
+announced, after a short delay (30 seconds by default) so that answering at once
+stays quiet, and optionally again every few minutes until it is answered, since
+its work stops until then. The speaker button in the status row mutes all sounds.
+
 The status row shows how much of the account's usage limits is left for the
 agent in the current tab, for example `Codex limits  week: 36% left`; hover over
 it to see the used percentage and when each window resets. Which windows exist

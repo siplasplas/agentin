@@ -6,6 +6,7 @@
 #include "GeminiAgent.h"
 #include "MainWindow.h"
 #include "MessageInput.h"
+#include "Notifier.h"
 #include "TurnLocks.h"
 
 #include <QCheckBox>
@@ -34,6 +35,8 @@
 #include <QProcess>
 #include <QPushButton>
 #include <QSaveFile>
+#include <QStyle>
+#include <QToolButton>
 #include <QShortcut>
 #include <QSignalBlocker>
 #include <QSpinBox>
@@ -112,7 +115,7 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
       antigravity_(new AntigravityProvider(antigravityProgram,
                                            QDir(dataDirectory_).filePath("antigravity-conversations.json"), this)),
       providers_{codex_, claude_, gemini_, glm_, antigravity_},
-      turnLocks_(new TurnLocks(dataDirectory_, this))
+      turnLocks_(new TurnLocks(dataDirectory_, this)), notifier_(new Notifier(this))
 {
     claude_->excludeSessionsOf(glm_);
     setWindowTitle("agentdeskt — Codex, Claude, GLM, Gemini and Antigravity");
@@ -123,6 +126,8 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     auto *settingsMenu = menuBar()->addMenu("Settings");
     auto *optionsAction = settingsMenu->addAction("Options…");
     connect(optionsAction, &QAction::triggered, this, &MainWindow::showOptionsDialog);
+    auto *notificationsAction = settingsMenu->addAction("Notifications…");
+    connect(notificationsAction, &QAction::triggered, this, &MainWindow::showNotificationsDialog);
     auto *approvalsAction = settingsMenu->addAction("Approvals…");
     connect(approvalsAction, &QAction::triggered, this, &MainWindow::showApprovalsDialog);
 
@@ -217,6 +222,11 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     auto *statusRow = new QHBoxLayout;
     statusRow->addWidget(status_, 1);
     statusRow->addWidget(usage_);
+    muteSounds_ = new QToolButton(central);
+    muteSounds_->setObjectName("muteSounds");
+    muteSounds_->setCheckable(true);
+    muteSounds_->setAutoRaise(true);
+    statusRow->addWidget(muteSounds_);
     statusRow->addWidget(newChatButton_);
     layout->addLayout(statusRow);
     layout->addWidget(tabs_, 1);
@@ -276,6 +286,7 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     }, Qt::DirectConnection);
     // The shared chat view must leave a page before the page and its document are deleted.
     connect(tabs_, &MruTabWidget::tabClosing, this, [this](QWidget *page) {
+        notifier_->waitingEnded(QString::number(quintptr(page)));
         if (chatPanel_->parentWidget() == page) {
             chatPanel_->hide();
             chatPanel_->setParent(this);
@@ -290,6 +301,12 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
         if (ChatTab *tab = currentTab()) tab->agent()->setReadOnly(checked);
     });
     connect(input_, &MessageInput::submitted, this, &MainWindow::submitCommand);
+    connect(muteSounds_, &QToolButton::toggled, this, [this](bool muted) {
+        notifier_->setMuted(muted);
+        showMuteState();
+        saveSettings();
+    });
+    showMuteState();
     connect(input_, &MessageInput::enterActionChanged, this, &MainWindow::showEnterAction);
     connect(sendButton_, &QPushButton::clicked, this, &MainWindow::submitCommand);
     connect(stopButton_, &QPushButton::clicked, this, &MainWindow::requestStop);
@@ -443,6 +460,13 @@ void MainWindow::loadSettings()
     const QString enterKey = settings.value("enterKey").toString();
     input_->setShortMessageLength(settings.value("enterSendsUpTo").toInt(60));
     undoAfterSend_ = settings.value("undoAfterSend").toBool(true);
+    notifier_->setSettings(Notifier::Settings::fromJson(settings.value("notifications").toObject()));
+    {
+        // Loading must not save the settings before all of them are read.
+        const QSignalBlocker blocker(muteSounds_);
+        muteSounds_->setChecked(notifier_->settings().muted);
+    }
+    showMuteState();
     QStringList glmModels;
     for (const QJsonValue &value : settings.value("glmModels").toArray()) {
         if (!value.toString().isEmpty()) glmModels.append(value.toString());
@@ -467,6 +491,7 @@ void MainWindow::saveSettings()
         || file.write(QJsonDocument(QJsonObject{{"version", 1}, {"enterKey", enterKey},
                                                          {"enterSendsUpTo", input_->shortMessageLength()},
                                                          {"undoAfterSend", undoAfterSend_},
+                                                         {"notifications", notifier_->settings().toJson()},
                                                          {"glmModels", QJsonArray::fromStringList(glm_->extraModels())},
                                                          {"agents", agents}})
                           .toJson(QJsonDocument::Indented)) < 0
@@ -584,6 +609,88 @@ void MainWindow::showOptionsDialog()
     saveSettings();
     modelControlsState_.clear();
     updateModelControls();
+}
+
+void MainWindow::showMuteState()
+{
+    const bool muted = muteSounds_->isChecked();
+    muteSounds_->setIcon(style()->standardIcon(muted ? QStyle::SP_MediaVolumeMuted : QStyle::SP_MediaVolume));
+    muteSounds_->setToolTip(muted ? "Sounds are off; click to turn them on" : "Sounds are on; click to turn them off");
+}
+
+// Sounds and desktop notifications for long turns and for agents that wait for an answer.
+void MainWindow::showNotificationsDialog()
+{
+    Notifier::Settings settings = notifier_->settings();
+    QDialog dialog(this);
+    dialog.setWindowTitle("Notifications");
+    auto *layout = new QVBoxLayout(&dialog);
+    auto *form = new QFormLayout;
+    layout->addLayout(form);
+    auto *popups = new QCheckBox("Show desktop notifications", &dialog);
+    popups->setChecked(settings.popups);
+    form->addRow(QString(), popups);
+    auto *minimum = new QSpinBox(&dialog);
+    minimum->setRange(0, 600);
+    minimum->setSuffix(" min");
+    minimum->setValue(settings.minimumMinutes);
+    minimum->setToolTip("Finished and failed turns notify only when they took at least this long; 0 notifies every turn");
+    form->addRow("Notify turns longer than:", minimum);
+    const auto soundRow = [this, &dialog, form](const QString &label, const QString &file) {
+        auto *row = new QHBoxLayout;
+        auto *path = new QLineEdit(file, &dialog);
+        path->setPlaceholderText("No sound");
+        auto *browse = new QPushButton("Browse…", &dialog);
+        auto *play = new QPushButton("Play", &dialog);
+        row->addWidget(path, 1);
+        row->addWidget(browse);
+        row->addWidget(play);
+        form->addRow(label, row);
+        connect(browse, &QPushButton::clicked, &dialog, [this, path] {
+            const QString chosen = QxFileDialog::getOpenFileName(this, "Choose a sound", path->text(),
+                                                                 "Sounds (*.wav *.mp3 *.ogg *.oga *.flac)");
+            if (!chosen.isEmpty()) path->setText(chosen);
+        });
+        connect(play, &QPushButton::clicked, &dialog, [this, path] {
+            if (!Notifier::playSound(path->text()))
+                appendLine("[Could not play the sound; install ffplay, mpv, pw-play or paplay, and check the file.]");
+        });
+        return path;
+    };
+    QLineEdit *finished = soundRow("Turn finished:", settings.finishedSound);
+    QLineEdit *failed = soundRow("Turn failed:", settings.failedSound);
+    QLineEdit *waiting = soundRow("Agent waits for you:", settings.waitingSound);
+    auto *delay = new QSpinBox(&dialog);
+    delay->setRange(0, 3600);
+    delay->setSuffix(" s");
+    delay->setValue(settings.waitingDelaySeconds);
+    delay->setToolTip("An approval or question is announced after this delay, so answering at once stays quiet");
+    form->addRow("Announce a waiting agent after:", delay);
+    auto *repeat = new QSpinBox(&dialog);
+    repeat->setRange(0, 600);
+    repeat->setSuffix(" min");
+    repeat->setSpecialValueText("Never");
+    repeat->setValue(settings.waitingRepeatMinutes);
+    form->addRow("Repeat while it waits, every:", repeat);
+    auto *note = new QLabel("A waiting agent is announced regardless of how long the turn has run, because its work "
+                            "stops until you answer. The speaker button in the status row mutes all sounds.", &dialog);
+    note->setWordWrap(true);
+    layout->addWidget(note);
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+    layout->addWidget(buttons);
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    dialog.resize(640, dialog.sizeHint().height());
+    if (dialog.exec() != QDialog::Accepted) return;
+    settings.popups = popups->isChecked();
+    settings.minimumMinutes = minimum->value();
+    settings.finishedSound = finished->text().trimmed();
+    settings.failedSound = failed->text().trimmed();
+    settings.waitingSound = waiting->text().trimmed();
+    settings.waitingDelaySeconds = delay->value();
+    settings.waitingRepeatMinutes = repeat->value();
+    notifier_->setSettings(settings);
+    saveSettings();
 }
 
 // Lists lasting "always" rules and the approvals given for the session in open chats, and removes
@@ -853,6 +960,19 @@ QWidget *MainWindow::addChatTab(AgentProvider *selected, const QString &workingD
     connect(tab, &ChatTab::requestsChanged, this, [this, page, tab] {
         if (tabs_->currentWidget() == page) updateRequestPanel();
         else if (tab->pendingRequest()) tabs_->setTabAttention(page, true);
+        // An agent waiting for an answer is announced even at the current tab: the user may be away.
+        const QString key = QString::number(quintptr(page));
+        const PendingRequest *request = tab->pendingRequest();
+        if (!request) {
+            notifier_->waitingEnded(key);
+            return;
+        }
+        const QString what = request->approval ? request->description.section('\n', 0, 0).trimmed()
+                                               : request->questions.value(request->current).text;
+        notifier_->waitingStarted(key, tab->provider()->name(), tab->title().left(60), what);
+    });
+    connect(tab, &ChatTab::turnEnded, this, [this, tab](bool succeeded, qint64 durationMs) {
+        notifier_->turnFinished(tab->provider()->name(), tab->title().left(60), succeeded, durationMs);
     });
     connect(tab, &ChatTab::userMessagesChanged, this, [this, page, tab] {
         if (tabs_->currentWidget() == page) input_->setHistory(tab->userMessages());

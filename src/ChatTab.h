@@ -94,6 +94,8 @@ signals:
     void changed();
     void textAppended();
     void userMessagesChanged();
+    // A turn ended on its own, successfully or not; turns the user stopped are not reported.
+    void turnEnded(bool succeeded, qint64 durationMs);
     void requestsChanged();
 
 private:
@@ -126,6 +128,7 @@ private:
     QStringList outgoing_;
     QString waitingFor_;
     bool inTurn_ = false;
+    qint64 turnStartedAt_ = 0;
     bool holdsDirectory_ = false;
     bool live_ = false;
     bool hasMore_ = false;

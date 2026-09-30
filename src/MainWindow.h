@@ -12,6 +12,8 @@ class ClaudeProvider;
 class CodexConnection;
 class GeminiProvider;
 class MessageInput;
+class Notifier;
+class QToolButton;
 class MruTabWidget;
 class QCheckBox;
 class QComboBox;
@@ -45,6 +47,8 @@ private:
     void saveSettings();
     void showOptionsDialog();
     void showApprovalsDialog();
+    void showNotificationsDialog();
+    void showMuteState();
     void loadRecentDirectories();
     void saveRecentDirectories();
     void rememberRecentDirectory(const QString &path);
@@ -76,6 +80,8 @@ private:
     // Provider order in the tree and the New chat dialog.
     QList<AgentProvider *> providers_;
     TurnLocks *turnLocks_;
+    Notifier *notifier_;
+    QToolButton *muteSounds_;
     MruTabWidget *tabs_;
     // One chat view shared by all tabs; it moves into the current tab's page and shows its document.
     QWidget *chatPanel_;
