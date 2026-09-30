@@ -43,6 +43,7 @@
 #include <QSaveFile>
 #include <QStyle>
 #include <QToolButton>
+#include <QTimer>
 #include <QShortcut>
 #include <QSignalBlocker>
 #include <QSpinBox>
@@ -234,6 +235,14 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     tokens_->setObjectName("tokenUsage");
     auto *headerRow = new QHBoxLayout;
     headerRow->addWidget(chatHeader_, 1);
+    operationTime_ = new QLabel("Time 00:00", chatPanel_);
+    operationTime_->setObjectName("operationTime");
+    operationTime_->setToolTip("Elapsed time of the current task or compaction; keeps the final duration when it ends");
+    headerRow->addWidget(operationTime_);
+    auto *operationTimer = new QTimer(this);
+    operationTimer->setInterval(1000);
+    connect(operationTimer, &QTimer::timeout, this, &MainWindow::updateOperationTime);
+    operationTimer->start();
     headerRow->addWidget(tokens_);
     headerRow->addWidget(modelInput_);
     headerRow->addWidget(effortInput_);
@@ -1260,8 +1269,15 @@ void MainWindow::appendLine(const QString &text)
     appendText(text + '\n');
 }
 
+void MainWindow::updateOperationTime()
+{
+    const ChatTab *tab = currentTab();
+    operationTime_->setText(tab ? tab->operationTimeText() : "Time 00:00");
+}
+
 void MainWindow::updateStatus()
 {
+    updateOperationTime();
     const ChatTab *tab = currentTab();
     if (!tab) {
         status_->setText("No chat open");

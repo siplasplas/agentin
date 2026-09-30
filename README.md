@@ -171,6 +171,12 @@ input, cached and output tokens. For agents other than Codex, the conversation
 figure covers the turns sent from the tab. Antigravity's statistics are read
 where its result event carries them.
 
+The chat header shows elapsed operation time as `mm:ss`: **Task** while an agent
+works and **Compact** during manual or automatic Codex compaction. The counter
+stops at the final duration when the operation ends and follows the selected tab.
+The application log records each task and compaction duration, including operations
+that fail or are interrupted. Waiting for a directory lock is not timed.
+
 The **Compact** button above a Codex chat manually compacts its context when the
 chat is live and idle. The read-only field beside it shows current context tokens
 reported by App Server, with apostrophes grouping thousands (for example

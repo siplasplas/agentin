@@ -3,6 +3,7 @@
 #include "AgentBackend.h"
 
 #include <QHash>
+#include <QElapsedTimer>
 #include <QObject>
 
 class QTextDocument;
@@ -50,6 +51,7 @@ public:
     QString title() const { return title_; }
     QString workingDirectory() const { return path_; }
     QString headerText() const;
+    QString operationTimeText() const;
     bool isLive() const { return live_; }
     bool hasMoreHistory() const { return hasMore_; }
     // The user's messages in this conversation as far as loaded, oldest first, for recalling them.
@@ -110,6 +112,14 @@ private:
     // Returns false when the agent refused the message.
     bool dispatch();
     void releaseDirectory();
+    void updateTaskClock();
+    void finishCompactionClock();
+    QElapsedTimer taskClock_;
+    QElapsedTimer compactionClock_;
+    bool taskClockRunning_ = false;
+    bool compactionClockRunning_ = false;
+    qint64 lastOperationDurationMs_ = 0;
+    QString lastOperationName_ = "Time";
 
     AgentProvider *provider_;
     AgentBackend *agent_ = nullptr;

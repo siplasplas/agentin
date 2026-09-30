@@ -75,6 +75,7 @@ private:
     void appendText(const QString &text);
     void appendLine(const QString &text);
     void updateStatus();
+    void updateOperationTime();
     void updateModelControls();
     void updateUsage();
     void showEnterAction(bool sends);
@@ -112,6 +113,7 @@ private:
     QWidget *compactionPanel_;
     QPushButton *compactButton_;
     QLineEdit *contextTokens_;
+    QLabel *operationTime_;
     // What the model controls last showed; rebuilding them would close an open drop-down list.
     QString modelControlsState_;
     MessageInput *input_;

@@ -162,6 +162,7 @@ bool CodexAgent::compact()
     stopSent_ = false;
     turnBaselineKnown_ = false;
     const QString id = threadId_;
+    emit compactionStarted();
     emit message("[Compacting Codex context]");
     emit stateChanged();
     connection_->request("thread/compact/start", {{"threadId", id}}, this,
@@ -445,6 +446,7 @@ void CodexAgent::resetTurn()
 {
     busy_ = false;
     manualCompaction_ = false;
+    emit compactionFinished();
     activeTurnId_.clear();
     stopRequested_ = false;
     stopSent_ = false;
@@ -469,6 +471,8 @@ void CodexAgent::handleNotification(const QString &method, const QJsonObject &pa
     } else if (method == "item/commandExecution/outputDelta") {
         streamedCommands_.insert(itemId);
         emit toolOutput(params.value("delta").toString());
+    } else if (method == "item/started" && item.value("type") == "contextCompaction") {
+        emit compactionStarted();
     } else if (method == "item/started" && item.value("type") == "commandExecution") {
         emit toolStarted("shell", item.value("command").toString());
     } else if (method == "item/completed") {
@@ -490,12 +494,14 @@ void CodexAgent::handleNotification(const QString &method, const QJsonObject &pa
             emit toolFinished("file changes", item.value("status").toString());
         } else if (type == "contextCompaction") {
             compactedHistoryPending_ = true;
+            emit compactionFinished();
             emit contextCompacted();
             if (!busy_) refreshAfterCompaction();
         }
     } else if (method == "thread/compacted") {
         // Older App Servers report the same event without a contextCompaction item.
         compactedHistoryPending_ = true;
+        emit compactionFinished();
         emit contextCompacted();
         if (!busy_) refreshAfterCompaction();
     } else if (method == "turn/completed") {

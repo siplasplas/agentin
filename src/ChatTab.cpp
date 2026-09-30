@@ -99,6 +99,13 @@ QString compactCount(qint64 count)
     return QString::number(count / 1000000.0, 'f', 1) + "M";
 }
 
+QString elapsedTime(qint64 milliseconds)
+{
+    const qint64 seconds = qMax<qint64>(0, milliseconds) / 1000;
+    return QString("%1:%2").arg(seconds / 60, 2, 10, QLatin1Char('0'))
+                            .arg(seconds % 60, 2, 10, QLatin1Char('0'));
+}
+
 QString fullCount(qint64 count)
 {
     QLocale locale = QLocale::c();
@@ -155,6 +162,37 @@ QString ChatTab::headerText() const
     return parts.join("  •  ");
 }
 
+QString ChatTab::operationTimeText() const
+{
+    if (compactionClockRunning_) return "Compact " + elapsedTime(compactionClock_.elapsed());
+    if (taskClockRunning_) return "Task " + elapsedTime(taskClock_.elapsed());
+    return lastOperationName_ + ' ' + elapsedTime(lastOperationDurationMs_);
+}
+
+void ChatTab::updateTaskClock()
+{
+    const bool running = agent_->isResponding() && !agent_->isCompacting();
+    if (running && !taskClockRunning_) {
+        taskClock_.start();
+        taskClockRunning_ = true;
+    } else if (!running && taskClockRunning_) {
+        lastOperationDurationMs_ = taskClock_.elapsed();
+        lastOperationName_ = "Task";
+        taskClockRunning_ = false;
+        emit logMessage("[" + provider_->name() + " task duration: " + elapsedTime(lastOperationDurationMs_) + "]");
+    }
+}
+
+void ChatTab::finishCompactionClock()
+{
+    if (!compactionClockRunning_) return;
+    lastOperationDurationMs_ = compactionClock_.elapsed();
+    lastOperationName_ = "Compact";
+    compactionClockRunning_ = false;
+    emit logMessage("[" + provider_->name() + " compaction duration: " + elapsedTime(lastOperationDurationMs_) + "]");
+    emit changed();
+}
+
 void ChatTab::startDraft()
 {
     live_ = true;
@@ -167,6 +205,8 @@ bool ChatTab::startNew(const QString &workingDirectory)
     path_ = workingDirectory;
     id_.clear();
     title_ = "New chat";
+    lastOperationDurationMs_ = 0;
+    lastOperationName_ = "Time";
     live_ = true;
     liveTranscript_.clear();
     historyRefreshCutoff_ = 0;
@@ -274,6 +314,7 @@ void ChatTab::setAgent(AgentBackend *agent)
     const QString name = agent->name();
     connect(agent, &AgentBackend::message, this, &ChatTab::logMessage);
     connect(agent, &AgentBackend::stateChanged, this, [this] {
+        updateTaskClock();
         emit changed();
         if (!inTurn_ && !agent_->isCompacting() && !outgoing_.isEmpty())
             QTimer::singleShot(0, this, &ChatTab::dispatch);
@@ -302,6 +343,7 @@ void ChatTab::setAgent(AgentBackend *agent)
         appendText("[" + tool + ": " + status + "]\n");
     });
     connect(agent, &AgentBackend::turnCompleted, this, [this, name](const QString &status, const QString &details) {
+        updateTaskClock();
         // Requests of a finished turn can no longer be answered.
         if (!requests_.isEmpty()) {
             requests_.clear();
@@ -373,6 +415,13 @@ void ChatTab::setAgent(AgentBackend *agent)
         conversationUsage_ = usage;
         emit changed();
     });
+    connect(agent, &AgentBackend::compactionStarted, this, [this] {
+        if (compactionClockRunning_) return;
+        compactionClock_.start();
+        compactionClockRunning_ = true;
+        emit changed();
+    });
+    connect(agent, &AgentBackend::compactionFinished, this, &ChatTab::finishCompactionClock);
     connect(agent, &AgentBackend::contextCompacted, this, [this] { appendText("\n[Context compacted]\n"); });
     connect(agent, &AgentBackend::historyRefreshStarted, this, [this] {
         historyRefreshCutoff_ = liveTranscript_.size();

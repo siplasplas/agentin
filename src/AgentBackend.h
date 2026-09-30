@@ -257,6 +257,8 @@ signals:
     void conversationOpenFailed(const QString &id, const QString &reason);
     // Entries are the complete list to show for the conversation, oldest first.
     void historyLoaded(const QString &id, const QList<ChatEntry> &entries, bool hasMore, const QString &notice);
+    void compactionStarted();
+    void compactionFinished();
     void contextCompacted();
     // Refreshes stored history between turns while queued messages stay in the tab.
     void historyRefreshStarted();
