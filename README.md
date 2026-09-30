@@ -236,7 +236,11 @@ chat header and the log say which chat holds the directory, and the message is
 sent when that turn ends. **Stop** (or `stop`) gives up waiting. The running turns
 of all agentdeskt windows are kept in `turn-locks.json` in the application data
 directory, and Claude Code sessions outside agentdeskt that are busy on a turn
-count as well. Gemini CLI and Antigravity CLI running outside agentdeskt publish
+count as well, as do Codex turns outside agentdeskt: Codex (usually its App
+Server daemon, which the Codex CLI and desktop app use) keeps each session's
+`~/.codex/sessions/.../rollout-*.jsonl` open, and a session whose last turn has
+started but not completed holds its directory, unless the turn runs in Codex's
+read-only sandbox. Gemini CLI and Antigravity CLI running outside agentdeskt publish
 no turn state, so such a process holds its directory for as long as it runs; the
 waiting chat names it with its PID, and closing it lets the chat continue.
 Processes started in `/` or the home directory are not counted, because they

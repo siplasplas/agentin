@@ -25,3 +25,8 @@ QList<BusyAgentSession> busyClaudeSessions(const QString &configDirectory);
 // Gemini CLI and Antigravity CLI processes outside this application, found through /proc. They publish
 // no turn state, so an interactive CLI counts as working for as long as it runs.
 QList<BusyAgentSession> runningCliSessions();
+// Codex turns running outside this application. Codex appends each session to
+// <codexHome>/sessions/.../rollout-*.jsonl, which the process serving it (usually the App Server
+// daemon) keeps open; a session whose last turn started but has not completed or been aborted is
+// working. Turns in Codex's read-only sandbox are not counted.
+QList<BusyAgentSession> runningCodexTurns(const QString &codexHome);

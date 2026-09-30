@@ -6,6 +6,7 @@
 #include <QFileInfo>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QSet>
 #include <QStringList>
 
 namespace {
@@ -130,6 +131,76 @@ QList<BusyAgentSession> runningCliSessions()
         // A CLI started in / or the home directory would cover every project, so it is not counted.
         if (directory.isEmpty() || directory == "/" || directory == home) continue;
         sessions.append({pid, directory, QString("%1 (PID %2: %3)").arg(tool).arg(pid).arg(arguments.mid(0, 4).join(' '))});
+    }
+    return sessions;
+}
+
+namespace {
+// Reads the working directory, the sandbox and whether a turn is running from a Codex rollout file.
+// Only the start and the last part of the file are read; the first line holds the session's directory.
+BusyAgentSession codexRolloutState(const QString &path, bool *running)
+{
+    *running = false;
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) return {};
+    QString directory = QJsonDocument::fromJson(file.readLine(1024 * 1024)).object().value("payload").toObject()
+                            .value("cwd").toString();
+    constexpr qint64 tail = 512 * 1024;
+    const bool partial = file.size() > tail;
+    if (partial) file.seek(file.size() - tail);
+    QString sandbox;
+    bool firstLine = partial;
+    while (!file.atEnd()) {
+        const QByteArray line = file.readLine();
+        // After seeking, the first line is usually cut off.
+        if (firstLine) {
+            firstLine = false;
+            continue;
+        }
+        const QJsonObject record = QJsonDocument::fromJson(line).object();
+        const QJsonObject payload = record.value("payload").toObject();
+        const QString type = record.value("type").toString();
+        if (type == "turn_context") {
+            if (payload.contains("cwd")) directory = payload.value("cwd").toString();
+            sandbox = payload.value("sandbox_policy").toObject().value("type").toString();
+        } else if (type == "event_msg") {
+            const QString event = payload.value("type").toString();
+            if (event == "task_started") *running = true;
+            else if (event == "task_complete" || event == "turn_aborted") *running = false;
+        }
+    }
+    if (sandbox == "read-only") *running = false;
+    return {0, directory, {}};
+}
+}
+
+QList<BusyAgentSession> runningCodexTurns(const QString &codexHome)
+{
+    QList<BusyAgentSession> sessions;
+    const QString sessionsRoot = QDir(QDir(codexHome).filePath("sessions")).canonicalPath();
+    if (sessionsRoot.isEmpty()) return sessions;
+    const QDir processes("/proc");
+    QSet<QString> seen;
+    for (const QString &name : processes.entryList(QDir::Dirs | QDir::NoDotAndDotDot)) {
+        bool numeric = false;
+        const qint64 pid = name.toLongLong(&numeric);
+        if (!numeric) continue;
+        // Only Codex processes are searched for open files, which keeps the scan short.
+        QFile cmdline(processes.filePath(name + "/cmdline"));
+        if (!cmdline.open(QIODevice::ReadOnly) || !cmdline.readAll().contains("codex") || isOwnDescendant(pid)) continue;
+        const QDir descriptors(processes.filePath(name + "/fd"));
+        for (const QFileInfo &descriptor : descriptors.entryInfoList(QDir::Files | QDir::System)) {
+            const QString target = descriptor.symLinkTarget();
+            if (!target.startsWith(sessionsRoot + '/') || !QFileInfo(target).fileName().startsWith("rollout-")
+                || seen.contains(target)) continue;
+            seen.insert(target);
+            bool running = false;
+            BusyAgentSession session = codexRolloutState(target, &running);
+            if (!running || session.directory.isEmpty()) continue;
+            session.pid = pid;
+            session.description = QString("a Codex turn outside agentdeskt (PID %1)").arg(pid);
+            sessions.append(session);
+        }
     }
     return sessions;
 }

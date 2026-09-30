@@ -81,6 +81,14 @@ QString TurnLocks::acquire(const QString &owner, const QString &directory, const
         }
     }
     if (holder.isEmpty()) {
+        const QString codexHome = qEnvironmentVariable("CODEX_HOME", QDir::home().filePath(".codex"));
+        for (const BusyAgentSession &session : runningCodexTurns(codexHome)) {
+            if (!overlaps(path, canonical(session.directory))) continue;
+            holder = session.description + " in " + session.directory;
+            break;
+        }
+    }
+    if (holder.isEmpty()) {
         for (const BusyAgentSession &session : runningCliSessions()) {
             if (!overlaps(path, canonical(session.directory))) continue;
             holder = session.description + " in " + session.directory + "; close it so this chat can continue";
