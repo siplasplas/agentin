@@ -266,9 +266,11 @@ assuming that a fresh quota is available.
 
 Which windows exist depends on the plan. Codex reads them from the App Server
 when it connects (`account/rateLimits/read`) and updates them as the server
-reports changes. Claude reports five-hour, weekly, and model-family windows only
-while it answers and when a window's state changes. The panel therefore uses the
-last reported snapshot and does not promise live quota polling for Claude.
+reports changes. Claude reports limits through SDK events while it answers. The
+bridge reads both typed limit fields and per-window `unifiedWindows` snapshots
+preserved in the SDK's raw data, when available. This also supports events where
+the top-level percentage is omitted during normal use. The panel uses the last
+reported snapshot and does not promise live quota polling for Claude.
 GLM has the same event handling through its bridge but may report no quota data.
 Gemini and Antigravity currently do not report account limits.
 

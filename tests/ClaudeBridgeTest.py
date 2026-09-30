@@ -55,7 +55,7 @@ class FakeClient:
         self.interrupted = True
 
 
-for name in ("AssistantMessage", "ResultMessage", "TextBlock", "ToolUseBlock"):
+for name in ("AssistantMessage", "ResultMessage", "TextBlock", "ToolUseBlock", "RateLimitEvent"):
     setattr(sdk, name, type(name, (Message,), {}))
 sdk.StreamEvent = type("StreamEvent", (Message,), {})
 sdk_types.StreamEvent = sdk.StreamEvent
@@ -72,6 +72,54 @@ spec.loader.exec_module(bridge_module)
 
 
 class ClaudeBridgeTest(unittest.IsolatedAsyncioTestCase):
+    async def test_per_window_rate_limits_reach_the_jsonl_client(self):
+        events = []
+        with patch.object(bridge_module, "send", events.append):
+            bridge = bridge_module.Bridge("/tmp/project")
+            await bridge.connect()
+            bridge.client.responses = [
+                sdk.RateLimitEvent(rate_limit_info=Message(
+                    status="allowed", rate_limit_type="five_hour", utilization=None, resets_at=1788465600,
+                    raw={"status": "allowed", "unifiedWindows": {
+                        "five_hour": {"utilization": 0.24, "resetsAt": 1788465600},
+                        "seven_day": {"utilization": 0.13, "resetsAt": 1789005600},
+                        "seven_day_opus": {"utilization": 0.07, "resetsAt": 1789005600},
+                    }})),
+                sdk.ResultMessage(result="Done", is_error=False, terminal_reason="completed", session_id="session-test"),
+            ]
+            await bridge.handle({"type": "prompt", "text": "hello"})
+            await bridge.turn_task
+            limits = [event for event in events if event["type"] == "rate_limit"]
+            self.assertEqual(limits, [
+                {"type": "rate_limit", "limit": "five_hour", "utilization": 0.24,
+                 "resetsAt": 1788465600, "status": "allowed"},
+                {"type": "rate_limit", "limit": "seven_day", "utilization": 0.13,
+                 "resetsAt": 1789005600, "status": ""},
+                {"type": "rate_limit", "limit": "seven_day_opus", "utilization": 0.07,
+                 "resetsAt": 1789005600, "status": ""},
+            ])
+
+    async def test_rate_limits_keep_typed_fallback_and_ignore_invalid_snapshots(self):
+        typed = Message(status="rejected", rate_limit_type="five_hour", utilization=1.0, resets_at=1000)
+        self.assertEqual(bridge_module.rate_limit_updates(typed), [
+            {"type": "rate_limit", "limit": "five_hour", "utilization": 1.0, "resetsAt": 1000, "status": "rejected"}
+        ])
+        typed.raw = {"unifiedWindows": {
+            "seven_day": {"utilization": 0.25, "resetsAt": 2000},
+            "seven_day_opus": {"utilization": "unknown", "resetsAt": False, "status": {}},
+            "seven_day_sonnet": {"utilization": float("nan"), "resetsAt": float("inf")},
+            "unknown_window": {"utilization": 0.5, "resetsAt": 3000},
+        }}
+        result = bridge_module.rate_limit_updates(typed)
+        self.assertEqual(result[0]["status"], "rejected")
+        self.assertEqual(result[1], {"type": "rate_limit", "limit": "seven_day", "utilization": 0.25,
+                                     "resetsAt": 2000, "status": ""})
+        self.assertEqual(len(result), 2)
+        for raw in (None, [], {"unifiedWindows": []}, {"unifiedWindows": {"seven_day": None}}):
+            typed.raw = raw
+            self.assertEqual(len(bridge_module.rate_limit_updates(typed)), 1)
+        self.assertEqual(bridge_module.rate_limit_updates(Message(rate_limit_type="overage")), [])
+
     async def test_lists_all_claude_sessions_without_local_index(self):
         session = Message(session_id="session-1", cwd="/tmp/project", custom_title=None,
                           summary="Project chat", first_prompt="Hello", created_at=1000,

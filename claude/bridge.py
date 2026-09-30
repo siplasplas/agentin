@@ -50,6 +50,56 @@ def describe_permission_updates(updates):
     return "; ".join(parts)
 
 
+def rate_limit_updates(info):
+    """Normalize typed SDK limits and optional per-window raw snapshots."""
+    windows = {"five_hour", "seven_day", "seven_day_opus", "seven_day_sonnet"}
+    statuses = {"allowed", "allowed_warning", "rejected"}
+
+    def utilization(value):
+        if isinstance(value, (int, float)) and not isinstance(value, bool) and 0 <= value <= 1:
+            return value
+        return None
+
+    def reset(value):
+        if (isinstance(value, (int, float)) and not isinstance(value, bool)
+                and 0 < value <= 2**63 - 1 and int(value) == value):
+            return int(value)
+        return None
+
+    def valid_status(value):
+        return value if isinstance(value, str) and value in statuses else ""
+
+    updates = {}
+    kind = getattr(info, "rate_limit_type", None)
+    if isinstance(kind, str) and kind in windows:
+        status = valid_status(getattr(info, "status", ""))
+        updates[kind] = {"type": "rate_limit", "limit": kind,
+                         "utilization": utilization(getattr(info, "utilization", None)),
+                         "resetsAt": reset(getattr(info, "resets_at", None)),
+                         "status": status}
+    raw = getattr(info, "raw", None)
+    snapshots = raw.get("unifiedWindows") if isinstance(raw, dict) else None
+    if isinstance(snapshots, dict):
+        for window, snapshot in snapshots.items():
+            if window not in windows or not isinstance(snapshot, dict):
+                continue
+            used = utilization(snapshot.get("utilization"))
+            resets_at = reset(snapshot.get("resetsAt"))
+            status = valid_status(snapshot.get("status"))
+            if used is None and resets_at is None and not status:
+                continue
+            # A rejection of the top-level window does not reject unrelated windows.
+            update = updates.setdefault(window, {"type": "rate_limit", "limit": window,
+                                                "utilization": None, "resetsAt": None, "status": ""})
+            if used is not None:
+                update["utilization"] = used
+            if resets_at is not None:
+                update["resetsAt"] = resets_at
+            if status:
+                update["status"] = status
+    return list(updates.values())
+
+
 class Bridge:
     def __init__(self, cwd, provider="claude", model=None, effort=None, read_only=False):
         self.cwd = cwd
@@ -181,9 +231,8 @@ class Bridge:
                             send({"type": "tool", "name": block.name, "input": block.input})
                     self.streamed_text = False
                 elif RateLimitEvent is not None and isinstance(message, RateLimitEvent):
-                    info = message.rate_limit_info
-                    send({"type": "rate_limit", "limit": info.rate_limit_type, "utilization": info.utilization,
-                          "resetsAt": info.resets_at, "status": info.status})
+                    for update in rate_limit_updates(message.rate_limit_info):
+                        send(update)
                 elif isinstance(message, ResultMessage):
                     usage = getattr(message, "usage", None)
                     if usage or getattr(message, "total_cost_usd", None) is not None:

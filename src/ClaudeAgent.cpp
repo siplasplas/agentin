@@ -134,7 +134,7 @@ QList<AgentModel> ClaudeProvider::models() const
     return result;
 }
 
-// The SDK reports a window only when its status changes, so windows appear after some turns.
+// Chat SDK events update the shared account snapshot, including any reported per-window data.
 void ClaudeProvider::updateUsage(const QJsonObject &event)
 {
     const QString type = event.value("limit").toString();
