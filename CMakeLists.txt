@@ -17,12 +17,12 @@ add_executable(agentdeskt
     src/AgentBackend.h
     src/CodexAgent.cpp
     src/CodexAgent.h
-    src/ClaudeBridge.cpp
-    src/ClaudeBridge.h
-    src/GeminiBridge.cpp
-    src/GeminiBridge.h
-    src/AntigravityBridge.cpp
-    src/AntigravityBridge.h
+    src/ClaudeAgent.cpp
+    src/ClaudeAgent.h
+    src/GeminiAgent.cpp
+    src/GeminiAgent.h
+    src/AntigravityAgent.cpp
+    src/AntigravityAgent.h
     src/MainWindow.cpp
     src/MainWindow.h
 )
@@ -41,12 +41,12 @@ if(BUILD_TESTING)
         src/AgentBackend.h
         src/CodexAgent.cpp
         src/CodexAgent.h
-        src/ClaudeBridge.cpp
-        src/ClaudeBridge.h
-        src/GeminiBridge.cpp
-        src/GeminiBridge.h
-        src/AntigravityBridge.cpp
-        src/AntigravityBridge.h
+        src/ClaudeAgent.cpp
+        src/ClaudeAgent.h
+        src/GeminiAgent.cpp
+        src/GeminiAgent.h
+        src/AntigravityAgent.cpp
+        src/AntigravityAgent.h
         src/MainWindow.cpp
         src/MainWindow.h
     )

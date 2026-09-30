@@ -1,7 +1,7 @@
-#include "ClaudeBridge.h"
+#include "AntigravityAgent.h"
+#include "ClaudeAgent.h"
 #include "CodexAgent.h"
-#include "GeminiBridge.h"
-#include "AntigravityBridge.h"
+#include "GeminiAgent.h"
 #include "MainWindow.h"
 
 #include <QComboBox>
@@ -37,105 +37,11 @@
 #include <algorithm>
 
 namespace {
-constexpr int kHistoryPageSize = 20;
-
 QString shortPreview(const QString &value)
 {
     const QString singleLine = value.simplified();
     constexpr int limit = 72;
     return singleLine.size() > limit ? singleLine.left(limit - 1) + QChar(0x2026) : singleLine;
-}
-
-QString geminiMessageText(const QJsonValue &content)
-{
-    if (content.isString()) return content.toString();
-    QStringList parts;
-    for (const QJsonValue &block : content.toArray()) {
-        const QString text = block.toObject().value("text").toString();
-        if (!text.isEmpty()) parts.append(text);
-    }
-    return parts.join(' ');
-}
-
-QJsonObject readGeminiSession(const QFileInfo &fileInfo, const QString &projectPath)
-{
-    QFile file(fileInfo.filePath());
-    if (!file.open(QIODevice::ReadOnly)) return {};
-    QJsonObject metadata;
-    QString firstPrompt;
-    if (fileInfo.suffix() == "jsonl") {
-        metadata = QJsonDocument::fromJson(file.readLine(256 * 1024)).object();
-        for (int line = 0; line < 128 && !file.atEnd() && firstPrompt.isEmpty(); ++line) {
-            const QJsonObject event = QJsonDocument::fromJson(file.readLine(256 * 1024)).object();
-            if (event.value("type").toString() == "user")
-                firstPrompt = geminiMessageText(event.value("content"));
-        }
-    } else {
-        metadata = QJsonDocument::fromJson(file.readAll()).object();
-        for (const QJsonValue &value : metadata.value("messages").toArray()) {
-            const QJsonObject message = value.toObject();
-            if (message.value("type").toString() == "user") {
-                firstPrompt = geminiMessageText(message.value("content"));
-                break;
-            }
-        }
-    }
-    const QString id = metadata.value("sessionId").toString();
-    if (id.isEmpty() || metadata.value("kind").toString() == "subagent") return {};
-    const qint64 createdAt = QDateTime::fromString(metadata.value("startTime").toString(), Qt::ISODate).toSecsSinceEpoch();
-    const qint64 modifiedAt = QDateTime::fromString(metadata.value("lastUpdated").toString(), Qt::ISODate).toSecsSinceEpoch();
-    return {{"provider", "Gemini"}, {"id", id}, {"cwd", projectPath},
-            {"title", firstPrompt.isEmpty() ? id : firstPrompt.simplified().left(200)},
-            {"createdAt", createdAt}, {"lastModified", modifiedAt}, {"file", fileInfo.absoluteFilePath()}};
-}
-
-// Replays a Gemini CLI session file, where JSONL records either append/replace a message by id or
-// reset the message list with "$set", and converts the result into chat entries.
-QList<ChatEntry> readGeminiHistory(const QString &filePath)
-{
-    QFile file(filePath);
-    if (!file.open(QIODevice::ReadOnly)) return {};
-    QList<QJsonObject> messages;
-    QHash<QString, qsizetype> positions;
-    const auto upsert = [&messages, &positions](const QJsonObject &message) {
-        const QString id = message.value("id").toString();
-        const auto found = positions.constFind(id);
-        if (!id.isEmpty() && found != positions.constEnd()) {
-            messages[*found] = message;
-            return;
-        }
-        if (!id.isEmpty()) positions.insert(id, messages.size());
-        messages.append(message);
-    };
-    if (QFileInfo(filePath).suffix() == "jsonl") {
-        while (!file.atEnd()) {
-            const QJsonObject record = QJsonDocument::fromJson(file.readLine()).object();
-            const QJsonObject update = record.value("$set").toObject();
-            if (update.contains("messages")) {
-                messages.clear();
-                positions.clear();
-                for (const QJsonValue &value : update.value("messages").toArray()) upsert(value.toObject());
-            } else if (record.contains("type") && record.contains("id")) {
-                upsert(record);
-            }
-        }
-    } else {
-        for (const QJsonValue &value : QJsonDocument::fromJson(file.readAll()).object().value("messages").toArray())
-            upsert(value.toObject());
-    }
-    QList<ChatEntry> entries;
-    for (const QJsonObject &message : messages) {
-        const QString type = message.value("type").toString();
-        const QString text = geminiMessageText(message.value("content")).trimmed();
-        if (type == "user") {
-            if (!text.isEmpty() && !text.startsWith("<session_context>")) entries.append({"user", text});
-        } else if (type == "gemini") {
-            if (!text.isEmpty()) entries.append({"assistant", text});
-            for (const QJsonValue &call : message.value("toolCalls").toArray())
-                entries.append({"tool", call.toObject().value("name").toString("tool")});
-        }
-    }
-    return entries;
 }
 
 // Returns the /proc/<pid>/stat fields that follow the command name (state, ppid, ...).
@@ -212,19 +118,15 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
                        const QString &geminiProgram, QWidget *parent, const QString &codexIndexPath,
                        const QString &antigravityProgram, const QString &geminiDataDirectory)
     : QMainWindow(parent), workingDirectory_(workingDirectory),
-      geminiDataDirectory_(geminiDataDirectory.isEmpty()
-          ? QDir(QDir::homePath()).filePath(".gemini") : geminiDataDirectory),
       claudePython_(claudePython), claudeScript_(claudeScript),
       codex_(new CodexAgent(codexProgram, workingDirectory, codexIndexFile(codexIndexPath), this)),
-      claude_(new ClaudeBridge(claudePython, claudeScript, workingDirectory, "claude", this)),
-      glm_(new ClaudeBridge(claudePython, claudeScript, workingDirectory, "glm", this)),
-      gemini_(new GeminiBridge(geminiProgram, workingDirectory, this)),
-      antigravity_(new AntigravityBridge(antigravityProgram, workingDirectory, this))
+      claude_(new ClaudeAgent(claudePython, claudeScript, workingDirectory, "claude", this)),
+      glm_(new ClaudeAgent(claudePython, claudeScript, workingDirectory, "glm", this)),
+      gemini_(new GeminiAgent(geminiProgram, workingDirectory, geminiDataDirectory.isEmpty()
+          ? QDir(QDir::homePath()).filePath(".gemini") : geminiDataDirectory, this)),
+      antigravity_(new AntigravityAgent(antigravityProgram, workingDirectory, this)),
+      agents_{codex_, claude_, glm_, gemini_, antigravity_}
 {
-    claudeWorkingDirectory_ = workingDirectory_;
-    glmWorkingDirectory_ = workingDirectory_;
-    geminiWorkingDirectory_ = workingDirectory_;
-    antigravityWorkingDirectory_ = workingDirectory_;
     localIndexPath_ = QDir(QFileInfo(codexIndexFile(codexIndexPath)).absolutePath()).filePath("claude-conversations.json");
     setWindowTitle("agentdeskt — Codex, Claude, GLM, Gemini and Antigravity");
     resize(900, 700);
@@ -296,7 +198,6 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
         attachChat(item);
     });
     connect(loadEarlierButton_, &QPushButton::clicked, this, [this] {
-        historyLimit_ += kHistoryPageSize;
         loadHistory(false);
     });
     connect(conversationTree_, &QTreeWidget::itemExpanded, this, [this](QTreeWidgetItem *item) {
@@ -320,216 +221,7 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     connect(sendButton_, &QPushButton::clicked, this, &MainWindow::submitCommand);
     connect(stopButton_, &QPushButton::clicked, this, &MainWindow::requestStop);
     connect(newChatButton_, &QPushButton::clicked, this, &MainWindow::showNewConversationDialog);
-    connect(claude_, &ClaudeBridge::ready, this, [this] {
-        claudeReady_ = true;
-        if (!pendingClaudeResumeId_.isEmpty()) {
-            const QString id = pendingClaudeResumeId_;
-            pendingClaudeResumeId_.clear();
-            claudeReady_ = false;
-            claude_->resumeConversation(id, claudeWorkingDirectory_);
-            return;
-        }
-        appendLine("[Connected to Claude Agent SDK]");
-        updateStatus();
-        sendNextClaudePrompt();
-    });
-    connect(claude_, &ClaudeBridge::textDelta, this, [this](const QString &text) {
-        if (!claudeTextStarted_) {
-            appendChatText("Claude", "\nClaude: ");
-            claudeTextStarted_ = true;
-        }
-        appendChatText("Claude", text);
-    });
-    connect(claude_, &ClaudeBridge::toolStarted, this, [this](const QString &name, const QJsonObject &input) {
-        appendChatText("Claude", "\n[Claude tool: " + name + "] "
-                   + QString::fromUtf8(QJsonDocument(input).toJson(QJsonDocument::Compact)) + '\n');
-    });
-    connect(claude_, &ClaudeBridge::completed, this, [this](const QString &state, const QString &details) {
-        if (claudeTextStarted_) appendChatText("Claude", "\n");
-        if (state != "completed") appendLine("[Claude response: " + state + (details.isEmpty() ? "" : ": " + details) + "]");
-        claudeBusy_ = false;
-        claudeStopRequested_ = false;
-        claudeTextStarted_ = false;
-        updateStatus();
-        sendNextClaudePrompt();
-    });
-    connect(claude_, &ClaudeBridge::approvalRequested, this,
-            [this](int id, const QString &tool, const QJsonObject &input) {
-        const QString details = QString::fromUtf8(QJsonDocument(input).toJson(QJsonDocument::Indented));
-        const auto answer = QMessageBox::question(this, "Approve Claude action",
-                                                   tool + "\n\n" + details + "\nAllow this action?",
-                                                   QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
-        claude_->answerApproval(id, answer == QMessageBox::Yes);
-    });
-    connect(claude_, &ClaudeBridge::questionsRequested, this, [this](int id, const QJsonArray &questions) {
-        QJsonObject answers;
-        bool allAccepted = true;
-        for (const QJsonValue &value : questions) {
-            const QJsonObject question = value.toObject();
-            const QString text = question.value("question").toString();
-            const QString title = question.value("header").toString("Claude question");
-            const QJsonArray options = question.value("options").toArray();
-            bool accepted = false;
-            QString reply;
-            if (question.value("multiSelect").toBool() || options.isEmpty()) {
-                reply = QInputDialog::getText(this, title, text, QLineEdit::Normal, {}, &accepted);
-            } else {
-                QStringList labels;
-                for (const QJsonValue &option : options) labels.append(option.toObject().value("label").toString());
-                reply = QInputDialog::getItem(this, title, text, labels, 0, false, &accepted);
-            }
-            if (!accepted) {
-                allAccepted = false;
-                break;
-            }
-            answers.insert(text, reply);
-        }
-        claude_->answerQuestions(id, answers, allAccepted);
-    });
-    connect(claude_, &ClaudeBridge::error, this, [this](const QString &message) {
-        appendLine("[Claude] " + message);
-    });
-    connect(claude_, &ClaudeBridge::disconnected, this, [this] {
-        claudeReady_ = false;
-        claudeBusy_ = false;
-        claudeStopRequested_ = false;
-        updateStatus();
-    });
-    connect(glm_, &ClaudeBridge::ready, this, [this] {
-        glmReady_ = true;
-        if (!pendingGlmResumeId_.isEmpty()) {
-            const QString id = pendingGlmResumeId_;
-            pendingGlmResumeId_.clear();
-            glmReady_ = false;
-            glm_->resumeConversation(id, glmWorkingDirectory_);
-            return;
-        }
-        appendLine("[Connected to GLM via Claude Agent SDK]");
-        updateStatus();
-        sendNextGlmPrompt();
-    });
-    connect(glm_, &ClaudeBridge::textDelta, this, [this](const QString &text) {
-        if (!glmTextStarted_) {
-            appendChatText("GLM", "\nGLM: ");
-            glmTextStarted_ = true;
-        }
-        appendChatText("GLM", text);
-    });
-    connect(glm_, &ClaudeBridge::toolStarted, this, [this](const QString &name, const QJsonObject &input) {
-        appendChatText("GLM", "\n[GLM tool: " + name + "] "
-                   + QString::fromUtf8(QJsonDocument(input).toJson(QJsonDocument::Compact)) + '\n');
-    });
-    connect(glm_, &ClaudeBridge::completed, this, [this](const QString &state, const QString &details) {
-        if (glmTextStarted_) appendChatText("GLM", "\n");
-        if (state != "completed") appendLine("[GLM response: " + state + (details.isEmpty() ? "" : ": " + details) + "]");
-        glmBusy_ = false;
-        glmStopRequested_ = false;
-        glmTextStarted_ = false;
-        updateStatus();
-        sendNextGlmPrompt();
-    });
-    connect(glm_, &ClaudeBridge::approvalRequested, this,
-            [this](int id, const QString &tool, const QJsonObject &input) {
-        const QString details = QString::fromUtf8(QJsonDocument(input).toJson(QJsonDocument::Indented));
-        const auto answer = QMessageBox::question(this, "Approve GLM action",
-                                                   tool + "\n\n" + details + "\nAllow this action?",
-                                                   QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
-        glm_->answerApproval(id, answer == QMessageBox::Yes);
-    });
-    connect(glm_, &ClaudeBridge::questionsRequested, this, [this](int id, const QJsonArray &questions) {
-        QJsonObject answers;
-        bool allAccepted = true;
-        for (const QJsonValue &value : questions) {
-            const QJsonObject question = value.toObject();
-            const QString text = question.value("question").toString();
-            const QString title = question.value("header").toString("GLM question");
-            const QJsonArray options = question.value("options").toArray();
-            bool accepted = false;
-            QString reply;
-            if (question.value("multiSelect").toBool() || options.isEmpty()) {
-                reply = QInputDialog::getText(this, title, text, QLineEdit::Normal, {}, &accepted);
-            } else {
-                QStringList labels;
-                for (const QJsonValue &option : options) labels.append(option.toObject().value("label").toString());
-                reply = QInputDialog::getItem(this, title, text, labels, 0, false, &accepted);
-            }
-            if (!accepted) { allAccepted = false; break; }
-            answers.insert(text, reply);
-        }
-        glm_->answerQuestions(id, answers, allAccepted);
-    });
-    connect(glm_, &ClaudeBridge::error, this, [this](const QString &message) { appendLine("[GLM] " + message); });
-    connect(glm_, &ClaudeBridge::disconnected, this, [this] {
-        glmReady_ = false;
-        glmBusy_ = false;
-        glmStopRequested_ = false;
-        updateStatus();
-    });
-    connect(gemini_, &GeminiBridge::textDelta, this, [this](const QString &text) {
-        if (!geminiTextStarted_) {
-            appendChatText("Gemini", "\nGemini: ");
-            geminiTextStarted_ = true;
-        }
-        appendChatText("Gemini", text);
-    });
-    connect(gemini_, &GeminiBridge::toolStarted, this, [this](const QString &name, const QJsonObject &input) {
-        appendChatText("Gemini", "\n[Gemini tool: " + name + "] "
-                   + QString::fromUtf8(QJsonDocument(input).toJson(QJsonDocument::Compact)) + '\n');
-    });
-    connect(gemini_, &GeminiBridge::error, this, [this](const QString &message) {
-        appendLine("[Gemini] " + message);
-    });
-    connect(gemini_, &GeminiBridge::completed, this, [this](const QString &state, const QString &details) {
-        if (geminiTextStarted_) appendChatText("Gemini", "\n");
-        if (state != "completed") appendLine("[Gemini response: " + state + (details.isEmpty() ? "" : ": " + details) + "]");
-        geminiBusy_ = false;
-        geminiStopRequested_ = false;
-        geminiTextStarted_ = false;
-        updateStatus();
-        sendNextGeminiPrompt();
-    });
-    connect(claude_, &ClaudeBridge::sessionChanged, this, [this](const QString &id) {
-        claudeSessionId_ = id;
-        if (viewLive_ && viewProvider_ == "Claude") viewId_ = id;
-        rememberLocalConversation("Claude", id);
-    });
-    connect(glm_, &ClaudeBridge::sessionChanged, this, [this](const QString &id) {
-        glmSessionId_ = id;
-        if (viewLive_ && viewProvider_ == "GLM") viewId_ = id;
-        rememberLocalConversation("GLM", id);
-    });
-    connect(gemini_, &GeminiBridge::sessionChanged, this, [this](const QString &id) {
-        if (viewLive_ && viewProvider_ == "Gemini") viewId_ = id;
-        rememberLocalConversation("Gemini", id);
-    });
-    connect(antigravity_, &AntigravityBridge::textDelta, this, [this](const QString &text) {
-        if (!antigravityTextStarted_) {
-            appendChatText("Antigravity", "\nAntigravity: ");
-            antigravityTextStarted_ = true;
-        }
-        appendChatText("Antigravity", text);
-    });
-    connect(antigravity_, &AntigravityBridge::toolStarted, this, [this](const QString &name, const QJsonObject &input) {
-        appendChatText("Antigravity", "\n[Antigravity tool: " + name + "] "
-                   + QString::fromUtf8(QJsonDocument(input).toJson(QJsonDocument::Compact)) + '\n');
-    });
-    connect(antigravity_, &AntigravityBridge::error, this, [this](const QString &message) {
-        appendLine("[Antigravity] " + message);
-    });
-    connect(antigravity_, &AntigravityBridge::completed, this, [this](const QString &state, const QString &details) {
-        if (antigravityTextStarted_) appendChatText("Antigravity", "\n");
-        if (state != "completed") appendLine("[Antigravity response: " + state + (details.isEmpty() ? "" : ": " + details) + "]");
-        antigravityBusy_ = false;
-        antigravityStopRequested_ = false;
-        antigravityTextStarted_ = false;
-        updateStatus();
-        sendNextAntigravityPrompt();
-    });
-    connect(antigravity_, &AntigravityBridge::conversationChanged, this, [this](const QString &id) {
-        if (viewLive_ && viewProvider_ == "Antigravity") viewId_ = id;
-        rememberLocalConversation("Antigravity", id);
-    });
-    connectAgent(codex_);
+    for (AgentBackend *agent : agents_) connectAgent(agent);
     connect(codex_, &CodexAgent::connected, this, [this] {
         if (expandedProviders_.contains("Codex")) codex_->syncConversations();
     });
@@ -565,11 +257,7 @@ MainWindow::~MainWindow()
             }
         }
     }
-    disconnect(claude_, nullptr, this, nullptr);
-    disconnect(glm_, nullptr, this, nullptr);
-    disconnect(gemini_, nullptr, this, nullptr);
-    disconnect(antigravity_, nullptr, this, nullptr);
-    disconnect(codex_, nullptr, this, nullptr);
+    for (AgentBackend *agent : agents_) disconnect(agent, nullptr, this, nullptr);
 }
 
 void MainWindow::submitCommand()
@@ -594,37 +282,10 @@ void MainWindow::submitCommand()
             appendLine("[The displayed chat is a read-only preview. Double-click it in the tree to continue it.]");
             return;
         }
-        if (currentProvider_ == 4) {
-            if (antigravity_->conversationId().isEmpty() && antigravityFirstPrompt_.isEmpty()) antigravityFirstPrompt_ = command;
-            appendChatText("Antigravity", "\nYou: " + command + '\n');
-            antigravityQueuedPrompts_.append(command);
-            sendNextAntigravityPrompt();
-            return;
-        }
-        if (currentProvider_ == 3) {
-            if (gemini_->sessionId().isEmpty() && geminiFirstPrompt_.isEmpty()) geminiFirstPrompt_ = command;
-            appendChatText("Gemini", "\nYou: " + command + '\n');
-            geminiQueuedPrompts_.append(command);
-            sendNextGeminiPrompt();
-            return;
-        }
-        if (currentProvider_ == 2) {
-            if (glmSessionId_.isEmpty() && glmFirstPrompt_.isEmpty()) glmFirstPrompt_ = command;
-            appendChatText("GLM", "\nYou: " + command + '\n');
-            glmQueuedPrompts_.append(command);
-            if (!glmReady_) glm_->start();
-            sendNextGlmPrompt();
-            return;
-        }
-        if (currentProvider_ == 1) {
-            if (claudeSessionId_.isEmpty() && claudeFirstPrompt_.isEmpty()) claudeFirstPrompt_ = command;
-            appendChatText("Claude", "\nYou: " + command + '\n');
-            claudeQueuedPrompts_.append(command);
-            if (!claudeReady_) claude_->start();
-            sendNextClaudePrompt();
-            return;
-        }
-        if (codex_->prompt(command)) appendChatText("Codex", "\nYou: " + command + '\n');
+        AgentBackend *current = currentAgent();
+        const QString name = current->name();
+        if (current->sessionId().isEmpty() && !firstPrompts_.contains(name)) firstPrompts_.insert(name, command);
+        if (current->prompt(command)) appendChatText(name, "\nYou: " + command + '\n');
     }
 }
 
@@ -726,12 +387,6 @@ QString MainWindow::providerName(int index)
     return names.value(index);
 }
 
-QString MainWindow::providerWorkingDirectory(int index) const
-{
-    return index == 0 ? codex_->workingDirectory()
-        : (index == 1 ? claudeWorkingDirectory_ : (index == 2 ? glmWorkingDirectory_
-           : (index == 3 ? geminiWorkingDirectory_ : antigravityWorkingDirectory_)));
-}
 
 int MainWindow::providerIndex(const QString &name)
 {
@@ -741,11 +396,6 @@ int MainWindow::providerIndex(const QString &name)
     return -1;
 }
 
-QString MainWindow::liveSessionId(int index) const
-{
-    return index == 0 ? codex_->sessionId() : (index == 1 ? claudeSessionId_ : (index == 2 ? glmSessionId_
-        : (index == 3 ? gemini_->sessionId() : antigravity_->conversationId())));
-}
 
 QString MainWindow::externalLock(const QString &provider, const QString &id) const
 {
@@ -932,44 +582,20 @@ void MainWindow::fetchGeminiSessions()
             appendLine("[Gemini CLI is not installed or is not in PATH. Install it or use --gemini /absolute/path/to/gemini.]");
         }
     }
-    QHash<QString, QString> projectPaths;
-    QFile projects(QDir(geminiDataDirectory_).filePath("projects.json"));
-    if (projects.open(QIODevice::ReadOnly)) {
-        const QJsonObject entries = QJsonDocument::fromJson(projects.readAll()).object()
-                                        .value("projects").toObject();
-        for (auto it = entries.begin(); it != entries.end(); ++it) {
-            if (QFileInfo(it.key()).isAbsolute() && !it.value().toString().isEmpty())
-                projectPaths.insert(it.value().toString(), it.key());
-        }
-    }
     QSet<QString> discoveredIds;
     bool changed = false;
-    const QDir profileRoot(QDir(geminiDataDirectory_).filePath("tmp"));
-    for (const QFileInfo &profile : profileRoot.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot)) {
-        QString path = projectPaths.value(profile.fileName());
-        if (path.isEmpty()) {
-            QFile root(QDir(profile.filePath()).filePath(".project_root"));
-            if (root.open(QIODevice::ReadOnly)) path = QString::fromUtf8(root.readAll()).trimmed();
-        }
-        if (!QFileInfo(path).isAbsolute()) continue;
-        const QDir chats(QDir(profile.filePath()).filePath("chats"));
-        const QFileInfoList files = chats.entryInfoList({"session-*.jsonl", "session-*.json"}, QDir::Files,
-                                                        QDir::Name);
-        for (const QFileInfo &file : files) {
-            QJsonObject entry = readGeminiSession(file, path);
-            const QString id = entry.value("id").toString();
-            if (id.isEmpty()) continue;
-            discoveredIds.insert(id);
-            const QString key = "Gemini\n" + id;
-            const QJsonObject old = localConversations_.value(key);
-            if (entry.value("title").toString() == id && !old.value("title").toString().isEmpty())
-                entry.insert("title", old.value("title"));
-            if (entry.value("createdAt").toInteger() <= 0 && old.value("createdAt").toInteger() > 0)
-                entry.insert("createdAt", old.value("createdAt"));
-            if (old == entry) continue;
-            localConversations_.insert(key, entry);
-            changed = true;
-        }
+    for (QJsonObject entry : gemini_->discoverSessions()) {
+        const QString id = entry.value("id").toString();
+        discoveredIds.insert(id);
+        const QString key = "Gemini\n" + id;
+        const QJsonObject old = localConversations_.value(key);
+        if (entry.value("title").toString() == id && !old.value("title").toString().isEmpty())
+            entry.insert("title", old.value("title"));
+        if (entry.value("createdAt").toInteger() <= 0 && old.value("createdAt").toInteger() > 0)
+            entry.insert("createdAt", old.value("createdAt"));
+        if (old == entry) continue;
+        localConversations_.insert(key, entry);
+        changed = true;
     }
     if (changed) saveLocalConversations();
     refreshConversationTree();
@@ -1070,12 +696,8 @@ void MainWindow::rememberLocalConversation(const QString &provider, const QStrin
     const QString key = provider + '\n' + id;
     QJsonObject entry = localConversations_.value(key);
     if (entry.isEmpty()) {
-        const QString path = provider == "Claude" ? claudeWorkingDirectory_
-            : (provider == "GLM" ? glmWorkingDirectory_
-               : (provider == "Gemini" ? geminiWorkingDirectory_ : antigravityWorkingDirectory_));
-        const QString prompt = provider == "Claude" ? claudeFirstPrompt_
-            : (provider == "GLM" ? glmFirstPrompt_
-               : (provider == "Gemini" ? geminiFirstPrompt_ : antigravityFirstPrompt_));
+        const QString path = agent(providerIndex(provider))->workingDirectory();
+        const QString prompt = firstPrompts_.value(provider);
         entry = {{"provider", provider}, {"id", id}, {"cwd", path},
                  {"title", prompt.isEmpty() ? id : prompt.left(120)},
                  {"createdAt", QDateTime::currentSecsSinceEpoch()}};
@@ -1093,51 +715,19 @@ void MainWindow::newProviderConversation(int providerIndex, const QString &path)
         return;
     }
     const QString canonicalPath = directory.canonicalFilePath();
-    if (providerIndex == 0) {
-        if (!codex_->newConversation(canonicalPath)) return;
-    } else if (providerIndex == 1) {
-        if (claudeBusy_) { appendLine("[Wait for Claude to finish.]"); return; }
-        claudeWorkingDirectory_ = canonicalPath;
-        claudeSessionId_.clear();
-        claudeFirstPrompt_.clear();
-        claudeQueuedPrompts_.clear();
-        pendingClaudeResumeId_.clear();
-        claudeReady_ = false;
-        if (claude_->isRunning()) claude_->resetConversation(canonicalPath);
-        else claude_->start(canonicalPath);
-    } else if (providerIndex == 2) {
-        if (glmBusy_) { appendLine("[Wait for GLM to finish.]"); return; }
-        glmWorkingDirectory_ = canonicalPath;
-        glmSessionId_.clear();
-        glmFirstPrompt_.clear();
-        glmQueuedPrompts_.clear();
-        pendingGlmResumeId_.clear();
-        glmReady_ = false;
-        if (glm_->isRunning()) glm_->resetConversation(canonicalPath);
-        else glm_->start(canonicalPath);
-    } else if (providerIndex == 3) {
-        if (geminiBusy_) { appendLine("[Wait for Gemini to finish.]"); return; }
-        geminiWorkingDirectory_ = canonicalPath;
-        geminiFirstPrompt_.clear();
-        geminiQueuedPrompts_.clear();
-        gemini_->resetConversation(canonicalPath);
-    } else {
-        if (antigravityBusy_) { appendLine("[Wait for Antigravity to finish.]"); return; }
-        antigravityWorkingDirectory_ = canonicalPath;
-        antigravityFirstPrompt_.clear();
-        antigravityQueuedPrompts_.clear();
-        antigravity_->resetConversation(canonicalPath);
-    }
+    AgentBackend *selected = agent(providerIndex);
+    if (!selected->newConversation(canonicalPath)) return;
+    firstPrompts_.remove(selected->name());
     selectProvider(providerIndex);
-    showLiveChat(providerName(providerIndex), canonicalPath);
-    appendLine("[Starting a new " + providerName(providerIndex) + " conversation in " + canonicalPath + "]");
+    showLiveChat(selected->name(), canonicalPath);
+    appendLine("[Starting a new " + selected->name() + " conversation in " + canonicalPath + "]");
     refreshConversationTree();
     updateStatus();
 }
 
 void MainWindow::showNewConversationDialog()
 {
-    const QString currentPath = providerWorkingDirectory(currentProvider_);
+    const QString currentPath = currentAgent()->workingDirectory();
     QDialog dialog(this);
     dialog.setWindowTitle("New conversation");
     auto *layout = new QVBoxLayout(&dialog);
@@ -1182,137 +772,21 @@ void MainWindow::showNewConversationDialog()
     }
 }
 
-void MainWindow::resumeProviderConversation(const QString &provider, const QString &id, const QString &path)
-{
-    if (id.isEmpty() || !QFileInfo(path).isDir()) return;
-    if (provider == "Claude") {
-        if (claudeBusy_) { appendLine("[Wait for Claude to finish.]"); return; }
-        claudeWorkingDirectory_ = path;
-        claudeSessionId_ = id;
-        claudeFirstPrompt_.clear();
-        claudeQueuedPrompts_.clear();
-        claudeReady_ = false;
-        if (claude_->isRunning()) claude_->resumeConversation(id, path);
-        else { pendingClaudeResumeId_ = id; claude_->start(path); }
-        selectProvider(1);
-    } else if (provider == "GLM") {
-        if (glmBusy_) { appendLine("[Wait for GLM to finish.]"); return; }
-        glmWorkingDirectory_ = path;
-        glmSessionId_ = id;
-        glmFirstPrompt_.clear();
-        glmQueuedPrompts_.clear();
-        glmReady_ = false;
-        if (glm_->isRunning()) glm_->resumeConversation(id, path);
-        else { pendingGlmResumeId_ = id; glm_->start(path); }
-        selectProvider(2);
-    } else if (provider == "Gemini") {
-        if (geminiBusy_) { appendLine("[Wait for Gemini to finish.]"); return; }
-        geminiWorkingDirectory_ = path;
-        geminiFirstPrompt_.clear();
-        geminiQueuedPrompts_.clear();
-        gemini_->resumeConversation(id, path);
-        selectProvider(3);
-    } else if (provider == "Antigravity") {
-        if (antigravityBusy_) { appendLine("[Wait for Antigravity to finish.]"); return; }
-        antigravityWorkingDirectory_ = path;
-        antigravityFirstPrompt_.clear();
-        antigravityQueuedPrompts_.clear();
-        antigravity_->resumeConversation(id, path);
-        selectProvider(4);
-    } else return;
-    appendLine("[Resuming " + provider + " conversation: " + id + "]");
-    updateStatus();
-}
 
-void MainWindow::sendNextClaudePrompt()
-{
-    if (!claudeReady_ || claudeBusy_ || claudeQueuedPrompts_.isEmpty()) return;
-    claudeBusy_ = true;
-    claudeStopRequested_ = false;
-    claudeTextStarted_ = false;
-    claude_->prompt(claudeQueuedPrompts_.takeFirst());
-    updateStatus();
-}
 
-void MainWindow::sendNextGlmPrompt()
-{
-    if (!glmReady_ || glmBusy_ || glmQueuedPrompts_.isEmpty()) return;
-    glmBusy_ = true;
-    glmStopRequested_ = false;
-    glmTextStarted_ = false;
-    glm_->prompt(glmQueuedPrompts_.takeFirst());
-    updateStatus();
-}
 
-void MainWindow::sendNextGeminiPrompt()
-{
-    if (geminiBusy_ || geminiQueuedPrompts_.isEmpty()) return;
-    geminiBusy_ = true;
-    geminiStopRequested_ = false;
-    geminiTextStarted_ = false;
-    gemini_->prompt(geminiQueuedPrompts_.takeFirst());
-    updateStatus();
-}
 
-void MainWindow::sendNextAntigravityPrompt()
-{
-    if (antigravityBusy_ || antigravityQueuedPrompts_.isEmpty()) return;
-    antigravityBusy_ = true;
-    antigravityStopRequested_ = false;
-    antigravityTextStarted_ = false;
-    antigravity_->prompt(antigravityQueuedPrompts_.takeFirst());
-    updateStatus();
-}
 
 void MainWindow::requestStop()
 {
-    if (currentProvider_ == 4) {
-        if (!antigravityBusy_) appendLine("[No active Antigravity response.]");
-        else if (!antigravityStopRequested_) {
-            antigravityStopRequested_ = true;
-            appendLine("[Interrupting Antigravity response]");
-            antigravity_->interrupt();
-            updateStatus();
-        }
+    AgentBackend *current = currentAgent();
+    if (!current->isResponding()) {
+        appendLine("[No active " + current->name() + " response.]");
         return;
     }
-    if (currentProvider_ == 3) {
-        if (!geminiBusy_) appendLine("[No active Gemini response.]");
-        else if (!geminiStopRequested_) {
-            geminiStopRequested_ = true;
-            appendLine("[Interrupting Gemini response]");
-            gemini_->interrupt();
-            updateStatus();
-        }
-        return;
-    }
-    if (currentProvider_ == 2) {
-        if (!glmBusy_) appendLine("[No active GLM response.]");
-        else if (!glmStopRequested_) {
-            glmStopRequested_ = true;
-            appendLine("[Interrupting GLM response]");
-            glm_->interrupt();
-            updateStatus();
-        }
-        return;
-    }
-    if (currentProvider_ == 1) {
-        if (!claudeBusy_) appendLine("[No active Claude response.]");
-        else if (!claudeStopRequested_) {
-            claudeStopRequested_ = true;
-            appendLine("[Interrupting Claude response]");
-            claude_->interrupt();
-            updateStatus();
-        }
-        return;
-    }
-    if (!codex_->isResponding()) {
-        appendLine("[No active response.]");
-        return;
-    }
-    if (!codex_->canInterrupt()) return;
-    appendLine("[Interrupting response]");
-    codex_->interrupt();
+    if (!current->canInterrupt()) return;
+    appendLine("[Interrupting " + current->name() + " response]");
+    current->interrupt();
 }
 
 void MainWindow::connectAgent(AgentBackend *agent)
@@ -1324,7 +798,7 @@ void MainWindow::connectAgent(AgentBackend *agent)
     connect(agent, &AgentBackend::messageDelta, this, [this, name](const QString &text) { appendChatText(name, text); });
     connect(agent, &AgentBackend::messageFinished, this, [this, name] { appendChatText(name, "\n"); });
     connect(agent, &AgentBackend::toolStarted, this, [this, name](const QString &tool, const QString &details) {
-        appendChatText(name, "\n[" + tool + "] " + details + '\n');
+        appendChatText(name, "\n[" + name + " tool: " + tool + "] " + details + '\n');
     });
     connect(agent, &AgentBackend::toolOutput, this, [this, name](const QString &text) { appendChatText(name, text); });
     connect(agent, &AgentBackend::toolFinished, this, [this, name](const QString &tool, const QString &status) {
@@ -1344,7 +818,7 @@ void MainWindow::connectAgent(AgentBackend *agent)
         agent->answerQuestions(id, askQuestions(questions));
     });
     // A resumed conversation becomes live only if the user is still looking at the chat they attached.
-    connect(agent, &AgentBackend::conversationOpened, this, [this, name](const QString &id, bool resumed) {
+    connect(agent, &AgentBackend::conversationOpened, this, [this, agent, name](const QString &id, bool resumed) {
         if (resumed && !pendingAttachId_.isEmpty()) {
             if (id == pendingAttachId_ && viewProvider_ == name && viewId_ == id) {
                 viewLive_ = true;
@@ -1355,7 +829,9 @@ void MainWindow::connectAgent(AgentBackend *agent)
         } else if (!resumed && viewLive_ && viewProvider_ == name) {
             viewId_ = id;
         }
-        refreshConversationTree();
+        // Codex keeps its own thread index; other agents' chats are recorded in the local index.
+        if (agent == codex_) refreshConversationTree();
+        else rememberLocalConversation(name, id);
     });
     connect(agent, &AgentBackend::conversationOpenFailed, this, [this, name](const QString &id, const QString &reason) {
         if (id.isEmpty() || id != pendingAttachId_) return;
@@ -1368,7 +844,6 @@ void MainWindow::connectAgent(AgentBackend *agent)
     connect(agent, &AgentBackend::historyLoaded, this,
             [this, name](const QString &id, const QList<ChatEntry> &entries, bool hasMore, const QString &notice) {
         if (viewProvider_ != name || viewId_ != id) return;
-        historyEntries_ = entries;
         showHistory(entries, hasMore, notice);
     });
 }
@@ -1416,8 +891,7 @@ void MainWindow::appendChatText(const QString &provider, const QString &text)
 
 void MainWindow::showLiveChat(const QString &provider, const QString &path)
 {
-    ++historyGeneration_;
-    codex_->cancelHistory();
+    for (AgentBackend *agent : agents_) agent->cancelHistory();
     viewProvider_ = provider;
     viewId_.clear();
     viewPath_ = path;
@@ -1425,7 +899,6 @@ void MainWindow::showLiveChat(const QString &provider, const QString &path)
     viewLive_ = true;
     lockNotice_.clear();
     liveTranscript_.clear();
-    historyEntries_.clear();
     chatView_->clear();
     loadEarlierButton_->setVisible(false);
     updateChatHeader();
@@ -1452,8 +925,8 @@ void MainWindow::attachChat(QTreeWidgetItem *item)
     const int index = providerIndex(provider);
     if (id.isEmpty() || index < 0 || (viewLive_ && viewProvider_ == provider && viewId_ == id)) return;
     if (viewProvider_ != provider || viewId_ != id) openChat(provider, id, path, item->text(0));
-    const bool alreadyLive = liveSessionId(index) == id;
-    if (!alreadyLive) {
+    AgentBackend *selected = agent(index);
+    if (selected->sessionId() != id) {
         const QString lock = externalLock(provider, id);
         if (!lock.isEmpty()) {
             lockNotice_ = "open in " + lock;
@@ -1463,14 +936,16 @@ void MainWindow::attachChat(QTreeWidgetItem *item)
         }
         lockNotice_.clear();
         updateChatHeader();
-        if (provider == "Codex") {
-            pendingAttachId_ = id;
-            if (codex_->resumeConversation(id, path)) selectProvider(index);
-            else pendingAttachId_.clear();
+        pendingAttachId_ = id;
+        if (!selected->resumeConversation(id, path)) {
+            pendingAttachId_.clear();
             return;
         }
-        resumeProviderConversation(provider, id, path);
-        if (liveSessionId(index) != id) return;
+        firstPrompts_.remove(provider);
+        selectProvider(index);
+        // Codex confirms asynchronously through conversationOpened; the other agents switch at once.
+        if (selected->sessionId() != id) return;
+        pendingAttachId_.clear();
     }
     selectProvider(index);
     viewLive_ = true;
@@ -1487,9 +962,6 @@ void MainWindow::openChat(const QString &provider, const QString &id, const QStr
     viewLive_ = false;
     lockNotice_.clear();
     liveTranscript_.clear();
-    historyLimit_ = kHistoryPageSize;
-    historyTotal_ = 0;
-    historyEntries_.clear();
     chatView_->setPlainText("Loading the latest messages…");
     loadEarlierButton_->setVisible(false);
     updateChatHeader();
@@ -1499,72 +971,12 @@ void MainWindow::openChat(const QString &provider, const QString &id, const QStr
 
 void MainWindow::loadHistory(bool reset)
 {
-    const quint64 generation = ++historyGeneration_;
-    codex_->cancelHistory();
-    if (viewProvider_ == "Codex") {
-        codex_->loadHistory(viewId_, viewPath_, !reset);
-    } else if (viewProvider_ == "Claude" || viewProvider_ == "GLM") {
-        if (!reset) liveTranscript_.clear();
-        if (claudePython_.isEmpty() || claudeScript_.isEmpty()) {
-            showHistory({}, false, "The Claude Agent SDK bridge is not configured.");
-            return;
-        }
-        auto *process = new QProcess(this);
-        historyProcesses_.append(process);
-        connect(process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this,
-                [this, process, generation](int exitCode, QProcess::ExitStatus status) {
-            historyProcesses_.removeAll(process);
-            process->deleteLater();
-            if (generation != historyGeneration_) return;
-            const QJsonObject result = QJsonDocument::fromJson(process->readAllStandardOutput().trimmed()).object();
-            if (status != QProcess::NormalExit || exitCode != 0 || result.value("type") != "history") {
-                QString message = result.value("message").toString();
-                if (message.isEmpty()) message = QString::fromUtf8(process->readAllStandardError()).trimmed();
-                appendLine("[" + viewProvider_ + " history: " + message + "]");
-                showHistory({}, false, "Could not load this conversation: " + message);
-                return;
-            }
-            QList<ChatEntry> entries;
-            for (const QJsonValue &value : result.value("entries").toArray()) {
-                const QJsonObject entry = value.toObject();
-                entries.append({entry.value("role").toString(), entry.value("text").toString()});
-            }
-            historyTotal_ = result.value("total").toInt();
-            historyEntries_ = entries;
-            showHistory(entries, historyTotal_ > entries.size());
-        });
-        connect(process, &QProcess::errorOccurred, this, [this, process, generation](QProcess::ProcessError error) {
-            if (error != QProcess::FailedToStart) return;
-            historyProcesses_.removeAll(process);
-            process->deleteLater();
-            if (generation == historyGeneration_) showHistory({}, false, "Could not start Python: " + process->errorString());
-        });
-        process->start(claudePython_, {"-u", claudeScript_, "--cwd", viewPath_, "--read-session", viewId_,
-                                       "--limit", QString::number(historyLimit_)});
-    } else if (viewProvider_ == "Gemini") {
-        QString filePath = localConversations_.value("Gemini\n" + viewId_).value("file").toString();
-        if (!QFileInfo(filePath).isFile()) {
-            filePath.clear();
-            const QDir profileRoot(QDir(geminiDataDirectory_).filePath("tmp"));
-            for (const QFileInfo &profile : profileRoot.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot)) {
-                const QDir chats(QDir(profile.filePath()).filePath("chats"));
-                for (const QFileInfo &file : chats.entryInfoList({"session-*.jsonl", "session-*.json"}, QDir::Files)) {
-                    if (readGeminiSession(file, {}).value("id").toString() == viewId_) filePath = file.filePath();
-                }
-            }
-        }
-        if (filePath.isEmpty()) {
-            showHistory({}, false, "The Gemini session file was not found.");
-            return;
-        }
-        if (!reset) liveTranscript_.clear();
-        const QList<ChatEntry> entries = readGeminiHistory(filePath);
-        historyTotal_ = entries.size();
-        historyEntries_ = entries.mid(qMax(0, entries.size() - historyLimit_));
-        showHistory(historyEntries_, historyTotal_ > historyEntries_.size());
-    } else {
-        showHistory({}, false, "History preview is not available for " + viewProvider_ + " conversations.");
-    }
+    for (AgentBackend *agent : agents_) agent->cancelHistory();
+    AgentBackend *viewed = agent(providerIndex(viewProvider_));
+    if (!viewed) return;
+    // Claude, GLM and Gemini reload the whole tail, which already contains this session's live turns.
+    if (!reset && viewed != codex_) liveTranscript_.clear();
+    viewed->loadHistory(viewId_, viewPath_, !reset);
 }
 
 void MainWindow::showHistory(const QList<ChatEntry> &entries, bool hasMore, const QString &notice)
@@ -1594,43 +1006,15 @@ void MainWindow::updateChatHeader()
 
 void MainWindow::updateStatus()
 {
-    QString state;
-    if (currentProvider_ == 4) {
-        if (antigravityBusy_) state = "Antigravity is responding…";
-        else if (QStandardPaths::findExecutable(antigravity_->program()).isEmpty())
-            state = "Antigravity CLI is not installed or is not in PATH";
-        else state = "Antigravity ready";
-        stopButton_->setEnabled(antigravityBusy_ && !antigravityStopRequested_);
-    } else if (currentProvider_ == 3) {
-        state = geminiBusy_ ? "Gemini is responding…" : "Gemini ready";
-        stopButton_->setEnabled(geminiBusy_ && !geminiStopRequested_);
-    } else if (currentProvider_ == 2) {
-        if (glmBusy_) state = "GLM is responding…";
-        else if (glmReady_) state = "GLM ready";
-        else if (glm_->isRunning()) state = "Connecting to GLM via Claude Agent SDK…";
-        else state = "GLM bridge is not running";
-        stopButton_->setEnabled(glmBusy_ && !glmStopRequested_);
-    } else if (currentProvider_ == 1) {
-        if (claudeBusy_) state = "Claude is responding…";
-        else if (claudeReady_) state = "Claude ready";
-        else if (claude_->isRunning()) state = "Connecting to Claude Agent SDK…";
-        else state = "Claude bridge is not running";
-        stopButton_->setEnabled(claudeBusy_ && !claudeStopRequested_);
-    } else {
-        state = codex_->statusText();
-        stopButton_->setEnabled(codex_->canInterrupt());
-    }
-    const QString currentDirectory = providerWorkingDirectory(currentProvider_);
-    status_->setText(state + "  •  " + QDir::toNativeSeparators(currentDirectory));
-    const int index = currentProvider_;
-    sendButton_->setText(index == 0 ? "Send to Codex" : (index == 1 ? "Send to Claude"
-                         : (index == 2 ? "Send to GLM" : (index == 3 ? "Send to Gemini" : "Send to Antigravity"))));
+    AgentBackend *current = currentAgent();
+    status_->setText(current->statusText() + "  •  " + QDir::toNativeSeparators(current->workingDirectory()));
+    stopButton_->setEnabled(current->canInterrupt());
+    sendButton_->setText("Send to " + current->name());
     sendButton_->setEnabled(viewLive_);
     // Reloading a longer tail while a live response streams would drop the partial answer.
-    const bool viewBusy = viewLive_ && (currentProvider_ == 0 ? codex_->isResponding() : (currentProvider_ == 1 ? claudeBusy_
-        : (currentProvider_ == 2 ? glmBusy_ : (currentProvider_ == 3 ? geminiBusy_ : antigravityBusy_))));
-    loadEarlierButton_->setEnabled(!viewBusy);
+    loadEarlierButton_->setEnabled(!(viewLive_ && current->isResponding()));
     input_->setPlaceholderText(viewLive_ ? "Enter a message or help, then press Enter"
                                          : "Read-only preview. Type help, new or clear, then press Enter");
-    newChatButton_->setEnabled(!codex_->isResponding() && !claudeBusy_ && !glmBusy_ && !geminiBusy_ && !antigravityBusy_);
+    newChatButton_->setEnabled(std::none_of(agents_.begin(), agents_.end(),
+                                            [](AgentBackend *agent) { return agent->isResponding(); }));
 }

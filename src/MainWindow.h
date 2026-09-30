@@ -4,6 +4,7 @@
 
 #include <QHash>
 #include <QJsonObject>
+#include <QList>
 #include <QMainWindow>
 #include <QSet>
 #include <QStringList>
@@ -13,11 +14,10 @@ class QLineEdit;
 class QPlainTextEdit;
 class QProcess;
 class QPushButton;
-class AgentBackend;
-class ClaudeBridge;
+class AntigravityAgent;
+class ClaudeAgent;
 class CodexAgent;
-class GeminiBridge;
-class AntigravityBridge;
+class GeminiAgent;
 class QTreeWidget;
 class QTreeWidgetItem;
 
@@ -38,10 +38,8 @@ private:
     void showHelp();
     void connectAgent(AgentBackend *agent);
     QHash<QString, QString> askQuestions(const QList<AgentQuestion> &questions);
-    void sendNextClaudePrompt();
-    void sendNextGlmPrompt();
-    void sendNextGeminiPrompt();
-    void sendNextAntigravityPrompt();
+    AgentBackend *agent(int index) const { return agents_.value(index); }
+    AgentBackend *currentAgent() const { return agent(currentProvider_); }
     bool loadLocalConversations();
     bool saveLocalConversations();
     void rememberLocalConversation(const QString &provider, const QString &id);
@@ -50,13 +48,11 @@ private:
     void rememberRecentDirectory(const QString &path);
     void newProviderConversation(int providerIndex, const QString &path);
     void showNewConversationDialog();
-    void resumeProviderConversation(const QString &provider, const QString &id, const QString &path);
     void fetchClaudeSessions();
     void fetchGeminiSessions();
     void refreshConversationTree();
     static QString providerName(int index);
     static int providerIndex(const QString &name);
-    QString providerWorkingDirectory(int index) const;
     void selectProvider(int index);
     void requestStop();
     void appendText(const QString &text);
@@ -65,7 +61,6 @@ private:
     void showChatPreview(QTreeWidgetItem *item);
     void attachChat(QTreeWidgetItem *item);
     void openChat(const QString &provider, const QString &id, const QString &path, const QString &title);
-    QString liveSessionId(int index) const;
     QString externalLock(const QString &provider, const QString &id) const;
     void showLiveChat(const QString &provider, const QString &path);
     void loadHistory(bool reset);
@@ -77,24 +72,15 @@ private:
     QString claudePython_;
     QString claudeScript_;
     QString localIndexPath_;
-    QString geminiDataDirectory_;
-    QString claudeWorkingDirectory_;
-    QString glmWorkingDirectory_;
-    QString geminiWorkingDirectory_;
-    QString antigravityWorkingDirectory_;
-    QString claudeSessionId_;
-    QString glmSessionId_;
-    QString pendingClaudeResumeId_;
-    QString pendingGlmResumeId_;
-    QString claudeFirstPrompt_;
-    QString glmFirstPrompt_;
-    QString geminiFirstPrompt_;
-    QString antigravityFirstPrompt_;
     CodexAgent *codex_;
-    ClaudeBridge *claude_;
-    ClaudeBridge *glm_;
-    GeminiBridge *gemini_;
-    AntigravityBridge *antigravity_;
+    ClaudeAgent *claude_;
+    ClaudeAgent *glm_;
+    GeminiAgent *gemini_;
+    AntigravityAgent *antigravity_;
+    // Indexed like providerName(): Codex, Claude, GLM, Gemini, Antigravity.
+    QList<AgentBackend *> agents_;
+    // First message of a new chat per provider, used as its title in the local index.
+    QHash<QString, QString> firstPrompts_;
     QPlainTextEdit *chatView_;
     QPlainTextEdit *log_;
     QLabel *chatHeader_;
@@ -105,10 +91,6 @@ private:
     QPushButton *newChatButton_;
     QLabel *status_;
     QTreeWidget *conversationTree_;
-    QStringList claudeQueuedPrompts_;
-    QStringList glmQueuedPrompts_;
-    QStringList geminiQueuedPrompts_;
-    QStringList antigravityQueuedPrompts_;
     QHash<QString, QJsonObject> localConversations_;
     QList<QProcess *> historyProcesses_;
     QSet<QString> expandedProviders_;
@@ -117,28 +99,10 @@ private:
     QString viewId_;
     QString viewPath_;
     QString viewTitle_;
-    QList<ChatEntry> historyEntries_;
     QString liveTranscript_;
     QStringList recentDirectories_;
     QString lockNotice_;
     QString pendingAttachId_;
-    quint64 historyGeneration_ = 0;
-    int historyLimit_ = 0;
-    int historyTotal_ = 0;
     bool viewLive_ = false;
     bool geminiExecutableChecked_ = false;
-    bool claudeReady_ = false;
-    bool claudeBusy_ = false;
-    bool claudeStopRequested_ = false;
-    bool claudeTextStarted_ = false;
-    bool glmReady_ = false;
-    bool glmBusy_ = false;
-    bool glmStopRequested_ = false;
-    bool glmTextStarted_ = false;
-    bool geminiBusy_ = false;
-    bool geminiStopRequested_ = false;
-    bool geminiTextStarted_ = false;
-    bool antigravityBusy_ = false;
-    bool antigravityStopRequested_ = false;
-    bool antigravityTextStarted_ = false;
 };

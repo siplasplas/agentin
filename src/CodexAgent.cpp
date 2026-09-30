@@ -542,7 +542,7 @@ void CodexAgent::handleNotification(const QString &method, const QJsonObject &pa
         streamedCommands_.insert(itemId);
         emit toolOutput(params.value("delta").toString());
     } else if (method == "item/started" && item.value("type") == "commandExecution") {
-        emit toolStarted("Command", item.value("command").toString());
+        emit toolStarted("shell", item.value("command").toString());
     } else if (method == "item/completed") {
         const QString type = item.value("type").toString();
         const QString completedId = item.value("id").toString();
@@ -557,9 +557,9 @@ void CodexAgent::handleNotification(const QString &method, const QJsonObject &pa
                 const QString output = item.value("aggregatedOutput").toString();
                 if (!output.isEmpty()) emit toolOutput(output);
             }
-            emit toolFinished("Command", item.value("status").toString());
+            emit toolFinished("shell", item.value("status").toString());
         } else if (type == "fileChange") {
-            emit toolFinished("File changes", item.value("status").toString());
+            emit toolFinished("file changes", item.value("status").toString());
         }
     } else if (method == "turn/completed") {
         const QJsonObject turn = params.value("turn").toObject();
