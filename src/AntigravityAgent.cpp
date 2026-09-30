@@ -38,12 +38,24 @@ void AntigravityProvider::loadConversations()
 
 // `agy models` prints one model per line as "<id>\t<name>". The reasoning level is part of the model
 // (for example gemini-3.8-flash-high), so Antigravity chats offer no separate effort.
+AntigravityProvider::~AntigravityProvider()
+{
+    if (modelsProcess_) {
+        disconnect(modelsProcess_, nullptr, this, nullptr);
+        modelsProcess_->kill();
+        modelsProcess_->waitForFinished(1000);
+    }
+}
+
 void AntigravityProvider::requestModels()
 {
+    if (modelsProcess_) return;
     auto *process = new QProcess(this);
+    modelsProcess_ = process;
     connect(process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this,
             [this, process](int code, QProcess::ExitStatus status) {
         process->deleteLater();
+        modelsProcess_ = nullptr;
         if (status != QProcess::NormalExit || code != 0) return;
         QList<AgentModel> models{{{}, "Default model", "The model configured in Antigravity CLI", {}, {}, {}, true}};
         for (const QString &line : QString::fromUtf8(process->readAllStandardOutput()).split('\n')) {
@@ -55,8 +67,10 @@ void AntigravityProvider::requestModels()
         models_ = models;
         emit modelsChanged();
     });
-    connect(process, &QProcess::errorOccurred, process, [process](QProcess::ProcessError error) {
-        if (error == QProcess::FailedToStart) process->deleteLater();
+    connect(process, &QProcess::errorOccurred, this, [this, process](QProcess::ProcessError error) {
+        if (error != QProcess::FailedToStart) return;
+        process->deleteLater();
+        modelsProcess_ = nullptr;
     });
     process->start(program_, {"models"});
 }
@@ -250,6 +264,21 @@ void AntigravityAgent::handleLine(const QByteArray &line)
     } else if (type == "result") {
         resultSeen_ = true;
         const QJsonObject result = event.value("result").toObject();
+        // The field names follow what the CLI appears to use; nothing is shown when they are absent.
+        for (const QJsonObject &holder : {result, event}) {
+            QJsonObject usage;
+            for (const QString &key : {QStringLiteral("usage"), QStringLiteral("stats"), QStringLiteral("token_usage")})
+                if (holder.value(key).isObject()) usage = holder.value(key).toObject();
+            if (usage.isEmpty()) continue;
+            TokenUsage tokens;
+            tokens.input = usage.value("input_tokens").toInteger(-1);
+            tokens.cached = usage.value("cached_tokens").toInteger(usage.value("cached").toInteger(-1));
+            tokens.output = usage.value("output_tokens").toInteger(-1);
+            tokens.reasoning = usage.value("thoughts_tokens").toInteger(usage.value("reasoning_tokens").toInteger(-1));
+            tokens.total = usage.value("total_tokens").toInteger(-1);
+            if (!tokens.isEmpty()) emit turnUsage(tokens);
+            break;
+        }
         const QString id = result.value("conversation_id").toString();
         if (!id.isEmpty() && id != conversationId_) {
             conversationId_ = id;

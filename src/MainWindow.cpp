@@ -184,8 +184,11 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     emptyDocument_->setDocumentLayout(new QPlainTextDocumentLayout(emptyDocument_));
     chatView_->setDocument(emptyDocument_);
     // The model and effort belong to the chat, so they sit in its header.
+    tokens_ = new QLabel(chatPanel_);
+    tokens_->setObjectName("tokenUsage");
     auto *headerRow = new QHBoxLayout;
     headerRow->addWidget(chatHeader_, 1);
+    headerRow->addWidget(tokens_);
     headerRow->addWidget(modelInput_);
     headerRow->addWidget(effortInput_);
     headerRow->addWidget(readOnlyInput_);
@@ -917,6 +920,7 @@ void MainWindow::updateStatus()
         status_->setText("No chat open");
         status_->setToolTip({});
         chatHeader_->clear();
+        tokens_->clear();
         loadEarlierButton_->setVisible(false);
         sendButton_->setText("Send");
         sendButton_->setEnabled(false);
@@ -930,6 +934,18 @@ void MainWindow::updateStatus()
     status_->setText(agent->statusText() + "  •  " + QDir::toNativeSeparators(tab->workingDirectory()));
     status_->setToolTip(status_->text());
     chatHeader_->setText(tab->headerText());
+    const TokenUsage turn = tab->lastTurnUsage();
+    const TokenUsage conversation = tab->conversationUsage();
+    QStringList usage;
+    if (!turn.isEmpty()) usage.append("turn " + ChatTab::shortUsage(turn));
+    if (!conversation.isEmpty()) usage.append("chat " + ChatTab::shortUsage(conversation));
+    tokens_->setText(usage.join("  "));
+    QStringList usageTip{"Tokens in" + QString(QChar(0x2192)) + "out"};
+    if (!turn.isEmpty()) usageTip.append("Latest turn: " + ChatTab::usageDetails(turn));
+    if (!conversation.isEmpty())
+        usageTip.append((tab->conversationUsageIsComplete() ? "Conversation: " : "This session in the tab: ")
+                        + ChatTab::usageDetails(conversation));
+    tokens_->setToolTip(usage.isEmpty() ? QString() : usageTip.join('\n'));
     chatHeader_->setToolTip(tab->conversationId().isEmpty() ? tab->headerText()
                                                              : tab->headerText() + "\n" + tab->conversationId());
     loadEarlierButton_->setVisible(tab->hasMoreHistory());

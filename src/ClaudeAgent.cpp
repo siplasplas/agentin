@@ -533,6 +533,19 @@ void ClaudeAgent::handleLine(const QByteArray &line)
         sessionId_ = event.value("id").toString();
         emit conversationOpened(sessionId_, false);
         if (provider_) provider_->rememberConversation(sessionId_, workingDirectory_, firstPrompt_);
+    } else if (type == "usage") {
+        // Claude counts cache reads and cache writes apart from the other input tokens.
+        const QJsonObject usage = event.value("usage").toObject();
+        TokenUsage tokens;
+        const qint64 fresh = usage.value("input_tokens").toInteger(-1);
+        const qint64 cacheRead = usage.value("cache_read_input_tokens").toInteger(0);
+        const qint64 cacheWrite = usage.value("cache_creation_input_tokens").toInteger(0);
+        tokens.input = fresh < 0 ? -1 : fresh + cacheRead + cacheWrite;
+        tokens.cached = usage.contains("cache_read_input_tokens") ? cacheRead : -1;
+        tokens.output = usage.value("output_tokens").toInteger(-1);
+        tokens.total = tokens.input < 0 || tokens.output < 0 ? -1 : tokens.input + tokens.output;
+        tokens.costUsd = event.value("costUsd").isDouble() ? event.value("costUsd").toDouble() : -1;
+        emit turnUsage(tokens);
     } else if (type == "rate_limit") {
         if (provider_) provider_->updateUsage(event);
     } else if (type == "error") {

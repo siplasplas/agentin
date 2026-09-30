@@ -66,6 +66,14 @@ public:
     bool send(const QString &text);
     void loadEarlier();
 
+    // Tokens of the latest turn and of the conversation. The conversation total covers the whole
+    // conversation when the agent reports it (Codex), otherwise the turns sent from this tab.
+    TokenUsage lastTurnUsage() const { return turnUsage_; }
+    TokenUsage conversationUsage() const { return conversationUsage_; }
+    bool conversationUsageIsComplete() const { return conversationUsageFromAgent_; }
+    static QString shortUsage(const TokenUsage &usage);
+    static QString usageDetails(const TokenUsage &usage);
+
     // Approvals and questions are answered in the tab, one request at a time.
     const PendingRequest *pendingRequest() const { return requests_.isEmpty() ? nullptr : &requests_.first(); }
     qsizetype pendingRequestCount() const { return requests_.size(); }
@@ -110,6 +118,9 @@ private:
     QString lockNotice_;
     QList<PendingRequest> requests_;
     QStringList sessionApprovals_;
+    TokenUsage turnUsage_;
+    TokenUsage conversationUsage_;
+    bool conversationUsageFromAgent_ = false;
     TurnLocks *locks_ = nullptr;
     QTimer *retry_;
     QStringList outgoing_;

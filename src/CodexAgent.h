@@ -63,6 +63,9 @@ private:
     QString effort_;
     // Set once the user picks a model, so the thread's reported settings no longer replace it.
     bool modelChosen_ = false;
+    // The thread's token total before the running turn, found from the first report in the turn.
+    TokenUsage turnBaseline_;
+    bool turnBaselineKnown_ = false;
     // The thread's own sandbox policy, restored when read-only mode is switched off again.
     QJsonObject threadSandbox_;
     bool readOnly_ = false;

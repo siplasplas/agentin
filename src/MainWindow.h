@@ -91,6 +91,7 @@ private:
     QComboBox *modelInput_;
     QComboBox *effortInput_;
     QCheckBox *readOnlyInput_;
+    QLabel *tokens_;
     // What the model controls last showed; rebuilding them would close an open drop-down list.
     QString modelControlsState_;
     MessageInput *input_;

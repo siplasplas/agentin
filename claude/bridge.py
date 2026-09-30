@@ -181,6 +181,9 @@ class Bridge:
                     send({"type": "rate_limit", "limit": info.rate_limit_type, "utilization": info.utilization,
                           "resetsAt": info.resets_at, "status": info.status})
                 elif isinstance(message, ResultMessage):
+                    usage = getattr(message, "usage", None)
+                    if usage or getattr(message, "total_cost_usd", None) is not None:
+                        send({"type": "usage", "usage": usage or {}, "costUsd": message.total_cost_usd})
                     if getattr(message, "session_id", None):
                         self.session_id = message.session_id
                         send({"type": "session", "id": self.session_id})

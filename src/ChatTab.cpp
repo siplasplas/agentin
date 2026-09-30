@@ -3,6 +3,7 @@
 #include "TurnLocks.h"
 
 #include <QDir>
+#include <QLocale>
 #include <QPlainTextDocumentLayout>
 #include <QRegularExpression>
 #include <QTextCursor>
@@ -69,6 +70,7 @@ bool ChatTab::dispatch()
     const bool wasWaiting = isWaiting();
     waitingFor_.clear();
     inTurn_ = true;
+    turnUsage_ = {};
     if (!agent_->prompt(outgoing_.takeFirst())) {
         inTurn_ = false;
         releaseDirectory();
@@ -84,6 +86,51 @@ void ChatTab::releaseDirectory()
     if (!holdsDirectory_) return;
     holdsDirectory_ = false;
     if (locks_) locks_->release(QString("%1").arg(quintptr(this)));
+}
+
+namespace {
+QString compactCount(qint64 count)
+{
+    if (count < 1000) return QString::number(count);
+    if (count < 1000000) return QString::number(count / 1000.0, 'f', count < 100000 ? 1 : 0) + "k";
+    return QString::number(count / 1000000.0, 'f', 1) + "M";
+}
+
+QString fullCount(qint64 count)
+{
+    QLocale locale = QLocale::c();
+    locale.setNumberOptions({});
+    return locale.toString(count);
+}
+}
+
+// For example "12.3k→1.2k": input tokens, then output tokens.
+QString ChatTab::shortUsage(const TokenUsage &usage)
+{
+    if (usage.isEmpty()) return {};
+    const QString in = usage.input < 0 ? "?" : compactCount(usage.input);
+    const QString out = usage.output < 0 ? "?" : compactCount(usage.output);
+    return in + QChar(0x2192) + out;
+}
+
+QString ChatTab::usageDetails(const TokenUsage &usage)
+{
+    QStringList parts;
+    if (usage.input >= 0) {
+        parts.append(fullCount(usage.input) + " in"
+                     + (usage.cached >= 0 ? " (" + fullCount(usage.cached) + " cached)" : QString()));
+    }
+    if (usage.output >= 0) {
+        parts.append(fullCount(usage.output) + " out"
+                     + (usage.reasoning >= 0 ? " (" + fullCount(usage.reasoning) + " reasoning)" : QString()));
+    }
+    if (usage.total >= 0) parts.append(fullCount(usage.total) + " total");
+    if (usage.costUsd >= 0) parts.append(QString("$%1").arg(usage.costUsd, 0, 'f', 4));
+    if (usage.contextUsed >= 0 && usage.contextWindow > 0) {
+        parts.append(QString("context %1% of %2").arg(qRound(100.0 * usage.contextUsed / usage.contextWindow))
+                         .arg(compactCount(usage.contextWindow)));
+    }
+    return parts.join(", ");
 }
 
 QString ChatTab::key(const QString &provider, const QString &id)
@@ -119,6 +166,9 @@ bool ChatTab::startNew(const QString &workingDirectory)
     title_ = "New chat";
     live_ = true;
     liveTranscript_.clear();
+    turnUsage_ = {};
+    conversationUsage_ = {};
+    conversationUsageFromAgent_ = false;
     historyMessages_.clear();
     sentMessages_.clear();
     emit userMessagesChanged();
@@ -144,6 +194,9 @@ void ChatTab::showPreview(AgentProvider *provider, const QString &id, const QStr
     pendingAttach_ = false;
     hasMore_ = false;
     liveTranscript_.clear();
+    turnUsage_ = {};
+    conversationUsage_ = {};
+    conversationUsageFromAgent_ = false;
     historyMessages_.clear();
     sentMessages_.clear();
     emit userMessagesChanged();
@@ -228,6 +281,11 @@ void ChatTab::setAgent(AgentBackend *agent)
             requests_.clear();
             emit requestsChanged();
         }
+        if (!turnUsage_.isEmpty()) {
+            if (!conversationUsageFromAgent_) conversationUsage_ += turnUsage_;
+            emit logMessage("[" + name + " turn: " + usageDetails(turnUsage_) + "]");
+            emit changed();
+        }
         // Between turns the directory is free for other agents; the next queued message takes it again.
         inTurn_ = false;
         releaseDirectory();
@@ -275,6 +333,15 @@ void ChatTab::setAgent(AgentBackend *agent)
         if (!pendingAttach_ || id != id_) return;
         pendingAttach_ = false;
         lockNotice_ = reason;
+        emit changed();
+    });
+    connect(agent, &AgentBackend::turnUsage, this, [this](const TokenUsage &usage) {
+        turnUsage_ = usage;
+        emit changed();
+    });
+    connect(agent, &AgentBackend::conversationUsage, this, [this](const TokenUsage &usage) {
+        conversationUsageFromAgent_ = true;
+        conversationUsage_ = usage;
         emit changed();
     });
     connect(agent, &AgentBackend::historyLoaded, this,

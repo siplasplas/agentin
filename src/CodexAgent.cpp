@@ -315,6 +315,7 @@ void CodexAgent::sendNextPrompt()
     activeTurnId_.clear();
     stopRequested_ = false;
     stopSent_ = false;
+    turnBaselineKnown_ = false;
     QJsonObject params{{"threadId", threadId_},
                        {"input", QJsonArray{QJsonObject{{"type", "text"}, {"text", text}}}}};
     if (modelChosen_ && !model_.isEmpty()) params.insert("model", model_);
@@ -401,6 +402,41 @@ void CodexAgent::handleNotification(const QString &method, const QJsonObject &pa
         emit turnCompleted(turn.value("status").toString(), turn.value("error").toObject().value("message").toString());
         emit stateChanged();
         sendNextPrompt();
+    } else if (method == "thread/tokenUsage/updated") {
+        // "total" covers the thread and "last" the latest request; a turn can make several requests,
+        // so its usage is the total minus the total before its first request.
+        const QJsonObject report = params.value("tokenUsage").toObject();
+        const auto read = [&report](const QJsonObject &breakdown) {
+            TokenUsage usage;
+            usage.input = breakdown.value("inputTokens").toInteger(-1);
+            usage.cached = breakdown.value("cachedInputTokens").toInteger(-1);
+            usage.output = breakdown.value("outputTokens").toInteger(-1);
+            usage.reasoning = breakdown.value("reasoningOutputTokens").toInteger(-1);
+            usage.total = breakdown.value("totalTokens").toInteger(-1);
+            usage.contextWindow = report.value("modelContextWindow").toInteger(-1);
+            return usage;
+        };
+        TokenUsage total = read(report.value("total").toObject());
+        const TokenUsage last = read(report.value("last").toObject());
+        total.contextUsed = last.total;
+        if (!turnBaselineKnown_) {
+            turnBaselineKnown_ = true;
+            const auto before = [](qint64 all, qint64 latest) { return all < 0 || latest < 0 ? qint64(-1) : all - latest; };
+            turnBaseline_.input = before(total.input, last.input);
+            turnBaseline_.cached = before(total.cached, last.cached);
+            turnBaseline_.output = before(total.output, last.output);
+            turnBaseline_.reasoning = before(total.reasoning, last.reasoning);
+            turnBaseline_.total = before(total.total, last.total);
+        }
+        const auto since = [](qint64 all, qint64 start) { return all < 0 ? qint64(-1) : all - qMax<qint64>(start, 0); };
+        TokenUsage turn = total;
+        turn.input = since(total.input, turnBaseline_.input);
+        turn.cached = since(total.cached, turnBaseline_.cached);
+        turn.output = since(total.output, turnBaseline_.output);
+        turn.reasoning = since(total.reasoning, turnBaseline_.reasoning);
+        turn.total = since(total.total, turnBaseline_.total);
+        emit turnUsage(turn);
+        emit conversationUsage(total);
     } else if (method == "error") {
         emit message("[Error] " + params.value("error").toObject().value("message").toString());
     }

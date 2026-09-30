@@ -14,6 +14,7 @@ class AntigravityProvider : public AgentProvider
     Q_OBJECT
 public:
     AntigravityProvider(const QString &program, const QString &indexPath, QObject *parent = nullptr);
+    ~AntigravityProvider() override;
 
     QString name() const override { return "Antigravity"; }
     AgentHelp help() const override;
@@ -34,6 +35,7 @@ private:
     QString program_;
     ConversationIndex index_;
     QList<AgentModel> models_;
+    QProcess *modelsProcess_ = nullptr;
 };
 
 class AntigravityAgent : public AgentBackend

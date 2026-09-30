@@ -408,6 +408,16 @@ void GeminiAgent::handleLine(const QByteArray &line)
         emit message("[Gemini] " + details);
     } else if (type == "result") {
         resultSeen_ = true;
+        // input_tokens includes the cached tokens; Gemini CLI does not report reasoning tokens here.
+        const QJsonObject stats = event.value("stats").toObject();
+        if (!stats.isEmpty()) {
+            TokenUsage tokens;
+            tokens.input = stats.value("input_tokens").toInteger(-1);
+            tokens.cached = stats.value("cached").toInteger(-1);
+            tokens.output = stats.value("output_tokens").toInteger(-1);
+            tokens.total = stats.value("total_tokens").toInteger(-1);
+            emit turnUsage(tokens);
+        }
         const QString status = event.value("status").toString();
         if (status != "success") errorDetails_ = event.value("error").toObject().value("message").toString(status);
     }

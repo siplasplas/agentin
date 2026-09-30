@@ -32,6 +32,36 @@ struct HistoryPages
     bool hasMore() const { return shown < entries.size(); }
 };
 
+// Token counts of a turn or a conversation; -1 means the agent did not report the value.
+struct TokenUsage
+{
+    // All input tokens, including those read from the cache.
+    qint64 input = -1;
+    qint64 cached = -1;
+    qint64 output = -1;
+    qint64 reasoning = -1;
+    qint64 total = -1;
+    double costUsd = -1;
+    // Tokens in the latest request and the model's context window.
+    qint64 contextUsed = -1;
+    qint64 contextWindow = -1;
+
+    bool isEmpty() const { return input < 0 && output < 0 && total < 0; }
+    static qint64 add(qint64 a, qint64 b) { return a < 0 ? b : (b < 0 ? a : a + b); }
+    TokenUsage &operator+=(const TokenUsage &other)
+    {
+        input = add(input, other.input);
+        cached = add(cached, other.cached);
+        output = add(output, other.output);
+        reasoning = add(reasoning, other.reasoning);
+        total = add(total, other.total);
+        costUsd = costUsd < 0 ? other.costUsd : (other.costUsd < 0 ? costUsd : costUsd + other.costUsd);
+        if (other.contextUsed >= 0) contextUsed = other.contextUsed;
+        if (other.contextWindow >= 0) contextWindow = other.contextWindow;
+        return *this;
+    }
+};
+
 struct AgentQuestion
 {
     QString id;
@@ -211,6 +241,10 @@ signals:
     void toolOutput(const QString &text);
     void toolFinished(const QString &name, const QString &status);
     void turnCompleted(const QString &status, const QString &details);
+    // Tokens of the running or just finished turn; may be reported several times during a turn.
+    void turnUsage(const TokenUsage &usage);
+    // Tokens of the whole conversation, for agents that keep the total themselves (Codex).
+    void conversationUsage(const TokenUsage &usage);
     // alwaysRule describes the lasting rule the agent proposes; empty when it proposes none.
     void approvalRequested(int id, const QString &title, const QString &description, bool canAcceptForSession,
                            const QString &alwaysRule);

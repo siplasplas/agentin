@@ -154,6 +154,17 @@ The options are saved in `settings.json` in the application data directory.
 A continued Codex conversation keeps the model and effort it used; Claude and
 Gemini sessions do not record them, so continued chats start with the defaults.
 
+The chat header shows the tokens of the latest turn and of the conversation as
+input→output, for example `turn 2.5k→300  chat 11.5k→1.1k`; its tooltip lists
+input with cached tokens, output with reasoning tokens, the total, the cost and
+how full the context window is, as far as the agent reports them, and each
+finished turn is summarized in the log. Codex reports the whole thread (a turn is
+the difference in the thread's totals), Claude and GLM report input, cache and
+output tokens and the cost but not reasoning separately, and Gemini reports
+input, cached and output tokens. For agents other than Codex, the conversation
+figure covers the turns sent from the tab. Antigravity's statistics are read
+where its result event carries them.
+
 The status row shows how much of the account's usage limits is left for the
 agent in the current tab, for example `Codex limits  week: 36% left`; hover over
 it to see the used percentage and when each window resets. Which windows exist
