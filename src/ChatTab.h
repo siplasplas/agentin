@@ -6,7 +6,20 @@
 #include <QObject>
 
 class QTextDocument;
-class QWidget;
+
+// An approval or a set of questions from the agent, waiting for the user in the tab.
+struct PendingRequest
+{
+    int id = 0;
+    bool approval = false;
+    QString title;
+    QString description;
+    bool canAcceptForSession = false;
+    QList<AgentQuestion> questions;
+    // The question shown now; earlier ones are answered.
+    qsizetype current = 0;
+    QHash<QString, QStringList> answers;
+};
 
 // One chat shown in a tab: its agent session, the text it displays and whether it can be continued.
 // A tab is either live (messages go to the agent) or a read-only view of a saved conversation.
@@ -15,8 +28,7 @@ class ChatTab : public QObject
     Q_OBJECT
 
 public:
-    ChatTab(AgentProvider *provider, const QString &workingDirectory, QWidget *dialogParent,
-            QObject *parent = nullptr);
+    ChatTab(AgentProvider *provider, const QString &workingDirectory, QObject *parent = nullptr);
 
     AgentProvider *provider() const { return provider_; }
     AgentBackend *agent() const { return agent_; }
@@ -44,25 +56,33 @@ public:
     bool send(const QString &text);
     void loadEarlier();
 
+    // Approvals and questions are answered in the tab, one request at a time.
+    const PendingRequest *pendingRequest() const { return requests_.isEmpty() ? nullptr : &requests_.first(); }
+    qsizetype pendingRequestCount() const { return requests_.size(); }
+    void answerApproval(ApprovalDecision decision);
+    void answerQuestion(const QStringList &values);
+    // Sends the answers given so far and leaves the remaining questions unanswered.
+    void skipQuestions();
+    // Uses text from the message field for the current question: option numbers or, where the agent
+    // accepts it, the user's own words. Returns false when no question is waiting for text.
+    bool answerWithText(const QString &text);
+
 signals:
     void logMessage(const QString &text);
     // Title, header, live state or agent state changed.
     void changed();
     void textAppended();
     void userMessagesChanged();
-    // The agent needs an answer in a dialog, so the tab should be shown first.
-    void activateRequested();
+    void requestsChanged();
 
 private:
     void setAgent(AgentBackend *agent);
     void appendText(const QString &text);
     void showHistory(const QList<ChatEntry> &entries, bool hasMore, const QString &notice);
-    ApprovalDecision askApproval(const QString &title, const QString &description, bool canAcceptForSession);
-    QHash<QString, QString> askQuestions(const QList<AgentQuestion> &questions);
+    void finishQuestions();
 
     AgentProvider *provider_;
     AgentBackend *agent_ = nullptr;
-    QWidget *dialogParent_;
     QTextDocument *document_;
     QString id_;
     QString path_;
@@ -71,6 +91,7 @@ private:
     QStringList historyMessages_;
     QStringList sentMessages_;
     QString lockNotice_;
+    QList<PendingRequest> requests_;
     bool live_ = false;
     bool hasMore_ = false;
     bool pendingAttach_ = false;

@@ -61,6 +61,7 @@ private:
     void updateModelControls();
     void updateUsage();
     void showEnterAction(bool sends);
+    void updateRequestPanel();
     void chooseModel();
 
     QString workingDirectory_;
@@ -79,6 +80,10 @@ private:
     QPushButton *loadEarlierButton_;
     QPlainTextEdit *chatView_;
     QTextDocument *emptyDocument_;
+    // Shows the current tab's waiting approval or question below the chat.
+    QWidget *requestPanel_;
+    // Which request the panel shows; rebuilding it would drop the options the user ticked.
+    QString requestPanelState_;
     QPlainTextEdit *log_;
     QComboBox *modelInput_;
     QComboBox *effortInput_;

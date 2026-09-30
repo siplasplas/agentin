@@ -1,16 +1,13 @@
 #include "ChatTab.h"
 
 #include <QDir>
-#include <QInputDialog>
-#include <QLineEdit>
-#include <QMessageBox>
-#include <QPushButton>
 #include <QPlainTextDocumentLayout>
+#include <QRegularExpression>
 #include <QTextCursor>
 #include <QTextDocument>
 
-ChatTab::ChatTab(AgentProvider *provider, const QString &workingDirectory, QWidget *dialogParent, QObject *parent)
-    : QObject(parent), provider_(provider), dialogParent_(dialogParent), document_(new QTextDocument(this)),
+ChatTab::ChatTab(AgentProvider *provider, const QString &workingDirectory, QObject *parent)
+    : QObject(parent), provider_(provider), document_(new QTextDocument(this)),
       path_(workingDirectory), title_("New chat")
 {
     document_->setDocumentLayout(new QPlainTextDocumentLayout(document_));
@@ -151,17 +148,35 @@ void ChatTab::setAgent(AgentBackend *agent)
         appendText("\n[" + tool + ": " + status + "]\n");
     });
     connect(agent, &AgentBackend::turnCompleted, this, [this, name](const QString &status, const QString &details) {
+        // Requests of a finished turn can no longer be answered.
+        if (!requests_.isEmpty()) {
+            requests_.clear();
+            emit requestsChanged();
+        }
         if (status != "completed")
             emit logMessage("[" + name + " response: " + status + (details.isEmpty() ? "" : ": " + details) + "]");
     });
     connect(agent, &AgentBackend::approvalRequested, this,
-            [this, agent](int id, const QString &title, const QString &description, bool canAcceptForSession) {
-        emit activateRequested();
-        agent->answerApproval(id, askApproval(title, description, canAcceptForSession));
+            [this](int id, const QString &title, const QString &description, bool canAcceptForSession) {
+        PendingRequest request;
+        request.id = id;
+        request.approval = true;
+        request.title = title;
+        request.description = description;
+        request.canAcceptForSession = canAcceptForSession;
+        requests_.append(request);
+        emit requestsChanged();
     });
-    connect(agent, &AgentBackend::questionsRequested, this, [this, agent](int id, const QList<AgentQuestion> &questions) {
-        emit activateRequested();
-        agent->answerQuestions(id, askQuestions(questions));
+    connect(agent, &AgentBackend::questionsRequested, this, [this](int id, const QList<AgentQuestion> &questions) {
+        if (questions.isEmpty()) {
+            agent_->answerQuestions(id, {});
+            return;
+        }
+        PendingRequest request;
+        request.id = id;
+        request.questions = questions;
+        requests_.append(request);
+        emit requestsChanged();
     });
     // A resumed conversation becomes live only if this tab still shows the chat it asked for.
     connect(agent, &AgentBackend::conversationOpened, this, [this](const QString &id, bool resumed) {
@@ -222,51 +237,69 @@ void ChatTab::showHistory(const QList<ChatEntry> &entries, bool hasMore, const Q
     emit textAppended();
 }
 
-// Closing the dialog declines, which lets the agent continue without the action.
-ApprovalDecision ChatTab::askApproval(const QString &title, const QString &description, bool canAcceptForSession)
+void ChatTab::answerApproval(ApprovalDecision decision)
 {
-    QMessageBox box(QMessageBox::Question, title, description + "\n\nAllow this action?", QMessageBox::NoButton,
-                    dialogParent_);
-    box.setInformativeText("Decline lets the agent continue without this action; Decline and stop also ends its turn.");
-    QPushButton *once = box.addButton("Allow once", QMessageBox::AcceptRole);
-    QPushButton *session = canAcceptForSession ? box.addButton("Allow for this session", QMessageBox::AcceptRole)
-                                               : nullptr;
-    QPushButton *decline = box.addButton("Decline", QMessageBox::RejectRole);
-    QPushButton *stop = box.addButton("Decline and stop", QMessageBox::DestructiveRole);
-    box.setDefaultButton(decline);
-    box.setEscapeButton(decline);
-    box.exec();
-    if (box.clickedButton() == once) return ApprovalDecision::Accept;
-    if (session && box.clickedButton() == session) return ApprovalDecision::AcceptForSession;
-    if (box.clickedButton() == stop) return ApprovalDecision::Cancel;
-    return ApprovalDecision::Decline;
+    if (requests_.isEmpty() || !requests_.first().approval) return;
+    const int id = requests_.takeFirst().id;
+    agent_->answerApproval(id, decision);
+    emit requestsChanged();
 }
 
-// Asks each question in a dialog and stops at the first one the user cancels. Options are numbered
-// with their descriptions; where the agent accepts it, the list is editable for an own answer.
-QHash<QString, QString> ChatTab::askQuestions(const QList<AgentQuestion> &questions)
+void ChatTab::answerQuestion(const QStringList &values)
 {
-    QHash<QString, QString> answers;
-    for (const AgentQuestion &question : questions) {
-        bool accepted = false;
-        QString prompt = question.text;
-        for (int i = 0; i < question.options.size(); ++i) {
-            const QString description = question.optionDescriptions.value(i);
-            prompt += QString("\n%1. %2").arg(i + 1).arg(question.options.at(i))
-                + (description.isEmpty() ? QString() : " — " + description);
-        }
-        if (question.allowOther && !question.options.isEmpty()) prompt += "\nOr type your own answer.";
-        QString reply;
-        if (question.secret) {
-            reply = QInputDialog::getText(dialogParent_, question.header, prompt, QLineEdit::Password, {}, &accepted);
-        } else if (question.multiSelect || question.options.isEmpty()) {
-            reply = QInputDialog::getText(dialogParent_, question.header, prompt, QLineEdit::Normal, {}, &accepted);
-        } else {
-            reply = QInputDialog::getItem(dialogParent_, question.header, prompt, question.options, 0,
-                                          question.allowOther, &accepted);
-        }
-        if (!accepted) break;
-        answers.insert(question.id, reply);
+    if (requests_.isEmpty() || requests_.first().approval) return;
+    PendingRequest &request = requests_.first();
+    request.answers.insert(request.questions.at(request.current).id, values);
+    if (++request.current < request.questions.size()) {
+        emit requestsChanged();
+        return;
     }
-    return answers;
+    finishQuestions();
+}
+
+void ChatTab::skipQuestions()
+{
+    if (!requests_.isEmpty() && !requests_.first().approval) finishQuestions();
+}
+
+void ChatTab::finishQuestions()
+{
+    const PendingRequest request = requests_.takeFirst();
+    agent_->answerQuestions(request.id, request.answers);
+    emit requestsChanged();
+}
+
+bool ChatTab::answerWithText(const QString &text)
+{
+    if (requests_.isEmpty() || requests_.first().approval) return false;
+    const PendingRequest &request = requests_.first();
+    const AgentQuestion &question = request.questions.at(request.current);
+    if (question.secret) {
+        emit logMessage("[Type the answer in the hidden field above the message field, so it is not shown.]");
+        return true;
+    }
+    if (question.options.isEmpty()) {
+        answerQuestion({text});
+        return true;
+    }
+    // Option numbers, several separated by commas or spaces for a multi-select question.
+    QStringList chosen;
+    const QStringList numbers = text.split(QRegularExpression("[,\\s]+"), Qt::SkipEmptyParts);
+    for (const QString &number : numbers) {
+        bool isNumber = false;
+        const int index = number.toInt(&isNumber) - 1;
+        if (!isNumber || index < 0 || index >= question.options.size()) {
+            chosen.clear();
+            break;
+        }
+        chosen.append(question.options.at(index));
+    }
+    if (!chosen.isEmpty() && (question.multiSelect || chosen.size() == 1)) {
+        answerQuestion(chosen);
+    } else if (question.allowOther) {
+        answerQuestion({text});
+    } else {
+        emit logMessage(QString("[Choose an option by its number, 1 to %1.]").arg(question.options.size()));
+    }
+    return true;
 }

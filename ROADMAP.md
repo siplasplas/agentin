@@ -12,16 +12,12 @@ Codex, Claude and Gemini chats choose a model (and an effort where the agent has
 ## Approvals and questions in the chat
 
 Agents ask for approvals (run a command, change files, access the network) and ask questions with
-options. The dialogs already allow an approval once or for the session, declining with or without
-stopping the turn, numbered options with descriptions, an own answer where the agent accepts one,
-and hidden input for secrets. Still open:
+options. They are answered in a panel in the tab: approval once or for the session, declining with
+or without stopping the turn, numbered options with descriptions (several where allowed), option
+numbers or an own answer typed in the message field, and hidden input for secrets. Still open:
 
 - **Lasting rules:** allow similar commands from now on, for example repeated `git` commands (Codex
   `proposedExecpolicyAmendment`, Claude suggestions saved to their settings destination).
-- **Questions:** pick several options where the question allows it (Claude `multiSelect`) instead of
-  typing them, and type an own answer in the message field with the normal Enter policy.
-- **In the chat instead of dialogs:** show approvals and questions in the tab that asked, so other tabs
-  stay usable and several pending requests do not stack modal dialogs; mark the tab for attention.
 
 ## Directory lock for running turns
 

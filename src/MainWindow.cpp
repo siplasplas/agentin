@@ -7,7 +7,10 @@
 #include "MessageInput.h"
 
 #include <QCheckBox>
+#include <QButtonGroup>
 #include <QComboBox>
+#include <QFrame>
+#include <QRadioButton>
 #include <QDateTime>
 #include <QDialog>
 #include <QDialogButtonBox>
@@ -184,6 +187,12 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     panelLayout->addLayout(headerRow);
     panelLayout->addWidget(loadEarlierButton_);
     panelLayout->addWidget(chatView_, 1);
+    requestPanel_ = new QFrame(chatPanel_);
+    requestPanel_->setObjectName("requestPanel");
+    static_cast<QFrame *>(requestPanel_)->setFrameShape(QFrame::StyledPanel);
+    new QVBoxLayout(requestPanel_);
+    requestPanel_->hide();
+    panelLayout->addWidget(requestPanel_);
 
     log_ = new QPlainTextEdit(this);
     log_->setObjectName("log");
@@ -336,7 +345,7 @@ void MainWindow::submitCommand()
     } else if (local == "quit" || local == "/quit" || local == "exit") {
         close();
     } else if (ChatTab *tab = currentTab()) {
-        tab->send(command);
+        if (!tab->answerWithText(command)) tab->send(command);
     } else {
         appendLine("[No chat is open. Use New chat… to start one.]");
     }
@@ -696,7 +705,7 @@ QWidget *MainWindow::addChatTab(AgentProvider *selected, const QString &workingD
     auto *page = new QWidget;
     auto *layout = new QVBoxLayout(page);
     layout->setContentsMargins(0, 0, 0, 0);
-    auto *tab = new ChatTab(selected, workingDirectory, this, page);
+    auto *tab = new ChatTab(selected, workingDirectory, page);
     connect(tab, &ChatTab::logMessage, this, &MainWindow::appendLine);
     connect(tab, &ChatTab::changed, this, [this, page] { updateTab(page); });
     connect(tab, &ChatTab::textAppended, this, [this, page] {
@@ -707,7 +716,11 @@ QWidget *MainWindow::addChatTab(AgentProvider *selected, const QString &workingD
         chatView_->moveCursor(QTextCursor::End);
         chatView_->ensureCursorVisible();
     });
-    connect(tab, &ChatTab::activateRequested, this, [this, page] { tabs_->setCurrentWidget(page); });
+    // A tab in the background that waits for an answer is marked until the user switches to it.
+    connect(tab, &ChatTab::requestsChanged, this, [this, page, tab] {
+        if (tabs_->currentWidget() == page) updateRequestPanel();
+        else if (tab->pendingRequest()) tabs_->setTabAttention(page, true);
+    });
     connect(tab, &ChatTab::userMessagesChanged, this, [this, page, tab] {
         if (tabs_->currentWidget() == page) input_->setHistory(tab->userMessages());
     });
@@ -804,10 +817,123 @@ void MainWindow::updateStatus()
     stopButton_->setEnabled(agent->canInterrupt());
     sendButton_->setText("Send to " + tab->provider()->name());
     sendButton_->setEnabled(tab->isLive());
-    input_->setPlaceholderText(tab->isLive() ? "Message or help, then Ctrl+Enter to send"
+    const PendingRequest *request = tab->pendingRequest();
+    if (request && !request->approval)
+        input_->setPlaceholderText("Answer the question above: an option number or your own words");
+    else input_->setPlaceholderText(tab->isLive() ? "Message or help, then Ctrl+Enter to send"
                                              : "Read-only preview. Type help, new or clear, then press Enter");
     updateModelControls();
     updateUsage();
+    updateRequestPanel();
+}
+
+// Rebuilds the panel for the current tab's first waiting request. Options can be chosen here or by
+// typing their numbers in the message field, which also takes an answer in the user's own words.
+void MainWindow::updateRequestPanel()
+{
+    ChatTab *tab = currentTab();
+    const PendingRequest *request = tab ? tab->pendingRequest() : nullptr;
+    const QString state = request ? QString("%1/%2/%3/%4").arg(quintptr(tab)).arg(request->id).arg(request->current)
+                                        .arg(tab->pendingRequestCount())
+                                  : QString();
+    if (state == requestPanelState_) return;
+    requestPanelState_ = state;
+    auto *layout = static_cast<QVBoxLayout *>(requestPanel_->layout());
+    while (QLayoutItem *item = layout->takeAt(0)) {
+        if (QWidget *widget = item->widget()) widget->deleteLater();
+        if (QLayout *child = item->layout()) {
+            while (QLayoutItem *inner = child->takeAt(0)) {
+                if (inner->widget()) inner->widget()->deleteLater();
+                delete inner;
+            }
+        }
+        delete item;
+    }
+    requestPanel_->setVisible(request);
+    if (!request) return;
+    auto *title = new QLabel(requestPanel_);
+    title->setWordWrap(true);
+    auto *text = new QLabel(requestPanel_);
+    text->setWordWrap(true);
+    text->setTextInteractionFlags(Qt::TextSelectableByMouse);
+    layout->addWidget(title);
+    layout->addWidget(text);
+    const QString waiting = tab->pendingRequestCount() > 1
+        ? QString("  (%1 more waiting)").arg(tab->pendingRequestCount() - 1) : QString();
+    if (request->approval) {
+        title->setText("<b>" + request->title.toHtmlEscaped() + "</b>" + waiting.toHtmlEscaped());
+        text->setText(request->description);
+        // The row joins the panel before its buttons, so they are shown in the already visible panel.
+        auto *buttons = new QHBoxLayout;
+        layout->addLayout(buttons);
+        const auto addButton = [this, buttons, tab](const QString &label, ApprovalDecision decision, const QString &tip) {
+            auto *button = new QPushButton(label, requestPanel_);
+            button->setToolTip(tip);
+            buttons->addWidget(button);
+            connect(button, &QPushButton::clicked, this, [tab, decision] { tab->answerApproval(decision); });
+        };
+        addButton("Allow once", ApprovalDecision::Accept, "Allow only this action");
+        if (request->canAcceptForSession)
+            addButton("Allow for this session", ApprovalDecision::AcceptForSession,
+                      "Also allow the same kind of action for the rest of this session");
+        addButton("Decline", ApprovalDecision::Decline, "The agent continues without this action");
+        addButton("Decline and stop", ApprovalDecision::Cancel, "Decline and end the agent's turn");
+        buttons->addStretch(1);
+        return;
+    }
+    const AgentQuestion &question = request->questions.at(request->current);
+    QString heading = question.header.toHtmlEscaped();
+    if (request->questions.size() > 1)
+        heading += QString(" (question %1 of %2)").arg(request->current + 1).arg(request->questions.size());
+    title->setText("<b>" + heading + "</b>" + waiting.toHtmlEscaped());
+    text->setText(question.text);
+    auto *group = new QButtonGroup(requestPanel_);
+    group->setExclusive(!question.multiSelect);
+    for (int i = 0; i < question.options.size(); ++i) {
+        const QString description = question.optionDescriptions.value(i);
+        const QString label = QString("%1. %2").arg(i + 1).arg(question.options.at(i))
+            + (description.isEmpty() ? QString() : " — " + description);
+        QAbstractButton *option = question.multiSelect ? static_cast<QAbstractButton *>(new QCheckBox(label, requestPanel_))
+                                                       : new QRadioButton(label, requestPanel_);
+        group->addButton(option, i);
+        layout->addWidget(option);
+    }
+    QLineEdit *secret = nullptr;
+    if (question.secret) {
+        secret = new QLineEdit(requestPanel_);
+        secret->setEchoMode(QLineEdit::Password);
+        secret->setPlaceholderText("Hidden answer");
+        layout->addWidget(secret);
+    } else {
+        QString hint;
+        if (question.options.isEmpty()) hint = "Type the answer in the message field and send it.";
+        else if (question.multiSelect) hint = "Tick the options, or type their numbers in the message field (for example 1, 3).";
+        else hint = "Choose an option, or type its number in the message field.";
+        if (question.allowOther && !question.options.isEmpty()) hint += " You can also type your own answer there.";
+        auto *hintLabel = new QLabel(hint, requestPanel_);
+        hintLabel->setWordWrap(true);
+        layout->addWidget(hintLabel);
+    }
+    auto *buttons = new QHBoxLayout;
+    layout->addLayout(buttons);
+    auto *answer = new QPushButton("Answer", requestPanel_);
+    answer->setVisible(secret || !question.options.isEmpty());
+    auto *skip = new QPushButton(request->questions.size() > 1 ? "Skip the questions" : "Skip", requestPanel_);
+    skip->setToolTip("Leave the question unanswered; the agent continues without the answer");
+    buttons->addWidget(answer);
+    buttons->addWidget(skip);
+    buttons->addStretch(1);
+    const QStringList options = question.options;
+    connect(answer, &QPushButton::clicked, this, [tab, group, secret, options] {
+        QStringList values;
+        if (secret) values.append(secret->text());
+        for (QAbstractButton *option : group->buttons()) {
+            if (option->isChecked()) values.append(options.at(group->id(option)));
+        }
+        if (!values.isEmpty()) tab->answerQuestion(values);
+    });
+    if (secret) connect(secret, &QLineEdit::returnPressed, answer, &QPushButton::click);
+    connect(skip, &QPushButton::clicked, this, [tab] { tab->skipQuestions(); });
 }
 
 // A colored badge next to Send tells what Enter does now; the tooltip names the key for the other action.

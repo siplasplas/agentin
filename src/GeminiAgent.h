@@ -64,7 +64,7 @@ public:
     void loadHistory(const QString &id, const QString &workingDirectory, bool older) override;
     void cancelHistory() override {}
     void answerApproval(int, ApprovalDecision) override {}
-    void answerQuestions(int, const QHash<QString, QString> &) override {}
+    void answerQuestions(int, const QHash<QString, QStringList> &) override {}
 
 private:
     bool isRunning() const;

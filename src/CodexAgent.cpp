@@ -172,7 +172,7 @@ void CodexAgent::answerApproval(int id, ApprovalDecision decision)
     emit message("[Approval: " + value + "]");
 }
 
-void CodexAgent::answerQuestions(int id, const QHash<QString, QString> &answers)
+void CodexAgent::answerQuestions(int id, const QHash<QString, QStringList> &answers)
 {
     const QJsonValue requestId = serverRequests_.take(id);
     const QList<AgentQuestion> questions = pendingQuestions_.take(id);
@@ -181,7 +181,7 @@ void CodexAgent::answerQuestions(int id, const QHash<QString, QString> &answers)
     for (const AgentQuestion &question : questions) {
         const auto answer = answers.constFind(question.id);
         result.insert(question.id, QJsonObject{
-            {"answers", answer != answers.constEnd() ? QJsonArray{*answer} : QJsonArray{}}});
+            {"answers", answer != answers.constEnd() ? QJsonArray::fromStringList(*answer) : QJsonArray{}}});
     }
     connection_->respond(requestId, {{"answers", result}});
 }

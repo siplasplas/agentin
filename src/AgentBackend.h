@@ -187,7 +187,8 @@ public:
 
     virtual void answerApproval(int id, ApprovalDecision decision) = 0;
     // Answers are keyed by AgentQuestion::id; a missing key means the question was not answered.
-    virtual void answerQuestions(int id, const QHash<QString, QString> &answers) = 0;
+    // A question with multiSelect may have several values.
+    virtual void answerQuestions(int id, const QHash<QString, QStringList> &answers) = 0;
 
 signals:
     void message(const QString &text);

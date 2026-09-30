@@ -379,11 +379,12 @@ void ClaudeAgent::answerApproval(int id, ApprovalDecision decision)
     send({{"type", "approval_response"}, {"id", id}, {"allow", allow}, {"decision", value}});
 }
 
-void ClaudeAgent::answerQuestions(int id, const QHash<QString, QString> &answers)
+void ClaudeAgent::answerQuestions(int id, const QHash<QString, QStringList> &answers)
 {
     const int count = pendingQuestionCounts_.take(id);
     QJsonObject result;
-    for (auto it = answers.begin(); it != answers.end(); ++it) result.insert(it.key(), it.value());
+    // Claude Code expects the answers of a multi-select question as one comma-separated string.
+    for (auto it = answers.begin(); it != answers.end(); ++it) result.insert(it.key(), it.value().join(", "));
     send({{"type", "question_response"}, {"id", id}, {"accepted", answers.size() == count}, {"answers", result}});
 }
 

@@ -221,13 +221,17 @@ stored; older messages become available after **Show earlier messages**.
 
 Any other text is sent to the chat in the current tab when it is not a read-only
 preview. Messages entered while a response is in progress are queued. Requests to
-approve an action or answer a question switch to their tab and appear in a
-separate dialog. An approval can be given once or, for Codex and for Claude
-when Claude Code suggests a rule, for the rest of the session; declining lets
-the agent continue, and **Decline and stop** also ends its turn. Question
-options are listed with numbers and descriptions; where the agent accepts an
-answer in your own words, the option list can be edited, and secrets are typed
-hidden.
+approve an action or answer a question appear in a
+panel below the chat of the tab that asked, so other tabs stay usable; a
+background tab with a waiting request is marked. An approval can be given once
+or, for Codex and for Claude when Claude Code suggests a rule, for the rest of
+the session; declining lets the agent continue, and **Decline and stop** also
+ends its turn. Question options are listed with numbers and descriptions: choose
+them in the panel (several where the question allows it) or type their numbers
+in the message field, for example `2` or `1, 3`. Where the agent accepts an
+answer in your own words, type it in the message field with the usual Enter
+behavior. Secrets are typed in a hidden field in the panel. Requests of a turn
+that ends are dropped.
 
 ## Test
 
