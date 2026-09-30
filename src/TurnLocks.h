@@ -3,6 +3,7 @@
 #include <QObject>
 #include <QSet>
 #include <QString>
+#include <QStringList>
 
 // Keeps two agents from working on turns in the same directory, or in one directory and its
 // subdirectory, at the same time. A chat holds its directory only from sending a message until the
@@ -16,9 +17,9 @@ public:
     explicit TurnLocks(const QString &dataDirectory, QObject *parent = nullptr);
     ~TurnLocks() override;
 
-    // Returns an empty string when owner now holds directory, otherwise a description of who holds a
-    // conflicting directory.
-    QString acquire(const QString &owner, const QString &directory, const QString &label);
+    // A turn holds its working directory and every other directory the agent may write to. Returns an
+    // empty string when owner now holds them, otherwise a description of who holds a conflicting one.
+    QString acquire(const QString &owner, const QStringList &directories, const QString &label);
     void release(const QString &owner);
 
 signals:

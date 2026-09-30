@@ -181,6 +181,8 @@ public:
     // True when the operating system enforces read-only turns (a sandbox), rather than the agent
     // following a rule; only such turns may skip the directory lock.
     virtual bool readOnlyIsEnforced() const { return false; }
+    // Directories besides the working directory that the agent may write to in the next turn.
+    virtual QStringList writableDirectories() const { return {}; }
 
     // Queues a message for the current conversation and sends it when the agent is free. Every
     // accepted message ends with turnCompleted, also when the turn fails or the agent stops.

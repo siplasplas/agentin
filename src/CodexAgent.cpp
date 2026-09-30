@@ -221,6 +221,14 @@ void CodexAgent::setReadOnly(bool readOnly)
 
 // Read-only turns use Codex's read-only sandbox, which also stops shell commands from writing.
 // Switching back restores the thread's own policy, or workspace write when the thread began read-only.
+QStringList CodexAgent::writableDirectories() const
+{
+    if (readOnly_) return {};
+    QStringList directories;
+    for (const QJsonValue &root : sandboxPolicy().value("writableRoots").toArray()) directories.append(root.toString());
+    return directories;
+}
+
 QJsonObject CodexAgent::sandboxPolicy() const
 {
     if (readOnly_) return {{"type", "readOnly"}};

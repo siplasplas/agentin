@@ -4,6 +4,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QSet>
@@ -92,7 +93,7 @@ QList<BusyAgentSession> busyClaudeSessions(const QString &configDirectory)
         const qint64 pid = entry.value("pid").toInteger();
         if (entry.value("status").toString() != "busy" || pid <= 0 || isOwnDescendant(pid)
             || !isProcessAlive(pid, entry.value("procStart").toString())) continue;
-        sessions.append({pid, entry.value("cwd").toString(),
+        sessions.append({pid, entry.value("cwd").toString(), {},
                          QString("a Claude Code %1 (PID %2)").arg(entry.value("kind").toString("session")).arg(pid)});
     }
     return sessions;
@@ -130,7 +131,7 @@ QList<BusyAgentSession> runningCliSessions()
         const QString directory = QFileInfo(processes.filePath(name + "/cwd")).symLinkTarget();
         // A CLI started in / or the home directory would cover every project, so it is not counted.
         if (directory.isEmpty() || directory == "/" || directory == home) continue;
-        sessions.append({pid, directory, QString("%1 (PID %2: %3)").arg(tool).arg(pid).arg(arguments.mid(0, 4).join(' '))});
+        sessions.append({pid, directory, {}, QString("%1 (PID %2: %3)").arg(tool).arg(pid).arg(arguments.mid(0, 4).join(' '))});
     }
     return sessions;
 }
@@ -149,6 +150,7 @@ BusyAgentSession codexRolloutState(const QString &path, bool *running)
     const bool partial = file.size() > tail;
     if (partial) file.seek(file.size() - tail);
     QString sandbox;
+    QStringList writable;
     bool firstLine = partial;
     while (!file.atEnd()) {
         const QByteArray line = file.readLine();
@@ -163,6 +165,13 @@ BusyAgentSession codexRolloutState(const QString &path, bool *running)
         if (type == "turn_context") {
             if (payload.contains("cwd")) directory = payload.value("cwd").toString();
             sandbox = payload.value("sandbox_policy").toObject().value("type").toString();
+            writable.clear();
+            for (const QJsonValue &value : payload.value("file_system_sandbox_policy").toObject().value("entries").toArray()) {
+                const QJsonObject entry = value.toObject();
+                const QJsonObject place = entry.value("path").toObject();
+                if (entry.value("access").toString() == "write" && place.value("type").toString() == "path")
+                    writable.append(place.value("path").toString());
+            }
         } else if (type == "event_msg") {
             const QString event = payload.value("type").toString();
             if (event == "task_started") *running = true;
@@ -170,7 +179,7 @@ BusyAgentSession codexRolloutState(const QString &path, bool *running)
         }
     }
     if (sandbox == "read-only") *running = false;
-    return {0, directory, {}};
+    return {0, directory, writable, {}};
 }
 }
 

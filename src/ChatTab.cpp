@@ -51,7 +51,8 @@ bool ChatTab::dispatch()
     // an agent that only promises not to change files still waits.
     if (locks_ && !holdsDirectory_ && !(agent_->isReadOnly() && agent_->readOnlyIsEnforced())) {
         const QString label = provider_->name() + " chat \"" + title_.left(40) + "\"";
-        const QString holder = locks_->acquire(QString("%1").arg(quintptr(this)), path_, label);
+        const QString holder = locks_->acquire(QString("%1").arg(quintptr(this)),
+                                               QStringList{path_} + agent_->writableDirectories(), label);
         if (!holder.isEmpty()) {
             if (waitingFor_ != holder) {
                 waitingFor_ = holder;

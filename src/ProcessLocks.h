@@ -2,6 +2,7 @@
 
 #include <QList>
 #include <QString>
+#include <QStringList>
 
 // Detects conversations held open by another process, so they can stay read-only here.
 
@@ -18,6 +19,8 @@ struct BusyAgentSession
 {
     qint64 pid = 0;
     QString directory;
+    // Other directories the session may write to.
+    QStringList writable;
     QString description;
 };
 // Claude Code sessions outside this application that are working on a turn right now.

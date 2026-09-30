@@ -229,7 +229,9 @@ loaded history and from what you sent in the tab, so no separate history is
 stored; older messages become available after **Show earlier messages**.
 
 Two agents never work on turns in the same directory, or in a directory and one
-of its subdirectories, at the same time. A chat holds its directory only from
+of its subdirectories, at the same time. A turn holds its working directory and
+every other directory the agent may write to (Codex's writable roots), so no
+other agent works in them either; the shared `/tmp` is not held. A chat holds its directory only from
 sending a message until the agent hands control back, so between turns another
 chat in the same directory can be used. A message that would conflict waits: the
 chat header and the log say which chat holds the directory, and the message is
