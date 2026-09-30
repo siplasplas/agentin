@@ -157,13 +157,15 @@ void ChatTab::setAgent(AgentBackend *agent)
             emit logMessage("[" + name + " response: " + status + (details.isEmpty() ? "" : ": " + details) + "]");
     });
     connect(agent, &AgentBackend::approvalRequested, this,
-            [this](int id, const QString &title, const QString &description, bool canAcceptForSession) {
+            [this](int id, const QString &title, const QString &description, bool canAcceptForSession,
+                   const QString &alwaysRule) {
         PendingRequest request;
         request.id = id;
         request.approval = true;
         request.title = title;
         request.description = description;
         request.canAcceptForSession = canAcceptForSession;
+        request.alwaysRule = alwaysRule;
         requests_.append(request);
         emit requestsChanged();
     });

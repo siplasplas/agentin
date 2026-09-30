@@ -2,6 +2,7 @@
 
 #include "AgentBackend.h"
 
+#include <QJsonArray>
 #include <QJsonObject>
 #include <QJsonValue>
 #include <QPointer>
@@ -69,6 +70,8 @@ private:
     QSet<QString> streamedCommands_;
     QHash<int, QJsonValue> serverRequests_;
     QHash<int, QList<AgentQuestion>> pendingQuestions_;
+    // Command prefixes Codex proposed as lasting rules, by approval request.
+    QHash<int, QJsonArray> proposedRules_;
     int nextServerRequest_ = 1;
     QString historyThreadId_;
     QString historyCursor_;

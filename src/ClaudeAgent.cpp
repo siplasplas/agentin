@@ -374,8 +374,10 @@ void ClaudeAgent::answerApproval(int id, ApprovalDecision decision)
 {
     const QString value = decision == ApprovalDecision::Accept ? "accept"
         : decision == ApprovalDecision::AcceptForSession ? "acceptForSession"
+        : decision == ApprovalDecision::AcceptAlways ? "acceptAlways"
         : decision == ApprovalDecision::Cancel ? "cancel" : "decline";
-    const bool allow = decision == ApprovalDecision::Accept || decision == ApprovalDecision::AcceptForSession;
+    const bool allow = decision == ApprovalDecision::Accept || decision == ApprovalDecision::AcceptForSession
+        || decision == ApprovalDecision::AcceptAlways;
     send({{"type", "approval_response"}, {"id", id}, {"allow", allow}, {"decision", value}});
 }
 
@@ -470,7 +472,7 @@ void ClaudeAgent::handleLine(const QByteArray &line)
         const QString details = QString::fromUtf8(QJsonDocument(event.value("input").toObject()).toJson(QJsonDocument::Indented));
         emit approvalRequested(event.value("id").toInt(), "Approve " + name_ + " action",
                                event.value("tool").toString() + "\n\n" + details.trimmed(),
-                               event.value("canRemember").toBool());
+                               event.value("canRemember").toBool(), event.value("alwaysRule").toString());
     } else if (type == "question") {
         // The SDK keys answers by question text.
         QList<AgentQuestion> questions;

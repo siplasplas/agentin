@@ -225,8 +225,12 @@ approve an action or answer a question appear in a
 panel below the chat of the tab that asked, so other tabs stay usable; a
 background tab with a waiting request is marked. An approval can be given once
 or, for Codex and for Claude when Claude Code suggests a rule, for the rest of
-the session; declining lets the agent continue, and **Decline and stop** also
-ends its turn. Question options are listed with numbers and descriptions: choose
+the session. When the agent proposes a lasting rule, **Always allow** adds it, so
+similar actions run without asking from now on: Codex allows commands with the
+proposed prefix (for example `git status`), and Claude saves its suggested rule
+where Claude Code proposes it, such as the project's local settings; the panel
+shows the rule first. Declining lets the agent continue, and **Decline and stop**
+also ends its turn. Question options are listed with numbers and descriptions: choose
 them in the panel (several where the question allows it) or type their numbers
 in the message field, for example `2` or `1, 3`. Where the agent accepts an
 answer in your own words, type it in the message field with the usual Enter

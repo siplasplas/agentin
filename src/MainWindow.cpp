@@ -862,7 +862,8 @@ void MainWindow::updateRequestPanel()
         ? QString("  (%1 more waiting)").arg(tab->pendingRequestCount() - 1) : QString();
     if (request->approval) {
         title->setText("<b>" + request->title.toHtmlEscaped() + "</b>" + waiting.toHtmlEscaped());
-        text->setText(request->description);
+        text->setText(request->alwaysRule.isEmpty() ? request->description
+                                                    : request->description + "\n\nAlways allow: " + request->alwaysRule);
         // The row joins the panel before its buttons, so they are shown in the already visible panel.
         auto *buttons = new QHBoxLayout;
         layout->addLayout(buttons);
@@ -876,6 +877,8 @@ void MainWindow::updateRequestPanel()
         if (request->canAcceptForSession)
             addButton("Allow for this session", ApprovalDecision::AcceptForSession,
                       "Also allow the same kind of action for the rest of this session");
+        if (!request->alwaysRule.isEmpty())
+            addButton("Always allow", ApprovalDecision::AcceptAlways, request->alwaysRule);
         addButton("Decline", ApprovalDecision::Decline, "The agent continues without this action");
         addButton("Decline and stop", ApprovalDecision::Cancel, "Decline and end the agent's turn");
         buttons->addStretch(1);

@@ -33,6 +33,23 @@ except ImportError:  # SDKs without rate limit events
     RateLimitEvent = None
 
 
+def describe_permission_updates(updates):
+    """Describes the CLI's suggested permission updates for the user, or returns an empty string."""
+    parts = []
+    for update in updates:
+        where = {"localSettings": "this project's local settings", "projectSettings": "this project's settings",
+                 "userSettings": "your user settings", "session": "this session"}.get(update.destination or "", "settings")
+        if update.type in ("addRules", "replaceRules"):
+            rules = ", ".join(rule.tool_name + (f"({rule.rule_content})" if rule.rule_content else "")
+                              for rule in update.rules or [])
+            parts.append(f"{update.behavior or 'allow'} {rules} in {where}")
+        elif update.type == "addDirectories":
+            parts.append(f"add {', '.join(update.directories or [])} in {where}")
+        elif update.type == "setMode":
+            parts.append(f"switch to {update.mode} mode in {where}")
+    return "; ".join(parts)
+
+
 class Bridge:
     def __init__(self, cwd, provider="claude", model=None, effort=None):
         self.cwd = cwd
@@ -98,7 +115,7 @@ class Bridge:
             send({"type": "question", "id": request_id, "questions": input_data.get("questions", [])})
         else:
             send({"type": "approval", "id": request_id, "tool": tool_name, "input": input_data,
-                  "canRemember": bool(suggestions)})
+                  "canRemember": bool(suggestions), "alwaysRule": describe_permission_updates(suggestions)})
         try:
             answer = await future
         finally:
@@ -112,11 +129,14 @@ class Bridge:
                 "answers": answer.get("answers", {}),
             })
         decision = answer.get("decision") or ("accept" if answer.get("allow", False) else "decline")
-        if decision in ("accept", "acceptForSession"):
-            # Allowing for the session applies the CLI's suggested rules only to this session.
+        if decision in ("accept", "acceptForSession", "acceptAlways"):
+            # Allowing for the session applies the CLI's suggested rules only to this session; allowing
+            # always keeps the destination the CLI suggested, such as the project's local settings.
             updates = None
             if decision == "acceptForSession" and suggestions:
                 updates = [dataclasses.replace(update, destination="session") for update in suggestions]
+            elif decision == "acceptAlways" and suggestions:
+                updates = suggestions
             return PermissionResultAllow(updated_input=input_data, updated_permissions=updates)
         return PermissionResultDeny(message="User declined this action", interrupt=decision == "cancel")
 

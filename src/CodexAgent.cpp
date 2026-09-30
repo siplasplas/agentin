@@ -164,8 +164,17 @@ void CodexAgent::cancelHistory()
 void CodexAgent::answerApproval(int id, ApprovalDecision decision)
 {
     const QJsonValue requestId = serverRequests_.take(id);
+    const QJsonArray rule = proposedRules_.take(id);
     if (requestId.isUndefined() || !connection_) return;
-    const QString value = decision == ApprovalDecision::Accept ? "accept"
+    if (decision == ApprovalDecision::AcceptAlways && !rule.isEmpty()) {
+        connection_->respond(requestId, {{"decision", QJsonObject{
+            {"acceptWithExecpolicyAmendment", QJsonObject{{"execpolicy_amendment", rule}}}}}});
+        QStringList words;
+        for (const QJsonValue &word : rule) words.append(word.toString());
+        emit message("[Approval: always allow commands starting with " + words.join(' ') + "]");
+        return;
+    }
+    const QString value = decision == ApprovalDecision::Accept || decision == ApprovalDecision::AcceptAlways ? "accept"
         : decision == ApprovalDecision::AcceptForSession ? "acceptForSession"
         : decision == ApprovalDecision::Cancel ? "cancel" : "decline";
     connection_->respond(requestId, {{"decision", value}});
@@ -396,7 +405,15 @@ void CodexAgent::handleServerRequest(const QString &method, const QJsonValue &id
         }
         const int requestId = nextServerRequest_++;
         serverRequests_.insert(requestId, id);
-        emit approvalRequested(requestId, "Approve Codex action", description.trimmed(), true);
+        const QJsonArray rule = params.value("proposedExecpolicyAmendment").toArray();
+        QString alwaysRule;
+        if (!rule.isEmpty()) {
+            proposedRules_.insert(requestId, rule);
+            QStringList words;
+            for (const QJsonValue &word : rule) words.append(word.toString());
+            alwaysRule = "Allow commands starting with \"" + words.join(' ') + "\" without asking";
+        }
+        emit approvalRequested(requestId, "Approve Codex action", description.trimmed(), true, alwaysRule);
     } else if (method == "item/tool/requestUserInput") {
         QList<AgentQuestion> questions;
         for (const QJsonValue &value : params.value("questions").toArray()) {

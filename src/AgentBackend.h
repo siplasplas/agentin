@@ -50,6 +50,8 @@ enum class ApprovalDecision {
     Accept,
     // Also allow the same kind of action for the rest of the session.
     AcceptForSession,
+    // Also add the rule the agent proposed, so similar actions are allowed from now on.
+    AcceptAlways,
     // The agent continues without the action.
     Decline,
     // Decline and stop the agent's turn.
@@ -200,7 +202,9 @@ signals:
     void toolOutput(const QString &text);
     void toolFinished(const QString &name, const QString &status);
     void turnCompleted(const QString &status, const QString &details);
-    void approvalRequested(int id, const QString &title, const QString &description, bool canAcceptForSession);
+    // alwaysRule describes the lasting rule the agent proposes; empty when it proposes none.
+    void approvalRequested(int id, const QString &title, const QString &description, bool canAcceptForSession,
+                           const QString &alwaysRule);
     void questionsRequested(int id, const QList<AgentQuestion> &questions);
     void conversationOpened(const QString &id, bool resumed);
     void conversationOpenFailed(const QString &id, const QString &reason);
