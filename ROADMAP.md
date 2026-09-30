@@ -2,6 +2,24 @@
 
 Planned work, roughly in order. Items move to `README.md` once they are implemented.
 
+## Token statistics
+
+Show for each turn and for the whole conversation how many tokens went in and out: input, cached
+input, output and reasoning, plus the cost and the context window where the agent reports them, for
+example in the chat header with details in a tooltip, and a turn summary in the log.
+
+- Codex: `thread/tokenUsage/updated` carries `last` (the latest turn) and `total` (the thread) with
+  `inputTokens`, `cachedInputTokens`, `cacheWriteInputTokens`, `outputTokens`, `reasoningOutputTokens`
+  and `totalTokens`, and `modelContextWindow`.
+- Claude and GLM: the SDK's `ResultMessage` has `usage` (`input_tokens`, `output_tokens`,
+  `cache_read_input_tokens`, `cache_creation_input_tokens`), `model_usage` per model and
+  `total_cost_usd`; reasoning tokens are not reported separately. The bridge would forward them with
+  the turn's completion.
+- Gemini CLI: the `result` event of `stream-json` carries statistics with input, output, cached and
+  thought tokens; check the exact fields.
+- Antigravity CLI: its stream appears to report input, output and thought tokens; check the result
+  event.
+
 ## Approvals and questions in the chat
 
 Agents ask for approvals (run a command, change files, access the network) and ask questions with
