@@ -37,12 +37,43 @@ Add a lock on working directories, held only while an agent works on a turn:
 - **When blocked:** the message waits in the chat's queue, the tab shows which chat holds the directory,
   and the message is sent when that turn ends. The user can still stop the waiting chat or the one
   that holds the lock.
-- **Across application instances:** keep the active turns in a shared registry in the application data
-  directory (guarded by `QLockFile`, entries with PID so stale entries from crashed instances can be
-  dropped).
-- **Other tools:** agents started outside agentdeskt (for example `codex` or `claude` in a terminal)
-  do not use the registry. Detecting them, for example by the working directory of running agent
-  processes on Linux, would be a heuristic like the existing session locks; decide later whether it is
-  worth it.
-- **Open questions:** whether a read-only question should be allowed to bypass the lock, and whether
-  directories that an agent may write to outside its working directory need to be locked too.
+- **Across application instances:** keep the active turns in a shared registry file in the application
+  data directory: one entry per running turn with the canonical directory, agent, PID and process start
+  time, guarded by `QLockFile`. Entries whose process is gone (PID with a different start time) are
+  dropped, so a crashed instance does not keep directories locked. A `QFileSystemWatcher` on the
+  registry wakes chats that wait for a directory.
+- **Agents started outside agentdeskt:** they do not use the registry, so their turns have to be
+  detected from what each tool leaves behind. What exists today:
+  - Claude Code registers every running session in `~/.claude/sessions/<pid>.json` (or under
+    `CLAUDE_CONFIG_DIR`) with `cwd`, `status` (for example `busy`) and `statusUpdatedAt`. A session whose
+    process is alive and whose status is busy holds its directory. Check which other status values
+    exist before relying on them.
+  - Codex appends each session to `~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl`: `turn_context`
+    records carry the working directory, and `event_msg` records of type `task_started` and
+    `task_complete` mark the turns. A session whose last `task_started` has no `task_complete` is
+    running a turn, but a crashed CLI leaves the same state, so it also needs a live process or a
+    recent file modification.
+  - Codex also runs a local App Server daemon with a control socket (`~/.codex/app-server-control/`,
+    reachable through `codex app-server proxy`). If the Codex CLI and desktop app use that daemon,
+    agentdeskt could connect to the same server and read thread states directly: `thread/loaded/list`,
+    `ThreadStatus` `active` (with `waitingOnApproval` or `waitingOnUserInput`) or `idle`, and
+    `thread/status/changed`. Whether the other clients use the daemon is not verified yet.
+  - Gemini CLI and Antigravity have no registry. On Linux the working directory of their processes is
+    `/proc/<pid>/cwd`. A headless process lives for one turn, but an interactive CLI lives for the whole
+    session, so its turns cannot be told apart from idle time; such a process could either lock its
+    directory for the whole session or be ignored.
+  Start with the application registry and Claude Code's registry, which are reliable, and add the Codex
+  and process-based detection as heuristics.
+- **Read-only turns:** the text of a message does not tell whether the agent will change files; even a
+  question can end with an edit or a command that writes. A turn may skip the lock only when the user
+  chooses a read-only mode and the agent enforces it:
+  - Codex: `sandboxPolicy` `readOnly` in `turn/start` (or `sandbox` `read-only` for the thread). The
+    operating system sandbox also stops shell commands from writing, so this guarantee is strong.
+  - Claude and GLM: `permission_mode` `plan` in the Agent SDK; Gemini: `--approval-mode plan`. These are
+    rules of the agent, not an operating system sandbox, so the guarantee is weaker. A cautious first
+    version offers read-only turns without the lock only for Codex.
+  - Antigravity: check what `agy` offers.
+  A read-only turn neither takes nor waits for the lock. It may read files that another agent is
+  changing at that moment, so its answer can describe an intermediate state.
+- **Open question:** whether directories that an agent may write to outside its working directory need
+  to be locked too.
