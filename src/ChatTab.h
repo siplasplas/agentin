@@ -19,6 +19,7 @@ struct PendingRequest
     QString description;
     bool canAcceptForSession = false;
     QString alwaysRule;
+    QString sessionRule;
     QList<AgentQuestion> questions;
     // The question shown now; earlier ones are answered.
     qsizetype current = 0;

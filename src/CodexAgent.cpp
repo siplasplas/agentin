@@ -1,6 +1,7 @@
 #include "CodexAgent.h"
 
 #include "CodexConnection.h"
+#include "CommandApproval.h"
 
 #include <QJsonArray>
 
@@ -63,6 +64,9 @@ CodexAgent::CodexAgent(CodexConnection *connection, const QString &workingDirect
             emit steerFailed(text, "The Codex App Server disconnected before confirming the message.");
         }
         threadId_.clear();
+        serverRequests_.clear();
+        proposedRules_.clear();
+        requestSessionRules_.clear();
         queuedPrompts_.clear();
         if (refreshingHistory_) ++historyGeneration_;
         refreshingHistory_ = false;
@@ -100,6 +104,8 @@ bool CodexAgent::newConversation(const QString &workingDirectory)
         return false;
     }
     closeThread();
+    trustedSessionCommands_.clear();
+    trustedConversationId_.clear();
     workingDirectory_ = workingDirectory;
     queuedPrompts_.clear();
     startThread();
@@ -112,6 +118,10 @@ bool CodexAgent::resumeConversation(const QString &id, const QString &workingDir
     if (busy_ || threadOpening_ || steeringInFlight_) {
         emit message("[Wait for the current Codex response to finish.]");
         return false;
+    }
+    if (id != trustedConversationId_) {
+        trustedSessionCommands_.clear();
+        trustedConversationId_.clear();
     }
     closeThread();
     if (!workingDirectory.isEmpty()) workingDirectory_ = workingDirectory;
@@ -294,9 +304,17 @@ void CodexAgent::cancelHistory()
 
 void CodexAgent::answerApproval(int id, ApprovalDecision decision)
 {
+    if (!serverRequests_.contains(id)) return;
     const QJsonValue requestId = serverRequests_.take(id);
     const QJsonArray rule = proposedRules_.take(id);
+    const QString sessionRule = requestSessionRules_.take(id);
     if (requestId.isUndefined() || !connection_) return;
+    if (!sessionRule.isEmpty() && decision == ApprovalDecision::AcceptForSession) {
+        trustedSessionCommands_.insert(sessionRule);
+        trustedConversationId_ = threadId_;
+        decision = ApprovalDecision::Accept;
+        emit message("[Trusted for this chat: " + sessionRule + "]");
+    }
     if (decision == ApprovalDecision::AcceptAlways && !rule.isEmpty()) {
         connection_->respond(requestId, {{"decision", QJsonObject{
             {"acceptWithExecpolicyAmendment", QJsonObject{{"execpolicy_amendment", rule}}}}}});
@@ -310,6 +328,20 @@ void CodexAgent::answerApproval(int id, ApprovalDecision decision)
         : decision == ApprovalDecision::Cancel ? "cancel" : "decline";
     connection_->respond(requestId, {{"decision", value}});
     emit message("[Approval: " + value + "]");
+}
+
+QStringList CodexAgent::trustedSessionCommands() const
+{
+    QStringList rules = trustedSessionCommands_.values();
+    rules.sort();
+    return rules;
+}
+
+bool CodexAgent::removeTrustedSessionCommand(const QString &rule)
+{
+    if (!trustedSessionCommands_.remove(rule)) return false;
+    emit message("[Removed chat trust: " + rule + "]");
+    return true;
 }
 
 void CodexAgent::answerQuestions(int id, const QHash<QString, QStringList> &answers)
@@ -399,6 +431,9 @@ void CodexAgent::openThread(const QJsonObject &result, bool resumed)
 // Detaches this chat from its thread so the server can unload it once no client uses it.
 void CodexAgent::closeThread()
 {
+    serverRequests_.clear();
+    proposedRules_.clear();
+    requestSessionRules_.clear();
     if (connection_ && !threadId_.isEmpty()) {
         connection_->unregisterThread(threadId_);
         connection_->request("thread/unsubscribe", {{"threadId", threadId_}});
@@ -596,6 +631,21 @@ void CodexAgent::handleNotification(const QString &method, const QJsonObject &pa
 void CodexAgent::handleServerRequest(const QString &method, const QJsonValue &id, const QJsonObject &params)
 {
     if (method == "item/commandExecution/requestApproval" || method == "item/fileChange/requestApproval") {
+        QString sessionRule;
+        if (method == "item/commandExecution/requestApproval") {
+            const CommandApproval command = classifyCommandApproval(params.value("command").toString());
+            if (!command.deniedReason.isEmpty()) {
+                connection_->respond(id, {{"decision", "decline"}});
+                emit message("[Approval automatically declined: " + command.deniedReason + "]");
+                return;
+            }
+            if (params.value("networkApprovalContext").toObject().isEmpty()) sessionRule = command.sessionRule;
+            if (!sessionRule.isEmpty() && trustedSessionCommands_.contains(sessionRule)) {
+                connection_->respond(id, {{"decision", "accept"}});
+                emit message("[Approval allowed by chat trust: " + sessionRule + "]");
+                return;
+            }
+        }
         QString description = params.value("reason").toString();
         if (method == "item/commandExecution/requestApproval") {
             const QJsonObject network = params.value("networkApprovalContext").toObject();
@@ -613,13 +663,14 @@ void CodexAgent::handleServerRequest(const QString &method, const QJsonValue &id
         serverRequests_.insert(requestId, id);
         const QJsonArray rule = params.value("proposedExecpolicyAmendment").toArray();
         QString alwaysRule;
-        if (!rule.isEmpty()) {
+        if (!sessionRule.isEmpty()) requestSessionRules_.insert(requestId, sessionRule);
+        if (!rule.isEmpty() && sessionRule.isEmpty()) {
             proposedRules_.insert(requestId, rule);
             QStringList words;
             for (const QJsonValue &word : rule) words.append(word.toString());
             alwaysRule = "Allow commands starting with \"" + words.join(' ') + "\" without asking";
         }
-        emit approvalRequested(requestId, "Approve Codex action", description.trimmed(), true, alwaysRule);
+        emit approvalRequested(requestId, "Approve Codex action", description.trimmed(), true, alwaysRule, sessionRule);
     } else if (method == "item/tool/requestUserInput") {
         QList<AgentQuestion> questions;
         for (const QJsonValue &value : params.value("questions").toArray()) {

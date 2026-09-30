@@ -16,6 +16,8 @@ add_executable(agentdeskt
     src/CodexLocator.cpp
     src/CodexLocator.h
     src/AgentBackend.h
+    src/CommandApproval.cpp
+    src/CommandApproval.h
     src/ApprovalRules.cpp
     src/ApprovalRules.h
     src/ChatView.cpp
@@ -58,6 +60,8 @@ if(BUILD_TESTING)
         src/CodexLocator.cpp
         src/CodexLocator.h
         src/AgentBackend.h
+        src/CommandApproval.cpp
+        src/CommandApproval.h
         src/ApprovalRules.cpp
         src/ApprovalRules.h
         src/ChatView.cpp

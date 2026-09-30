@@ -75,9 +75,8 @@ class Bridge:
             "resume": self.session_id if resume else None,
             "include_partial_messages": True,
             "can_use_tool": self.can_use_tool,
+            "permission_mode": "plan" if self.read_only else "default",
         }
-        if self.read_only:
-            settings["permission_mode"] = "plan"
         if self.provider == "claude":
             if self.model:
                 settings["model"] = self.model
@@ -105,6 +104,8 @@ class Bridge:
         self.client = ClaudeSDKClient(options=options)
         self.connected = False
         await self.client.connect()
+        # Reassert the application mode before accepting prompts, including resumed sessions.
+        await self.client.set_permission_mode("plan" if self.read_only else "default")
         self.connected = True
         send({"type": "ready"})
 
@@ -113,7 +114,10 @@ class Bridge:
         self.next_id += 1
         future = asyncio.get_running_loop().create_future()
         self.pending[request_id] = future
-        suggestions = list(getattr(context, "suggestions", None) or [])
+        # Permission suggestions must not switch the session into auto, acceptEdits, or bypass mode.
+        # Mode changes belong to the application's Read-only control, not remembered tool approvals.
+        suggestions = [update for update in getattr(context, "suggestions", None) or []
+                       if update.type != "setMode"]
         if tool_name == "AskUserQuestion":
             send({"type": "question", "id": request_id, "questions": input_data.get("questions", [])})
         else:

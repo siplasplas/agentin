@@ -48,6 +48,8 @@ public:
     void loadHistory(const QString &id, const QString &workingDirectory, bool older) override;
     void cancelHistory() override;
     void answerApproval(int id, ApprovalDecision decision) override;
+    QStringList trustedSessionCommands() const override;
+    bool removeTrustedSessionCommand(const QString &rule) override;
     void answerQuestions(int id, const QHash<QString, QStringList> &answers) override;
 
     // Called by CodexConnection for messages that carry this chat's threadId.
@@ -88,6 +90,9 @@ private:
     QHash<int, QList<AgentQuestion>> pendingQuestions_;
     // Command prefixes Codex proposed as lasting rules, by approval request.
     QHash<int, QJsonArray> proposedRules_;
+    QSet<QString> trustedSessionCommands_;
+    QString trustedConversationId_;
+    QHash<int, QString> requestSessionRules_;
     int nextServerRequest_ = 1;
     QString historyThreadId_;
     QString historyCursor_;

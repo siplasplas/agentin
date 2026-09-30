@@ -347,8 +347,37 @@ also ends its turn. **Settings → Approvals…** lists the lasting rules (Codex
 settings and in the `.claude` settings of the directories of open chats and
 recent directories) and the approvals given for the session in open chats, and
 removes the selected ones. Codex may keep using a removed rule until its App
-Server restarts and cannot withdraw session approvals; for a Claude or GLM
-chat, withdrawing reconnects it and withdraws all of its session approvals. Question options are listed with numbers and descriptions: choose
+Server restarts and cannot withdraw native App Server session approvals; for a Claude or GLM
+chat, withdrawing reconnects it and withdraws all of its session approvals.
+
+Claude and GLM connections explicitly use `default` permission mode, with
+approval questions for actions that are not already allowed by permission rules.
+The mode is reapplied after every connection, including resumed conversations;
+**Read-only** uses `plan`, and switching it off restores `default`. Tool approval
+suggestions cannot change the permission mode to `auto`, `acceptEdits`, or
+`bypassPermissions`. Existing allow rules still apply in `default` mode.
+
+For Codex command approval requests, **Trust git add for this chat** and
+**Trust git commit for this chat** remember the command family in agentdeskt's
+memory, without writing a lasting Codex rule. Matching simple commands receive
+`accept` (allow once), even when their arguments change. Normal shell `-c`/`-lc`
+wrappers and Git directory options are recognized; compound commands, shell
+expansions, configuration overrides, and unknown syntax are never automatically
+trusted. **Settings → Approvals…** lists these rules as managed by agentdeskt;
+removing one immediately restores questions, including during a running turn.
+Trust belongs to one conversation in one chat and ends when changing the
+conversation or exiting the application.
+Network approval requests require their own decision.
+
+Incoming Codex command approval requests for `git push`, `sudo`, `doas`, `su`,
+and system package changes through apt/apt-get, dnf/dnf5, yum, zypper, pacman,
+apk, pkg, or brew are automatically declined. On Windows, runas and recognized
+winget/choco/scoop changes and PowerShell installation commands are also declined.
+These checks apply to recognized commands in approval requests, not commands
+executed by the agent without requesting approval; unknown shell syntax still
+requires a human decision. Quoted argument text does not count as a command.
+
+Question options are listed with numbers and descriptions: choose
 them in the panel (several where the question allows it) or type their numbers
 in the message field, for example `2` or `1, 3`. Where the agent accepts an
 answer in your own words, type it in the message field with the usual Enter

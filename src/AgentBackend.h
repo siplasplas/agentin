@@ -235,6 +235,9 @@ public:
     // Withdraws everything allowed "for this session", where the agent can do that.
     virtual bool canResetSessionApprovals() const { return false; }
     virtual void resetSessionApprovals() {}
+    // Rules managed by the application; revocation takes effect without reconnecting.
+    virtual QStringList trustedSessionCommands() const { return {}; }
+    virtual bool removeTrustedSessionCommand(const QString &) { return false; }
     // Answers are keyed by AgentQuestion::id; a missing key means the question was not answered.
     // A question with multiSelect may have several values.
     virtual void answerQuestions(int id, const QHash<QString, QStringList> &answers) = 0;
@@ -253,9 +256,10 @@ signals:
     void turnUsage(const TokenUsage &usage);
     // Tokens of the whole conversation, for agents that keep the total themselves (Codex).
     void conversationUsage(const TokenUsage &usage);
+    // sessionRule identifies an application-managed command family, if available.
     // alwaysRule describes the lasting rule the agent proposes; empty when it proposes none.
     void approvalRequested(int id, const QString &title, const QString &description, bool canAcceptForSession,
-                           const QString &alwaysRule);
+                           const QString &alwaysRule, const QString &sessionRule = {});
     void questionsRequested(int id, const QList<AgentQuestion> &questions);
     void conversationOpened(const QString &id, bool resumed);
     void conversationOpenFailed(const QString &id, const QString &reason);

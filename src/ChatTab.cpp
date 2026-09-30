@@ -381,7 +381,7 @@ void ChatTab::setAgent(AgentBackend *agent)
     });
     connect(agent, &AgentBackend::approvalRequested, this,
             [this](int id, const QString &title, const QString &description, bool canAcceptForSession,
-                   const QString &alwaysRule) {
+                   const QString &alwaysRule, const QString &sessionRule) {
         PendingRequest request;
         request.id = id;
         request.approval = true;
@@ -389,6 +389,7 @@ void ChatTab::setAgent(AgentBackend *agent)
         request.description = description;
         request.canAcceptForSession = canAcceptForSession;
         request.alwaysRule = alwaysRule;
+        request.sessionRule = sessionRule;
         requests_.append(request);
         emit requestsChanged();
     });
@@ -564,7 +565,7 @@ void ChatTab::answerApproval(ApprovalDecision decision)
 {
     if (requests_.isEmpty() || !requests_.first().approval) return;
     const PendingRequest request = requests_.takeFirst();
-    if (decision == ApprovalDecision::AcceptForSession) {
+    if (decision == ApprovalDecision::AcceptForSession && request.sessionRule.isEmpty()) {
         QStringList lines = request.description.split('\n', Qt::SkipEmptyParts);
         for (QString &line : lines) line = line.trimmed();
         sessionApprovals_.append(lines.join(" · "));

@@ -958,8 +958,9 @@ void MainWindow::showApprovalsDialog()
     tree->setHeaderLabels({"Agent", "Allowed", "Where"});
     tree->setRootIsDecorated(true);
     layout->addWidget(tree);
-    auto *note = new QLabel("Codex may keep using a removed rule until its App Server restarts. Codex cannot "
-                            "withdraw approvals given for a session; they end when agentdeskt closes. Withdrawing "
+    auto *note = new QLabel("Chat command trust is withdrawn immediately. Codex may keep using a removed lasting rule "
+                            "until its App Server restarts. Codex cannot "
+                            "withdraw native App Server session approvals; they end when agentdeskt closes. Withdrawing "
                             "the session approvals of a Claude or GLM chat reconnects it and withdraws all of them.",
                             &dialog);
     note->setWordWrap(true);
@@ -989,6 +990,12 @@ void MainWindow::showApprovalsDialog()
         for (int i = 0; i < tabs_->count(); ++i) {
             const ChatTab *tab = chatTab(tabs_->widget(i));
             if (!tab) continue;
+            for (const QString &rule : tab->agent()->trustedSessionCommands()) {
+                auto *item = new QTreeWidgetItem(session, {tab->provider()->name(), rule,
+                    "chat \"" + tab->title().left(40) + "\" (managed by agentdeskt)"});
+                item->setData(0, Qt::UserRole + 1, QVariant::fromValue<QObject *>(tabs_->widget(i)));
+                item->setData(0, Qt::UserRole + 2, rule);
+            }
             for (const QString &approval : tab->sessionApprovals()) {
                 auto *item = new QTreeWidgetItem(session, {tab->provider()->name(), approval,
                                                            "chat \"" + tab->title().left(40) + "\""});
@@ -1021,7 +1028,9 @@ void MainWindow::showApprovalsDialog()
                                        : "[Could not remove the rule: " + error + "]");
         } else if (auto *page = qobject_cast<QWidget *>(item->data(0, Qt::UserRole + 1).value<QObject *>())) {
             ChatTab *tab = tabs_->indexOf(page) >= 0 ? chatTab(page) : nullptr;
-            if (tab && !tab->agent()->canResetSessionApprovals()) {
+            if (tab && item->data(0, Qt::UserRole + 2).isValid()) {
+                tab->agent()->removeTrustedSessionCommand(item->data(0, Qt::UserRole + 2).toString());
+            } else if (tab && !tab->agent()->canResetSessionApprovals()) {
                 appendLine("[" + tab->provider()->name() + " cannot withdraw approvals given for a session.]");
             } else if (tab && tab->agent()->isResponding()) {
                 appendLine("[Wait for " + tab->provider()->name() + " to finish before withdrawing its session approvals.]");
@@ -1468,8 +1477,10 @@ void MainWindow::updateRequestPanel()
         };
         addButton("Allow once", ApprovalDecision::Accept, "Allow only this action");
         if (request->canAcceptForSession)
-            addButton("Allow for this session", ApprovalDecision::AcceptForSession,
-                      "Also allow the same kind of action for the rest of this session");
+            addButton(request->sessionRule.isEmpty() ? "Allow for this session"
+                      : "Trust " + request->sessionRule + " for this chat", ApprovalDecision::AcceptForSession,
+                      request->sessionRule.isEmpty() ? "Also allow the same kind of action for the rest of this session"
+                      : "Trust simple " + request->sessionRule + " commands with different arguments; revoke in Settings > Approvals");
         if (!request->alwaysRule.isEmpty())
             addButton("Always allow", ApprovalDecision::AcceptAlways, request->alwaysRule);
         addButton("Decline", ApprovalDecision::Decline, "The agent continues without this action");

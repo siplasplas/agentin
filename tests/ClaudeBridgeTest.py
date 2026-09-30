@@ -6,6 +6,7 @@ import sys
 import types
 import unittest
 from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 
@@ -27,10 +28,18 @@ class FakeClient:
         self.interrupted = False
         self.connected = False
         self.responses = []
+        self.permission_modes = []
+        self.effective_permission_mode = None
         self.__class__.instances.append(self)
 
     async def connect(self):
         self.connected = True
+        # Simulate a resumed CLI retaining an earlier automatic mode until explicitly changed.
+        self.effective_permission_mode = "auto" if self.options.resume else self.options.permission_mode
+
+    async def set_permission_mode(self, mode):
+        self.permission_modes.append(mode)
+        self.effective_permission_mode = mode
 
     async def disconnect(self):
         self.connected = False
@@ -100,6 +109,8 @@ class ClaudeBridgeTest(unittest.IsolatedAsyncioTestCase):
             bridge = bridge_module.Bridge("/tmp/project", "glm")
             await bridge.connect()
             options = bridge.client.options
+            self.assertEqual(options.permission_mode, "default")
+            self.assertEqual(bridge.client.permission_modes, ["default"])
             self.assertEqual(options.model, "glm-test")
             self.assertEqual(options.env["ANTHROPIC_AUTH_TOKEN"], "test-zai-key")
             self.assertEqual(options.env["ANTHROPIC_BASE_URL"], "https://api.z.ai/api/anthropic")
@@ -108,6 +119,81 @@ class ClaudeBridgeTest(unittest.IsolatedAsyncioTestCase):
             await bridge.handle({"type": "add_directory", "path": extra_directory})
             self.assertEqual(bridge.client.options.add_dirs, [extra_directory])
             self.assertEqual(events[-1], {"type": "directory_added", "path": extra_directory})
+
+    async def test_permission_mode_is_explicit_and_preserved_on_resume(self):
+        with patch.object(bridge_module, "send"):
+            bridge = bridge_module.Bridge("/tmp/project")
+            await bridge.connect()
+            self.assertEqual(bridge.client.options.permission_mode, "default")
+            self.assertEqual(bridge.client.permission_modes, ["default"])
+            bridge.session_id = "existing-auto-session"
+            await bridge.handle({"type": "reset_permissions"})
+            self.assertEqual(bridge.client.options.resume, "existing-auto-session")
+            self.assertEqual(bridge.client.options.permission_mode, "default")
+            self.assertEqual(bridge.client.permission_modes, ["default"])
+            await bridge.handle({"type": "settings", "readOnly": True})
+            self.assertEqual(bridge.client.permission_modes, ["default", "plan"])
+            await bridge.handle({"type": "reset_permissions"})
+            self.assertEqual(bridge.client.options.permission_mode, "plan")
+            self.assertEqual(bridge.client.permission_modes, ["plan"])
+            await bridge.handle({"type": "settings", "readOnly": False})
+            self.assertEqual(bridge.client.permission_modes, ["plan", "default"])
+
+    async def test_resume_replaces_saved_auto_mode_before_reporting_ready(self):
+        with TemporaryDirectory() as directory:
+            for read_only, expected_mode in ((False, "default"), (True, "plan")):
+                with self.subTest(read_only=read_only):
+                    modes_when_ready = []
+                    bridge = bridge_module.Bridge(directory, read_only=read_only)
+
+                    def collect(message):
+                        if message["type"] == "ready":
+                            modes_when_ready.append(bridge.client.effective_permission_mode)
+
+                    with patch.object(bridge_module, "send", collect):
+                        await bridge.connect()
+                        previous_client = bridge.client
+                        previous_client.effective_permission_mode = "auto"
+                        modes_when_ready.clear()
+                        await bridge.handle({"type": "resume", "session_id": "saved-auto-session", "cwd": directory})
+                    self.assertFalse(previous_client.connected)
+                    self.assertIsNot(bridge.client, previous_client)
+                    self.assertEqual(bridge.client.options.resume, "saved-auto-session")
+                    self.assertEqual(bridge.client.options.permission_mode, expected_mode)
+                    self.assertEqual(bridge.client.effective_permission_mode, expected_mode)
+                    self.assertEqual(modes_when_ready, [expected_mode])
+                    self.assertTrue(bridge.connected)
+
+    async def test_resume_does_not_report_ready_if_mode_change_fails(self):
+        events = []
+        with TemporaryDirectory() as directory, patch.object(bridge_module, "send", events.append):
+            bridge = bridge_module.Bridge(directory)
+            await bridge.connect()
+            events.clear()
+
+            async def reject_mode(client, mode):
+                raise RuntimeError("permission mode rejected")
+
+            with patch.object(FakeClient, "set_permission_mode", reject_mode):
+                with self.assertRaisesRegex(RuntimeError, "permission mode rejected"):
+                    await bridge.handle({"type": "resume", "session_id": "saved-auto-session", "cwd": directory})
+            self.assertFalse(bridge.connected)
+            self.assertFalse(any(event["type"] == "ready" for event in events))
+            self.assertEqual(bridge.client.prompts, [])
+
+    async def test_approval_suggestions_cannot_enable_automatic_modes(self):
+        events = []
+        with patch.object(bridge_module, "send", events.append):
+            bridge = bridge_module.Bridge("/tmp/project")
+            for mode in ("auto", "acceptEdits", "bypassPermissions"):
+                context = Message(suggestions=[Message(type="setMode", mode=mode)])
+                approval = asyncio.create_task(bridge.can_use_tool("Bash", {"command": "git add ."}, context))
+                await asyncio.sleep(0)
+                request = events[-1]
+                self.assertFalse(request["canRemember"])
+                self.assertEqual(request["alwaysRule"], "")
+                await bridge.handle({"type": "approval_response", "id": request["id"], "decision": "acceptAlways"})
+                self.assertIsNone((await approval).updated_permissions)
 
     async def test_glm_requires_zai_credentials(self):
         with patch.dict(bridge_module.os.environ, {}, clear=True):
