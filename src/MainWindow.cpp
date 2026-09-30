@@ -376,17 +376,26 @@ void MainWindow::loadSettings()
         const QJsonObject options = agents.value(listed->name()).toObject();
         listed->setDefaults(options.value("model").toString(), options.value("effort").toString("medium"));
     }
+    file.seek(0);
+    const QString enterKey = QJsonDocument::fromJson(file.readAll()).object().value("enterKey").toString();
+    input_->setEnterPolicy(enterKey == "send" ? MessageInput::EnterPolicy::Send
+                           : (enterKey == "newline" ? MessageInput::EnterPolicy::NewLine
+                                                    : MessageInput::EnterPolicy::Smart));
 }
 
 void MainWindow::saveSettings()
 {
+    const MessageInput::EnterPolicy policy = input_->enterPolicy();
+    const QString enterKey = policy == MessageInput::EnterPolicy::Send ? "send"
+        : (policy == MessageInput::EnterPolicy::NewLine ? "newline" : "smart");
     QJsonObject agents;
     for (const AgentProvider *listed : providers_)
         agents.insert(listed->name(), QJsonObject{{"model", listed->defaultModel()}, {"effort", listed->defaultEffort()}});
     if (!QDir().mkpath(dataDirectory_)) return;
     QSaveFile file(QDir(dataDirectory_).filePath("settings.json"));
     if (!file.open(QIODevice::WriteOnly)
-        || file.write(QJsonDocument(QJsonObject{{"version", 1}, {"agents", agents}}).toJson(QJsonDocument::Indented)) < 0
+        || file.write(QJsonDocument(QJsonObject{{"version", 1}, {"enterKey", enterKey}, {"agents", agents}})
+                          .toJson(QJsonDocument::Indented)) < 0
         || !file.commit()) {
         appendLine("[Could not save settings: " + file.errorString() + "]");
     }
@@ -399,6 +408,17 @@ void MainWindow::showOptionsDialog()
     QDialog dialog(this);
     dialog.setWindowTitle("Options");
     auto *layout = new QVBoxLayout(&dialog);
+    auto *enterForm = new QFormLayout;
+    auto *enterInput = new QComboBox(&dialog);
+    enterInput->setObjectName("enterKeyPolicy");
+    enterInput->addItem("Send, unless you typed a line break in the message",
+                        QVariant::fromValue(int(MessageInput::EnterPolicy::Smart)));
+    enterInput->addItem("Always send", QVariant::fromValue(int(MessageInput::EnterPolicy::Send)));
+    enterInput->addItem("Always start a new line", QVariant::fromValue(int(MessageInput::EnterPolicy::NewLine)));
+    enterInput->setCurrentIndex(enterInput->findData(int(input_->enterPolicy())));
+    enterForm->addRow("Enter key:", enterInput);
+    layout->addLayout(enterForm);
+    layout->addWidget(new QLabel("Shift+Enter always starts a new line and Ctrl+Enter always sends.", &dialog));
     layout->addWidget(new QLabel("Model and reasoning effort that new chats start with:", &dialog));
     auto *form = new QFormLayout;
     layout->addLayout(form);
@@ -452,6 +472,7 @@ void MainWindow::showOptionsDialog()
     connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
     connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
     if (dialog.exec() != QDialog::Accepted) return;
+    input_->setEnterPolicy(MessageInput::EnterPolicy(enterInput->currentData().toInt()));
     for (const Row &row : rows) row.provider->setDefaults(row.model->currentData().toString(), row.effort->currentData().toString());
     saveSettings();
     modelControlsState_.clear();
@@ -724,7 +745,7 @@ void MainWindow::updateStatus()
     stopButton_->setEnabled(agent->canInterrupt());
     sendButton_->setText("Send to " + tab->provider()->name());
     sendButton_->setEnabled(tab->isLive());
-    input_->setPlaceholderText(tab->isLive() ? "Enter a message or help, then press Enter"
+    input_->setPlaceholderText(tab->isLive() ? "Message or help; Shift+Enter starts a new line, Ctrl+Enter sends"
                                              : "Read-only preview. Type help, new or clear, then press Enter");
     updateModelControls();
     updateUsage();

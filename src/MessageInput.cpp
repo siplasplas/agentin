@@ -13,7 +13,10 @@ MessageInput::MessageInput(QWidget *parent)
 {
     setTabChangesFocus(true);
     setLineWrapMode(QPlainTextEdit::WidgetWidth);
-    connect(this, &QPlainTextEdit::textChanged, this, &MessageInput::fitHeight);
+    connect(this, &QPlainTextEdit::textChanged, this, [this] {
+        if (!toPlainText().contains('\n')) typedLineBreak_ = false;
+        fitHeight();
+    });
     fitHeight();
 }
 
@@ -28,13 +31,23 @@ void MessageInput::setHistory(const QStringList &messages)
 
 void MessageInput::keyPressEvent(QKeyEvent *event)
 {
-    const bool plainEnter = (event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter)
-        && !(event->modifiers() & (Qt::ShiftModifier | Qt::ControlModifier | Qt::AltModifier));
-    if (plainEnter) {
-        position_ = history_.size();
-        draft_.clear();
-        emit submitted();
-        return;
+    if (event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter) {
+        const Qt::KeyboardModifiers modifiers = event->modifiers() & ~Qt::KeypadModifier;
+        if (modifiers == Qt::ShiftModifier) {
+            insertLineBreak();
+            return;
+        }
+        if (modifiers == Qt::ControlModifier) {
+            submit();
+            return;
+        }
+        if (modifiers == Qt::NoModifier) {
+            const bool newLine = enterPolicy_ == EnterPolicy::NewLine
+                || (enterPolicy_ == EnterPolicy::Smart && typedLineBreak_);
+            if (newLine) insertLineBreak();
+            else submit();
+            return;
+        }
     }
     if (event->modifiers() == Qt::NoModifier || event->modifiers() == Qt::KeypadModifier) {
         if (event->key() == Qt::Key_PageUp || (event->key() == Qt::Key_Up && onFirstLine())) {
@@ -47,6 +60,19 @@ void MessageInput::keyPressEvent(QKeyEvent *event)
         }
     }
     QPlainTextEdit::keyPressEvent(event);
+}
+
+void MessageInput::submit()
+{
+    position_ = history_.size();
+    draft_.clear();
+    emit submitted();
+}
+
+void MessageInput::insertLineBreak()
+{
+    insertPlainText("\n");
+    typedLineBreak_ = true;
 }
 
 // Lines are visual lines, so a long wrapped message is also walked line by line.
@@ -75,6 +101,7 @@ void MessageInput::recall(int step)
     if (position_ == history_.size()) draft_ = toPlainText();
     position_ = target;
     setPlainText(position_ == history_.size() ? draft_ : history_.at(position_));
+    typedLineBreak_ = false;
     moveCursor(step < 0 ? QTextCursor::End : QTextCursor::Start);
 }
 
