@@ -15,6 +15,7 @@
 #include <QComboBox>
 #include <QFrame>
 #include <QRadioButton>
+#include <QRegularExpression>
 #include <QDateTime>
 #include <QDialog>
 #include <QDialogButtonBox>
@@ -751,6 +752,49 @@ void MainWindow::showNotificationsDialog()
     repeat->setSpecialValueText("Never");
     repeat->setValue(settings.waitingRepeatMinutes);
     form->addRow("Repeat while it waits, every:", repeat);
+    auto *voice = new QCheckBox("Announce with a voice instead of the sound files", &dialog);
+    voice->setObjectName("announceWithVoice");
+    voice->setChecked(settings.voice);
+    form->addRow(QString(), voice);
+    auto *voiceRow = new QHBoxLayout;
+    auto *voiceChoice = new QComboBox(&dialog);
+    voiceChoice->setObjectName("voiceChoice");
+    voiceChoice->addItem("Automatic", QString());
+    if (!Notifier::findPiper({}).isEmpty()) {
+        for (const QString &model : Notifier::piperModels())
+            voiceChoice->addItem("Piper: " + QFileInfo(model).completeBaseName(), model);
+    }
+    if (!Notifier::findEspeak().isEmpty()) voiceChoice->addItem("espeak-ng", QStringLiteral("espeak-ng"));
+    const QString chosenVoice = settings.voiceEngine == "espeak-ng" ? QStringLiteral("espeak-ng") : settings.piperModel;
+    voiceChoice->setCurrentIndex(qMax(0, voiceChoice->findData(chosenVoice)));
+    auto *tryVoice = new QPushButton("Try", &dialog);
+    voiceRow->addWidget(voiceChoice, 1);
+    voiceRow->addWidget(tryVoice);
+    form->addRow("Voice:", voiceRow);
+    const QString piperProgram = Notifier::findPiper({});
+    auto *voiceStatus = new QLabel(&dialog);
+    voiceStatus->setWordWrap(true);
+    voiceStatus->setText(piperProgram.isEmpty() && Notifier::findEspeak().isEmpty()
+        ? "No voice program found. Install Piper with a voice (a model .onnx with its .onnx.json in ~/piper or "
+          "~/.local/share/piper) or espeak-ng; until then the sound files play."
+        : "Found: " + QStringList{piperProgram.isEmpty() ? QString() : "Piper (" + piperProgram + ") with "
+                                      + QString::number(Notifier::piperModels().size()) + " voices",
+                                  Notifier::findEspeak().isEmpty() ? QString() : "espeak-ng"}.filter(QRegularExpression(".")).join(", ")
+          + ". A Polish Piper voice (pl_PL-…) speaks Polish sentences, other voices English.");
+    form->addRow(QString(), voiceStatus);
+    const auto voiceSettings = [voiceChoice](Notifier::Settings base) {
+        const QString data = voiceChoice->currentData().toString();
+        base.voiceEngine = data.isEmpty() ? QString() : (data == "espeak-ng" ? QStringLiteral("espeak-ng") : QStringLiteral("piper"));
+        base.piperModel = data == "espeak-ng" ? QString() : data;
+        return base;
+    };
+    connect(tryVoice, &QPushButton::clicked, &dialog, [this, voiceSettings, settings] {
+        const Notifier::Settings chosen = voiceSettings(settings);
+        const bool polish = Notifier::voiceEngine(chosen) == "piper"
+            && QFileInfo(Notifier::findPiperModel(chosen)).fileName().startsWith("pl");
+        if (!Notifier::say(chosen, polish ? "Codex skończył: przykładowa rozmowa" : "Codex finished: an example chat", this))
+            appendLine("[No voice program was found for this choice.]");
+    });
     auto *note = new QLabel("A waiting agent is announced regardless of how long the turn has run, because its work "
                             "stops until you answer. The speaker button in the status row mutes all sounds.", &dialog);
     note->setWordWrap(true);
@@ -768,6 +812,8 @@ void MainWindow::showNotificationsDialog()
     settings.waitingSound = waiting->text().trimmed();
     settings.waitingDelaySeconds = delay->value();
     settings.waitingRepeatMinutes = repeat->value();
+    settings.voice = voice->isChecked();
+    settings = voiceSettings(settings);
     notifier_->setSettings(settings);
     saveSettings();
 }

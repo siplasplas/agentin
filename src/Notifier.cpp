@@ -1,6 +1,8 @@
 #include "Notifier.h"
 
 #include <QApplication>
+#include <QDir>
+#include <QFile>
 #include <QFileInfo>
 #include <QProcess>
 #include <QStandardPaths>
@@ -19,6 +21,10 @@ Notifier::Settings Notifier::Settings::fromJson(const QJsonObject &object)
     settings.waitingSound = object.value("waitingSound").toString();
     settings.waitingDelaySeconds = object.value("waitingDelaySeconds").toInt(30);
     settings.waitingRepeatMinutes = object.value("waitingRepeatMinutes").toInt(0);
+    settings.voice = object.value("voice").toBool(true);
+    settings.voiceEngine = object.value("voiceEngine").toString();
+    settings.piperProgram = object.value("piperProgram").toString();
+    settings.piperModel = object.value("piperModel").toString();
     return settings;
 }
 
@@ -26,7 +32,8 @@ QJsonObject Notifier::Settings::toJson() const
 {
     return {{"popups", popups}, {"muted", muted}, {"minimumMinutes", minimumMinutes},
             {"finishedSound", finishedSound}, {"failedSound", failedSound}, {"waitingSound", waitingSound},
-            {"waitingDelaySeconds", waitingDelaySeconds}, {"waitingRepeatMinutes", waitingRepeatMinutes}};
+            {"waitingDelaySeconds", waitingDelaySeconds}, {"waitingRepeatMinutes", waitingRepeatMinutes},
+            {"voice", voice}, {"voiceEngine", voiceEngine}, {"piperProgram", piperProgram}, {"piperModel", piperModel}};
 }
 
 Notifier::Notifier(QObject *parent)
@@ -42,7 +49,9 @@ void Notifier::turnFinished(const QString &agent, const QString &chat, bool succ
     if (settings_.popups) {
         popup(agent + (succeeded ? " finished" : " stopped with an error"), "\"" + chat + "\" after " + length);
     }
-    if (!settings_.muted) playSound(succeeded ? settings_.finishedSound : settings_.failedSound);
+    if (!settings_.muted)
+        announce(succeeded ? Event::Finished : Event::Failed, agent, chat,
+                 succeeded ? settings_.finishedSound : settings_.failedSound);
 }
 
 void Notifier::waitingStarted(const QString &key, const QString &agent, const QString &chat, const QString &request)
@@ -67,8 +76,99 @@ void Notifier::announceWaiting(const QString &key)
     const auto found = waiting_.constFind(key);
     if (found == waiting_.constEnd()) return;
     if (settings_.popups) popup(found->agent + " is waiting for you", "\"" + found->chat + "\": " + found->request);
-    if (!settings_.muted) playSound(settings_.waitingSound);
+    if (!settings_.muted) announce(Event::Waiting, found->agent, found->chat, settings_.waitingSound);
     if (settings_.waitingRepeatMinutes > 0) found->timer->start(settings_.waitingRepeatMinutes * 60 * 1000);
+}
+
+// The sentence follows the language of the Piper voice (its file name starts with it, as in
+// pl_PL-gosia-medium); espeak-ng and other voices speak English.
+void Notifier::announce(Event event, const QString &agent, const QString &chat, const QString &soundFile)
+{
+    if (settings_.voice) {
+        const bool polish = voiceEngine(settings_) == "piper" && QFileInfo(findPiperModel(settings_)).fileName().startsWith("pl");
+        QString sentence;
+        switch (event) {
+        case Event::Finished: sentence = polish ? "%1 skończył: %2" : "%1 finished: %2"; break;
+        case Event::Failed: sentence = polish ? "%1 zakończył się błędem: %2" : "%1 stopped with an error: %2"; break;
+        case Event::Waiting: sentence = polish ? "%1 czeka na ciebie: %2" : "%1 is waiting for you: %2"; break;
+        }
+        if (say(settings_, sentence.arg(agent, chat), this)) return;
+    }
+    playSound(soundFile);
+}
+
+QString Notifier::findPiper(const Settings &settings)
+{
+    if (!settings.piperProgram.isEmpty()) return QFileInfo(settings.piperProgram).isExecutable() ? settings.piperProgram : QString();
+    const QString inPath = QStandardPaths::findExecutable("piper");
+    if (!inPath.isEmpty()) return inPath;
+    // pip installs Piper into a virtual environment, which is often not on PATH.
+    return QStandardPaths::findExecutable("piper", {QDir::home().filePath(".venvs/piper/bin"), QDir::home().filePath(".local/bin"),
+                                                     QDir::home().filePath("piper"), QDir::home().filePath(".local/share/piper/bin")});
+}
+
+QString Notifier::findPiperModel(const Settings &settings)
+{
+    if (!settings.piperModel.isEmpty()) return QFileInfo(settings.piperModel).isFile() ? settings.piperModel : QString();
+    return piperModels().value(0);
+}
+
+// A Piper voice is a model.onnx file with its model.onnx.json next to it.
+QStringList Notifier::piperModels()
+{
+    QStringList models;
+    QStringList places{QDir::home().filePath("piper"), QDir::home().filePath(".local/share/piper"),
+                       QDir::home().filePath(".local/share/piper-voices"), QDir::home().filePath(".local/share/piper/voices"),
+                       "/usr/share/piper-voices", "/usr/local/share/piper-voices"};
+    for (const QString &data : QStandardPaths::standardLocations(QStandardPaths::GenericDataLocation))
+        places << QDir(data).filePath("piper") << QDir(data).filePath("piper-voices");
+    for (const QString &place : places) {
+        for (const QFileInfo &model : QDir(place).entryInfoList({"*.onnx"}, QDir::Files, QDir::Name)) {
+            if (QFileInfo::exists(model.filePath() + ".json") && !models.contains(model.filePath())) models.append(model.filePath());
+        }
+    }
+    return models;
+}
+
+QString Notifier::findEspeak()
+{
+    const QString espeakNg = QStandardPaths::findExecutable("espeak-ng");
+    return espeakNg.isEmpty() ? QStandardPaths::findExecutable("espeak") : espeakNg;
+}
+
+QString Notifier::voiceEngine(const Settings &settings)
+{
+    const bool piper = !findPiper(settings).isEmpty() && !findPiperModel(settings).isEmpty();
+    const bool espeak = !findEspeak().isEmpty();
+    if (settings.voiceEngine == "piper") return piper ? "piper" : QString();
+    if (settings.voiceEngine == "espeak-ng") return espeak ? "espeak-ng" : QString();
+    return piper ? "piper" : (espeak ? "espeak-ng" : QString());
+}
+
+// Piper writes the speech to a temporary WAV file, which a sound player then plays.
+bool Notifier::say(const Settings &settings, const QString &text, QObject *parent)
+{
+    const QString engine = voiceEngine(settings);
+    if (engine == "espeak-ng") return QProcess::startDetached(findEspeak(), {text});
+    if (engine != "piper") return false;
+    static int counter = 0;
+    const QString output = QDir(QDir::tempPath()).filePath(QString("agentdeskt-voice-%1-%2.wav")
+                                                                 .arg(QCoreApplication::applicationPid()).arg(++counter));
+    auto *piper = new QProcess(parent);
+    QObject::connect(piper, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), piper,
+                     [piper, output](int code, QProcess::ExitStatus status) {
+        piper->deleteLater();
+        if (status == QProcess::NormalExit && code == 0) playSound(output);
+        // The player opens the file right away; it is removed a little later.
+        QTimer::singleShot(60000, [output] { QFile::remove(output); });
+    });
+    QObject::connect(piper, &QProcess::errorOccurred, piper, [piper](QProcess::ProcessError error) {
+        if (error == QProcess::FailedToStart) piper->deleteLater();
+    });
+    piper->start(findPiper(settings), {"--model", findPiperModel(settings), "--output_file", output});
+    piper->write(text.toUtf8() + '\n');
+    piper->closeWriteChannel();
+    return true;
 }
 
 bool Notifier::playSound(const QString &file)

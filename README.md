@@ -179,6 +179,17 @@ announced, after a short delay (30 seconds by default) so that answering at once
 stays quiet, and optionally again every few minutes until it is answered, since
 its work stops until then. The speaker button in the status row mutes all sounds.
 
+Announcements can be spoken instead, for example "Codex finished: fix the build"
+or "Claude is waiting for you: …", so it is clear which chat needs attention.
+agentdeskt looks for Piper (on `PATH`, in `~/.venvs/piper/bin` or `~/.local/bin`)
+with a voice (a `.onnx` model with its `.onnx.json`, for example in `~/piper` or
+`~/.local/share/piper`), or for espeak-ng. The speech is generated when needed,
+so the repository contains no audio files. A Polish Piper voice (its file name
+starts with `pl`, such as `pl_PL-gosia-medium` from
+[piper-voices](https://huggingface.co/rhasspy/piper-voices)) speaks Polish
+sentences; other voices speak English. The voice is chosen and tried in
+**Settings → Notifications…**; without a voice program the sound files play.
+
 The status row shows how much of the account's usage limits is left for the
 agent in the current tab, for example `Codex limits  week: 36% left`; hover over
 it to see the used percentage and when each window resets. Which windows exist
