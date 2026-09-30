@@ -74,7 +74,8 @@ Add a lock on working directories, held only while an agent works on a turn:
   and process-based detection as heuristics.
 - **Read-only turns:** the text of a message does not tell whether the agent will change files; even a
   question can end with an edit or a command that writes. A turn may skip the lock only when the user
-  chooses a read-only mode and the agent enforces it:
+  chooses a read-only mode and the agent enforces it. Codex chats already have this mode (the
+  **Read-only** box in the chat header); the lock should honor it:
   - Codex: `sandboxPolicy` `readOnly` in `turn/start` (or `sandbox` `read-only` for the thread). The
     operating system sandbox also stops shell commands from writing, so this guarantee is strong.
   - Claude and GLM: `permission_mode` `plan` in the Agent SDK; Gemini: `--approval-mode plan`. These are

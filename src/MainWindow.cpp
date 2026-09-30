@@ -6,6 +6,7 @@
 #include "MainWindow.h"
 #include "MessageInput.h"
 
+#include <QCheckBox>
 #include <QComboBox>
 #include <QDateTime>
 #include <QDialog>
@@ -139,6 +140,8 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     effortInput_ = new QComboBox(this);
     effortInput_->setObjectName("effortSelect");
     effortInput_->setToolTip("Reasoning effort for the next messages in this chat");
+    readOnlyInput_ = new QCheckBox("Read-only", this);
+    readOnlyInput_->setObjectName("readOnlyToggle");
     for (QComboBox *combo : {modelInput_, effortInput_}) {
         combo->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
         combo->setMinimumContentsLength(6);
@@ -177,6 +180,7 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     headerRow->addWidget(chatHeader_, 1);
     headerRow->addWidget(modelInput_);
     headerRow->addWidget(effortInput_);
+    headerRow->addWidget(readOnlyInput_);
     panelLayout->addLayout(headerRow);
     panelLayout->addWidget(loadEarlierButton_);
     panelLayout->addWidget(chatView_, 1);
@@ -264,6 +268,9 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
 
     connect(modelInput_, QOverload<int>::of(&QComboBox::activated), this, &MainWindow::chooseModel);
     connect(effortInput_, QOverload<int>::of(&QComboBox::activated), this, &MainWindow::chooseModel);
+    connect(readOnlyInput_, &QCheckBox::clicked, this, [this](bool checked) {
+        if (ChatTab *tab = currentTab()) tab->agent()->setReadOnly(checked);
+    });
     connect(input_, &MessageInput::submitted, this, &MainWindow::submitCommand);
     connect(input_, &MessageInput::enterActionChanged, this, &MainWindow::showEnterAction);
     connect(sendButton_, &QPushButton::clicked, this, &MainWindow::submitCommand);
@@ -856,6 +863,13 @@ void MainWindow::updateModelControls()
     QStringList state{tab ? tab->provider()->name() : QString(), tab && tab->isLive() ? "live" : "read-only",
                       tab ? tab->agent()->model() : QString(), tab ? tab->agent()->effort() : QString()};
     for (const AgentModel &model : models) state.append(model.id + ':' + model.efforts.join(','));
+    const bool canReadOnly = tab && tab->isLive() && tab->agent()->supportsReadOnly();
+    readOnlyInput_->setEnabled(canReadOnly);
+    readOnlyInput_->setChecked(tab && tab->agent()->isReadOnly());
+    readOnlyInput_->setToolTip(!tab || tab->agent()->supportsReadOnly()
+        ? "The agent may read files but not change them, from the next message on; "
+          "Codex enforces this with its read-only sandbox, which also covers shell commands"
+        : tab->provider()->name() + " does not offer a read-only mode that it enforces");
     if (state.join('\n') == modelControlsState_) return;
     modelControlsState_ = state.join('\n');
     const QSignalBlocker modelBlocker(modelInput_);

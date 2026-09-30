@@ -197,6 +197,22 @@ QString CodexAgent::effort() const
     return effort_.isEmpty() && threadId_.isEmpty() && !modelChosen_ && connection_ ? connection_->defaultEffort() : effort_;
 }
 
+void CodexAgent::setReadOnly(bool readOnly)
+{
+    readOnly_ = readOnly;
+    sandboxChosen_ = true;
+    emit stateChanged();
+}
+
+// Read-only turns use Codex's read-only sandbox, which also stops shell commands from writing.
+// Switching back restores the thread's own policy, or workspace write when the thread began read-only.
+QJsonObject CodexAgent::sandboxPolicy() const
+{
+    if (readOnly_) return {{"type", "readOnly"}};
+    if (!threadSandbox_.isEmpty() && threadSandbox_.value("type").toString() != "readOnly") return threadSandbox_;
+    return {{"type", "workspaceWrite"}};
+}
+
 void CodexAgent::setModel(const QString &model, const QString &effort)
 {
     model_ = model;
@@ -209,6 +225,8 @@ void CodexAgent::setModel(const QString &model, const QString &effort)
 void CodexAgent::openThread(const QJsonObject &result, bool resumed)
 {
     threadId_ = result.value("thread").toObject().value("id").toString();
+    threadSandbox_ = result.value("sandbox").toObject();
+    if (!sandboxChosen_) readOnly_ = threadSandbox_.value("type").toString() == "readOnly";
     if (!modelChosen_) {
         model_ = result.value("model").toString();
         effort_ = result.value("reasoningEffort").toString();
@@ -249,6 +267,7 @@ void CodexAgent::startThread()
     QJsonObject params{{"cwd", workingDirectory_}, {"serviceName", "agentdeskt"}};
     const QString startModel = modelChosen_ ? model_ : connection_->defaultModel();
     if (!startModel.isEmpty()) params.insert("model", startModel);
+    if (sandboxChosen_ && readOnly_) params.insert("sandbox", "read-only");
     connection_->request("thread/start", params, this,
                          [this](const QJsonObject &result, const QString &error) {
         threadOpening_ = false;
@@ -273,6 +292,7 @@ void CodexAgent::sendNextPrompt()
                        {"input", QJsonArray{QJsonObject{{"type", "text"}, {"text", text}}}}};
     if (modelChosen_ && !model_.isEmpty()) params.insert("model", model_);
     if (modelChosen_ && !effort_.isEmpty()) params.insert("effort", effort_);
+    if (sandboxChosen_) params.insert("sandboxPolicy", sandboxPolicy());
     connection_->request("turn/start", params, this, [this](const QJsonObject &result, const QString &error) {
         if (!error.isEmpty()) {
             resetTurn();

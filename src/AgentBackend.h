@@ -171,6 +171,12 @@ public:
         Q_UNUSED(effort);
     }
 
+    // Read-only turns: the agent may read files but not change them. Only agents that enforce this
+    // themselves offer it; the setting applies from the next message on.
+    virtual bool supportsReadOnly() const { return false; }
+    virtual bool isReadOnly() const { return false; }
+    virtual void setReadOnly(bool readOnly) { Q_UNUSED(readOnly); }
+
     // Queues a message for the current conversation and sends it when the agent is free.
     virtual bool prompt(const QString &text) = 0;
     virtual void interrupt() = 0;

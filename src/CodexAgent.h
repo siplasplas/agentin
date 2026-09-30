@@ -27,6 +27,9 @@ public:
     QString model() const override;
     QString effort() const override;
     void setModel(const QString &model, const QString &effort) override;
+    bool supportsReadOnly() const override { return true; }
+    bool isReadOnly() const override { return readOnly_; }
+    void setReadOnly(bool readOnly) override;
     bool newConversation(const QString &workingDirectory) override;
     bool resumeConversation(const QString &id, const QString &workingDirectory) override;
     bool prompt(const QString &text) override;
@@ -47,6 +50,7 @@ private:
     void sendNextPrompt();
     void sendStopIfPossible();
     void resetTurn();
+    QJsonObject sandboxPolicy() const;
 
     QPointer<CodexConnection> connection_;
     QString workingDirectory_;
@@ -56,6 +60,10 @@ private:
     QString effort_;
     // Set once the user picks a model, so the thread's reported settings no longer replace it.
     bool modelChosen_ = false;
+    // The thread's own sandbox policy, restored when read-only mode is switched off again.
+    QJsonObject threadSandbox_;
+    bool readOnly_ = false;
+    bool sandboxChosen_ = false;
     QStringList queuedPrompts_;
     QSet<QString> streamedMessages_;
     QSet<QString> streamedCommands_;
