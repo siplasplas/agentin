@@ -12,6 +12,7 @@ class ClaudeProvider;
 class CodexConnection;
 class GeminiProvider;
 class MruTabWidget;
+class QComboBox;
 class QLabel;
 class QLineEdit;
 class QPlainTextEdit;
@@ -52,6 +53,8 @@ private:
     void appendText(const QString &text);
     void appendLine(const QString &text);
     void updateStatus();
+    void updateModelControls();
+    void chooseModel();
 
     QString workingDirectory_;
     QString dataDirectory_;
@@ -70,6 +73,10 @@ private:
     QPlainTextEdit *chatView_;
     QTextDocument *emptyDocument_;
     QPlainTextEdit *log_;
+    QComboBox *modelInput_;
+    QComboBox *effortInput_;
+    // What the model controls last showed; rebuilding them would close an open drop-down list.
+    QString modelControlsState_;
     QLineEdit *input_;
     QPushButton *sendButton_;
     QPushButton *stopButton_;

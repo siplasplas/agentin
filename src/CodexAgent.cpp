@@ -95,7 +95,7 @@ bool CodexAgent::resumeConversation(const QString &id, const QString &workingDir
             emit stateChanged();
             return;
         }
-        openThread(result.value("thread").toObject().value("id").toString(), true);
+        openThread(result, true);
     });
     emit stateChanged();
     return true;
@@ -184,9 +184,22 @@ void CodexAgent::answerQuestions(int id, const QHash<QString, QString> &answers)
     connection_->respond(requestId, {{"answers", result}});
 }
 
-void CodexAgent::openThread(const QString &threadId, bool resumed)
+void CodexAgent::setModel(const QString &model, const QString &effort)
 {
-    threadId_ = threadId;
+    model_ = model;
+    effort_ = effort;
+    modelChosen_ = true;
+    emit stateChanged();
+}
+
+// Model and effort changes are sent with the next turn/start; the server keeps them for later turns.
+void CodexAgent::openThread(const QJsonObject &result, bool resumed)
+{
+    threadId_ = result.value("thread").toObject().value("id").toString();
+    if (!modelChosen_) {
+        model_ = result.value("model").toString();
+        effort_ = result.value("reasoningEffort").toString();
+    }
     if (threadId_.isEmpty()) {
         emit message("[Server did not return a conversation ID.]");
     } else {
@@ -214,14 +227,16 @@ void CodexAgent::startThread()
     if (!connection_ || !connection_->isConnected() || threadOpening_) return;
     threadOpening_ = true;
     emit message("[Starting a new conversation]");
-    connection_->request("thread/start", {{"cwd", workingDirectory_}, {"serviceName", "agentdeskt"}}, this,
+    QJsonObject params{{"cwd", workingDirectory_}, {"serviceName", "agentdeskt"}};
+    if (modelChosen_ && !model_.isEmpty()) params.insert("model", model_);
+    connection_->request("thread/start", params, this,
                          [this](const QJsonObject &result, const QString &error) {
         threadOpening_ = false;
         if (!error.isEmpty()) {
             emit stateChanged();
             return;
         }
-        openThread(result.value("thread").toObject().value("id").toString(), false);
+        openThread(result, false);
     });
     emit stateChanged();
 }
@@ -236,6 +251,8 @@ void CodexAgent::sendNextPrompt()
     stopSent_ = false;
     QJsonObject params{{"threadId", threadId_},
                        {"input", QJsonArray{QJsonObject{{"type", "text"}, {"text", text}}}}};
+    if (modelChosen_ && !model_.isEmpty()) params.insert("model", model_);
+    if (modelChosen_ && !effort_.isEmpty()) params.insert("effort", effort_);
     connection_->request("turn/start", params, this, [this](const QJsonObject &result, const QString &error) {
         if (!error.isEmpty()) {
             resetTurn();

@@ -35,6 +35,7 @@ public:
     void loadConversations() override;
     void refreshConversations() override;
     QList<QJsonObject> conversations() const override;
+    QList<AgentModel> models() const override { return models_; }
     AgentBackend *createChat(const QString &workingDirectory, QObject *parent) override;
 
     void start();
@@ -67,6 +68,7 @@ private:
     bool loadConversationIndex();
     bool saveConversationIndex();
     void syncConversations();
+    void requestModels(const QString &cursor);
     void requestConversationPage();
     void handleConversationPage(const QJsonObject &result);
     void finishConversationSync();
@@ -84,6 +86,8 @@ private:
     QHash<QString, QPointer<CodexAgent>> threads_;
     QHash<QString, QString> liveThreadDirectories_;
     QString syncCursor_;
+    QList<AgentModel> models_;
+    QList<AgentModel> stagedModels_;
     QHash<QString, QJsonObject> cachedConversations_;
     QHash<QString, QJsonObject> stagedConversations_;
     QSet<QString> newConversationIds_;

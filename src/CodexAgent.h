@@ -24,6 +24,9 @@ public:
     QString statusText() const override;
     bool isResponding() const override { return busy_; }
     bool canInterrupt() const override { return busy_ && !stopRequested_; }
+    QString model() const override { return model_; }
+    QString effort() const override { return effort_; }
+    void setModel(const QString &model, const QString &effort) override;
     bool newConversation(const QString &workingDirectory) override;
     bool resumeConversation(const QString &id, const QString &workingDirectory) override;
     bool prompt(const QString &text) override;
@@ -38,7 +41,7 @@ public:
     void handleServerRequest(const QString &method, const QJsonValue &id, const QJsonObject &params);
 
 private:
-    void openThread(const QString &threadId, bool resumed);
+    void openThread(const QJsonObject &result, bool resumed);
     void closeThread();
     void startThread();
     void sendNextPrompt();
@@ -49,6 +52,10 @@ private:
     QString workingDirectory_;
     QString threadId_;
     QString activeTurnId_;
+    QString model_;
+    QString effort_;
+    // Set once the user picks a model, so the thread's reported settings no longer replace it.
+    bool modelChosen_ = false;
     QStringList queuedPrompts_;
     QSet<QString> streamedMessages_;
     QSet<QString> streamedCommands_;

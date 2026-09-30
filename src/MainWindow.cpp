@@ -88,6 +88,12 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     tabs_->setTabsClosable(true);
     tabs_->setMovable(true);
     tabs_->setUsesScrollButtons(true);
+    modelInput_ = new QComboBox(central);
+    modelInput_->setObjectName("modelSelect");
+    modelInput_->setToolTip("Model for the next messages in this chat");
+    effortInput_ = new QComboBox(central);
+    effortInput_->setObjectName("effortSelect");
+    effortInput_->setToolTip("Reasoning effort for the next messages in this chat");
     input_ = new QLineEdit(central);
     input_->setObjectName("commandInput");
     sendButton_ = new QPushButton("Send", central);
@@ -125,6 +131,8 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     log_->setPlaceholderText("Application messages will appear here.");
 
     auto *inputRow = new QHBoxLayout;
+    inputRow->addWidget(modelInput_);
+    inputRow->addWidget(effortInput_);
     inputRow->addWidget(input_, 1);
     inputRow->addWidget(sendButton_);
     inputRow->addWidget(stopButton_);
@@ -194,6 +202,8 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
         if (tab && chatView_->document() == tab->document()) chatView_->setDocument(emptyDocument_);
     });
 
+    connect(modelInput_, QOverload<int>::of(&QComboBox::activated), this, &MainWindow::chooseModel);
+    connect(effortInput_, QOverload<int>::of(&QComboBox::activated), this, &MainWindow::chooseModel);
     connect(input_, &QLineEdit::returnPressed, this, &MainWindow::submitCommand);
     connect(sendButton_, &QPushButton::clicked, this, &MainWindow::submitCommand);
     connect(stopButton_, &QPushButton::clicked, this, &MainWindow::requestStop);
@@ -202,6 +212,7 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
         connect(listed, &AgentProvider::message, this, &MainWindow::appendLine);
         connect(listed, &AgentProvider::stateChanged, this, &MainWindow::updateStatus);
         connect(listed, &AgentProvider::conversationsChanged, this, &MainWindow::refreshConversationTree);
+        connect(listed, &AgentProvider::modelsChanged, this, &MainWindow::updateModelControls);
     }
 
     appendLine("Directory: " + workingDirectory_);
@@ -561,6 +572,7 @@ void MainWindow::updateStatus()
         sendButton_->setEnabled(false);
         stopButton_->setEnabled(false);
         input_->setPlaceholderText("Type help or new, then press Enter");
+        updateModelControls();
         return;
     }
     const AgentBackend *agent = tab->agent();
@@ -575,4 +587,68 @@ void MainWindow::updateStatus()
     sendButton_->setEnabled(tab->isLive());
     input_->setPlaceholderText(tab->isLive() ? "Enter a message or help, then press Enter"
                                              : "Read-only preview. Type help, new or clear, then press Enter");
+    updateModelControls();
+}
+
+// Shows the current chat's model and effort. Without a choice yet, the provider's default model and
+// that model's default effort are shown.
+void MainWindow::updateModelControls()
+{
+    const ChatTab *tab = currentTab();
+    const QList<AgentModel> models = tab ? tab->provider()->models() : QList<AgentModel>{};
+    QStringList state{tab ? tab->provider()->name() : QString(), tab && tab->isLive() ? "live" : "read-only",
+                      tab ? tab->agent()->model() : QString(), tab ? tab->agent()->effort() : QString()};
+    for (const AgentModel &model : models) state.append(model.id + ':' + model.efforts.join(','));
+    if (state.join('\n') == modelControlsState_) return;
+    modelControlsState_ = state.join('\n');
+    const QSignalBlocker modelBlocker(modelInput_);
+    const QSignalBlocker effortBlocker(effortInput_);
+    modelInput_->clear();
+    effortInput_->clear();
+    const bool available = !models.isEmpty();
+    modelInput_->setEnabled(available && tab->isLive());
+    effortInput_->setEnabled(available && tab->isLive());
+    if (!available) {
+        modelInput_->addItem(tab ? "Default model" : "No chat");
+        effortInput_->addItem("Default effort");
+        return;
+    }
+    QString selected = tab->agent()->model();
+    const AgentModel *current = nullptr;
+    for (const AgentModel &model : models) {
+        modelInput_->addItem(model.displayName, model.id);
+        modelInput_->setItemData(modelInput_->count() - 1, model.description, Qt::ToolTipRole);
+        if (model.id == selected || (selected.isEmpty() && model.isDefault)) current = &model;
+    }
+    if (!current) {
+        // A thread may use a model that the list hides; keep it selectable as it is.
+        modelInput_->addItem(selected.isEmpty() ? "Default model" : selected, selected);
+        modelInput_->setCurrentIndex(modelInput_->count() - 1);
+        effortInput_->addItem(tab->agent()->effort().isEmpty() ? "Default effort" : tab->agent()->effort(),
+                              tab->agent()->effort());
+        return;
+    }
+    modelInput_->setCurrentIndex(modelInput_->findData(current->id));
+    for (int i = 0; i < current->efforts.size(); ++i) {
+        effortInput_->addItem(current->efforts.at(i), current->efforts.at(i));
+        effortInput_->setItemData(i, current->effortDescriptions.value(i), Qt::ToolTipRole);
+    }
+    const QString effort = tab->agent()->effort();
+    const int effortIndex = effortInput_->findData(effort.isEmpty() ? current->defaultEffort : effort);
+    effortInput_->setCurrentIndex(effortIndex >= 0 ? effortIndex : effortInput_->findData(current->defaultEffort));
+}
+
+// A new model keeps the chosen effort when it supports it and otherwise uses the model's default.
+void MainWindow::chooseModel()
+{
+    ChatTab *tab = currentTab();
+    if (!tab) return;
+    const QString modelId = modelInput_->currentData().toString();
+    QString effort = effortInput_->currentData().toString();
+    for (const AgentModel &model : tab->provider()->models()) {
+        if (model.id != modelId) continue;
+        if (!model.efforts.contains(effort)) effort = model.defaultEffort;
+        break;
+    }
+    tab->agent()->setModel(modelId, effort);
 }

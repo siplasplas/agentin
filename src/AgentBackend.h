@@ -50,6 +50,18 @@ struct AgentHelp
     QStringList arguments;
 };
 
+// A model a chat can use, with the reasoning efforts it supports.
+struct AgentModel
+{
+    QString id;
+    QString displayName;
+    QString description;
+    QStringList efforts;
+    QStringList effortDescriptions;
+    QString defaultEffort;
+    bool isDefault = false;
+};
+
 class AgentBackend;
 
 // One kind of agent: it lists its conversations for the tree and creates a chat session per tab.
@@ -75,6 +87,8 @@ public:
     virtual void loadConversations() = 0;
     virtual void refreshConversations() = 0;
     virtual QList<QJsonObject> conversations() const = 0;
+    // Models chats can switch to; empty when the agent offers no choice.
+    virtual QList<AgentModel> models() const { return {}; }
 
     virtual AgentBackend *createChat(const QString &workingDirectory, QObject *parent) = 0;
 
@@ -82,6 +96,7 @@ signals:
     void message(const QString &text);
     void stateChanged();
     void conversationsChanged();
+    void modelsChanged();
 };
 
 // One chat session with an agent. It owns its protocol state, prompt queue and turn state; a
@@ -103,6 +118,15 @@ public:
     // Each call reports through message() and returns false when the request cannot be started.
     virtual bool newConversation(const QString &workingDirectory) = 0;
     virtual bool resumeConversation(const QString &id, const QString &workingDirectory) = 0;
+    // Model and reasoning effort for the next turns; empty means the agent's or the conversation's default.
+    virtual QString model() const { return {}; }
+    virtual QString effort() const { return {}; }
+    virtual void setModel(const QString &model, const QString &effort)
+    {
+        Q_UNUSED(model);
+        Q_UNUSED(effort);
+    }
+
     // Queues a message for the current conversation and sends it when the agent is free.
     virtual bool prompt(const QString &text) = 0;
     virtual void interrupt() = 0;

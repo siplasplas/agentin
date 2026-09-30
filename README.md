@@ -119,6 +119,13 @@ marked until you switch to it. Closing a tab while its agent is responding asks
 first and then stops the response. Ctrl+Tab switches tabs in most recently used
 order.
 
+In a Codex tab, choose the model and reasoning effort next to the message field.
+The lists come from the App Server (`model/list`); each model offers only the
+efforts it supports, and hovering shows their descriptions. A new choice applies
+from the next message on and stays with that conversation. When a saved
+conversation is continued, the fields show the model and effort it used. The
+other agents use their default model for now; see `ROADMAP.md`.
+
 Select a chat in the conversation tree to show a read-only preview of its
 latest messages in the preview tab, whose title is shown in italics. Selecting
 another chat replaces the preview; a chat that is already open in a tab is shown

@@ -37,6 +37,7 @@ CodexConnection::CodexConnection(const QString &program, const QString &workingD
             initialized_ = true;
             sendJson({{"method", "initialized"}, {"params", QJsonObject{}}});
             emit connected();
+            requestModels({});
             if (syncWhenConnected_) {
                 syncWhenConnected_ = false;
                 syncConversations();
@@ -99,6 +100,38 @@ AgentHelp CodexConnection::help() const
     return {{"Codex connection: codex app-server --stdio (direct JSONL).",
              "Installed Codex App Server commands and options (reference; CLI subcommands are not chat messages):"},
             "App Server", program_, {"app-server", "--help"}};
+}
+
+// model/list is paged; the list is replaced once all pages have arrived.
+void CodexConnection::requestModels(const QString &cursor)
+{
+    QJsonObject params;
+    if (cursor.isEmpty()) stagedModels_.clear();
+    else params.insert("cursor", cursor);
+    request("model/list", params, this, [this](const QJsonObject &result, const QString &error) {
+        if (!error.isEmpty()) return;
+        for (const QJsonValue &value : result.value("data").toArray()) {
+            const QJsonObject object = value.toObject();
+            AgentModel model;
+            model.id = object.value("model").toString(object.value("id").toString());
+            model.displayName = object.value("displayName").toString(model.id);
+            model.description = object.value("description").toString();
+            model.defaultEffort = object.value("defaultReasoningEffort").toString();
+            model.isDefault = object.value("isDefault").toBool();
+            for (const QJsonValue &option : object.value("supportedReasoningEfforts").toArray()) {
+                model.efforts.append(option.toObject().value("reasoningEffort").toString());
+                model.effortDescriptions.append(option.toObject().value("description").toString());
+            }
+            if (!model.id.isEmpty()) stagedModels_.append(model);
+        }
+        const QString next = result.value("nextCursor").toString();
+        if (!next.isEmpty()) {
+            requestModels(next);
+            return;
+        }
+        models_ = stagedModels_;
+        emit modelsChanged();
+    });
 }
 
 AgentBackend *CodexConnection::createChat(const QString &workingDirectory, QObject *parent)
