@@ -209,10 +209,8 @@ void MainWindowTest::audioChooserPathsAndLastDirectory()
     settings.write(QJsonDocument(QJsonObject{{"notifications", QJsonObject{
         {"finishedSound", oldFile}, {"failedSound", oldFile}}}}).toJson());
     settings.close();
-    bool rememberedDuration = false;
     const auto choose = [&](MainWindow &window, const QString &key, const QString &expectedDirectory,
-                            const QString &typedPath, const QString &expectedFile, bool cancel = false,
-                            bool enableDuration = false) {
+                            const QString &typedPath, const QString &expectedFile, bool cancel = false) {
         QAction *action = nullptr;
         for (QAction *candidate : window.findChildren<QAction *>())
             if (candidate->text() == "Notifications…") action = candidate;
@@ -222,11 +220,7 @@ void MainWindowTest::audioChooserPathsAndLastDirectory()
             auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
             QVERIFY(dialog);
             const auto closeDialog = qScopeGuard([dialog] { dialog->reject(); });
-            auto *duration = dialog->findChild<QCheckBox *>("audioDurationVisible");
-            QVERIFY(duration);
-            QCOMPARE(duration->isChecked(), rememberedDuration);
-            duration->setChecked(enableDuration);
-            rememberedDuration = enableDuration;
+            QVERIFY(!dialog->findChild<QCheckBox *>("audioDurationVisible"));
             auto *browse = dialog->findChild<QPushButton *>(key + "Browse");
             QVERIFY(browse);
             bool accepted = false;
@@ -237,7 +231,14 @@ void MainWindowTest::audioChooserPathsAndLastDirectory()
                 auto *view = picker->findChild<QTreeView *>();
                 QVERIFY(view);
                 QCOMPARE(picker->directory(), expectedDirectory);
-                QCOMPARE(view->isColumnHidden(4), !enableDuration);
+                QVERIFY(!picker->findChild<QCheckBox *>("chooserAudioDurationVisible"));
+                QVERIFY(!view->isColumnHidden(4));
+                const QFileInfo currentFile(dialog->findChild<QLineEdit *>(key + "Path")->text());
+                if (currentFile.isFile()) {
+                    QTRY_VERIFY(!view->selectionModel()->selectedRows().isEmpty());
+                    QCOMPARE(view->currentIndex().data().toString(), currentFile.fileName());
+                    QVERIFY(view->viewport()->rect().intersects(view->visualRect(view->currentIndex())));
+                }
                 QComboBox *name = nullptr;
                 for (QComboBox *combo : picker->findChildren<QComboBox *>())
                     if (combo->isEditable()) name = combo;
@@ -276,19 +277,19 @@ void MainWindowTest::audioChooserPathsAndLastDirectory()
                           "/nonexistent/gemini", nullptr, directory.filePath("index.json"), "/nonexistent/agy",
                           directory.filePath("gemini"));
         choose(window, "finishedSound", oldDirectory, firstFile, firstFile);
-        choose(window, "failedSound", firstDirectory, "../second/second.ogg", secondFile, false, true);
-        choose(window, "waitingSound", secondDirectory, "../cancelled", QString(), true, true);
+        choose(window, "failedSound", oldDirectory, "../second/second.ogg", secondFile);
+        choose(window, "waitingSound", secondDirectory, "../cancelled", QString(), true);
     }
     QVERIFY(settings.open(QIODevice::ReadOnly));
     const QJsonObject saved = QJsonDocument::fromJson(settings.readAll()).object();
     settings.close();
     QCOMPARE(saved.value("lastAudioDirectory").toString(), cancelledDirectory);
-    QVERIFY(saved.value("audioDurationVisible").toBool());
+    QVERIFY(!saved.contains("audioDurationVisible"));
     // The last browsed directory survives cancelling both dialogs and restarting the application.
     MainWindow restarted("/nonexistent/codex", directory.path(), "/nonexistent/python", "/nonexistent/bridge",
                          "/nonexistent/gemini", nullptr, directory.filePath("index.json"), "/nonexistent/agy",
                          directory.filePath("gemini"));
-    choose(restarted, "waitingSound", cancelledDirectory, "last.wav", cancelledFile, false, true);
+    choose(restarted, "waitingSound", cancelledDirectory, "last.wav", cancelledFile);
 }
 
 void MainWindowTest::speakerStopsAudio()

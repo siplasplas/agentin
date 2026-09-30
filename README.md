@@ -225,9 +225,10 @@ playing (including voice preparation); click it to stop the current audio withou
 changing the mute setting. When idle, it mutes notification sounds. The
 audio chooser remembers its last browsed directory across all three notification
 sound fields and application restarts, including when the chooser is cancelled.
-**Show audio duration in the file chooser** in notification settings enables the
-sortable duration column (`mm:ss.t`). This option is saved and disabled by default
-to avoid extra metadata reads. Image metadata is not enabled in this audio
+When a sound field already contains a file, Browse opens its directory and selects
+and scrolls to that file; an empty field starts in the last browsed directory.
+The audio chooser always shows the sortable duration column (`mm:ss.t`), without
+a checkbox. Image metadata is not enabled in this audio
 chooser. Pasted absolute or relative paths are handled by QxFileDialog, relative
 to its displayed directory. The
 notification settings dialog also has **Stop playback** for cancelling **Play**

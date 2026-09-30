@@ -91,7 +91,6 @@ private:
     QString workingDirectory_;
     QString dataDirectory_;
     QString lastAudioDirectory_;
-    bool audioDurationVisible_ = false;
     CodexConnection *codex_;
     ClaudeProvider *claude_;
     ClaudeProvider *glm_;

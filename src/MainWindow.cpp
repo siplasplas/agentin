@@ -663,7 +663,6 @@ void MainWindow::loadSettings()
     undoAfterSend_ = settings.value("undoAfterSend").toBool(true);
     notifier_->setSettings(Notifier::Settings::fromJson(settings.value("notifications").toObject()));
     lastAudioDirectory_ = settings.value("lastAudioDirectory").toString();
-    audioDurationVisible_ = settings.value("audioDurationVisible").toBool(false);
     {
         const QSignalBlocker blocker(usageVisibleAction_);
         const bool visible = settings.value("showUsageLimits").toBool(true);
@@ -717,7 +716,6 @@ void MainWindow::saveSettings()
                                                          {"chatFont", chatView_->font().toString()},
                                                          {"notifications", notifier_->settings().toJson()},
                                                          {"lastAudioDirectory", lastAudioDirectory_},
-                                                         {"audioDurationVisible", audioDurationVisible_},
                                                          {"showUsageLimits", usageVisibleAction_->isChecked()},
                                                          {"usagePanelHeight", usagePanelHeight_},
                                                          {"glmModels", QJsonArray::fromStringList(glm_->extraModels())},
@@ -870,15 +868,6 @@ void MainWindow::showNotificationsDialog()
     minimum->setValue(settings.minimumMinutes);
     minimum->setToolTip("Finished and failed turns notify only when they took at least this long; 0 notifies every turn");
     form->addRow("Notify turns longer than:", minimum);
-    auto *duration = new QCheckBox("Show audio duration in the file chooser", &dialog);
-    duration->setObjectName("audioDurationVisible");
-    duration->setChecked(audioDurationVisible_);
-    duration->setToolTip("Read audio metadata and allow sorting by duration; disabled by default to avoid extra file reads");
-    form->addRow(QString(), duration);
-    connect(duration, &QCheckBox::toggled, &dialog, [this](bool visible) {
-        audioDurationVisible_ = visible;
-        saveSettings();
-    });
     const auto soundRow = [this, &dialog, form](const QString &label, const QString &file, const QString &key) {
         auto *row = new QHBoxLayout;
         auto *path = new QLineEdit(file, &dialog);
@@ -902,7 +891,8 @@ void MainWindow::showNotificationsDialog()
             picker.setWindowTitle("Choose a sound");
             picker.setDirectory(directory);
             picker.setNameFilter("Sounds (*.wav *.mp3 *.ogg *.oga *.flac)");
-            picker.setAudioDurationVisible(audioDurationVisible_);
+            picker.setAudioDurationVisible(true);
+            picker.setFileName(path->text().trimmed());
             const bool accepted = picker.exec() == QDialog::Accepted;
             lastAudioDirectory_ = picker.directory();
             saveSettings();
