@@ -2,6 +2,7 @@
 
 import argparse
 import asyncio
+import dataclasses
 import json
 import os
 import sys
@@ -92,10 +93,12 @@ class Bridge:
         self.next_id += 1
         future = asyncio.get_running_loop().create_future()
         self.pending[request_id] = future
+        suggestions = list(getattr(context, "suggestions", None) or [])
         if tool_name == "AskUserQuestion":
             send({"type": "question", "id": request_id, "questions": input_data.get("questions", [])})
         else:
-            send({"type": "approval", "id": request_id, "tool": tool_name, "input": input_data})
+            send({"type": "approval", "id": request_id, "tool": tool_name, "input": input_data,
+                  "canRemember": bool(suggestions)})
         try:
             answer = await future
         finally:
@@ -108,9 +111,14 @@ class Bridge:
                 "questions": input_data.get("questions", []),
                 "answers": answer.get("answers", {}),
             })
-        if answer.get("allow", False):
-            return PermissionResultAllow(updated_input=input_data)
-        return PermissionResultDeny(message="User declined this action")
+        decision = answer.get("decision") or ("accept" if answer.get("allow", False) else "decline")
+        if decision in ("accept", "acceptForSession"):
+            # Allowing for the session applies the CLI's suggested rules only to this session.
+            updates = None
+            if decision == "acceptForSession" and suggestions:
+                updates = [dataclasses.replace(update, destination="session") for update in suggestions]
+            return PermissionResultAllow(updated_input=input_data, updated_permissions=updates)
+        return PermissionResultDeny(message="User declined this action", interrupt=decision == "cancel")
 
     def resolve_pending(self):
         for future in self.pending.values():

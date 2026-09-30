@@ -57,6 +57,7 @@ private:
     void setAgent(AgentBackend *agent);
     void appendText(const QString &text);
     void showHistory(const QList<ChatEntry> &entries, bool hasMore, const QString &notice);
+    ApprovalDecision askApproval(const QString &title, const QString &description, bool canAcceptForSession);
     QHash<QString, QString> askQuestions(const QList<AgentQuestion> &questions);
 
     AgentProvider *provider_;

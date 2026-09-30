@@ -370,9 +370,13 @@ void ClaudeAgent::cancelHistory()
     ++historyGeneration_;
 }
 
-void ClaudeAgent::answerApproval(int id, bool allow)
+void ClaudeAgent::answerApproval(int id, ApprovalDecision decision)
 {
-    send({{"type", "approval_response"}, {"id", id}, {"allow", allow}});
+    const QString value = decision == ApprovalDecision::Accept ? "accept"
+        : decision == ApprovalDecision::AcceptForSession ? "acceptForSession"
+        : decision == ApprovalDecision::Cancel ? "cancel" : "decline";
+    const bool allow = decision == ApprovalDecision::Accept || decision == ApprovalDecision::AcceptForSession;
+    send({{"type", "approval_response"}, {"id", id}, {"allow", allow}, {"decision", value}});
 }
 
 void ClaudeAgent::answerQuestions(int id, const QHash<QString, QString> &answers)
@@ -464,7 +468,8 @@ void ClaudeAgent::handleLine(const QByteArray &line)
     } else if (type == "approval") {
         const QString details = QString::fromUtf8(QJsonDocument(event.value("input").toObject()).toJson(QJsonDocument::Indented));
         emit approvalRequested(event.value("id").toInt(), "Approve " + name_ + " action",
-                               event.value("tool").toString() + "\n\n" + details.trimmed());
+                               event.value("tool").toString() + "\n\n" + details.trimmed(),
+                               event.value("canRemember").toBool());
     } else if (type == "question") {
         // The SDK keys answers by question text.
         QList<AgentQuestion> questions;
@@ -475,8 +480,12 @@ void ClaudeAgent::handleLine(const QByteArray &line)
             question.id = question.text;
             question.header = object.value("header").toString(name_ + " question");
             question.multiSelect = object.value("multiSelect").toBool();
-            for (const QJsonValue &option : object.value("options").toArray())
+            // Claude Code's questions always accept an answer in the user's own words.
+            question.allowOther = true;
+            for (const QJsonValue &option : object.value("options").toArray()) {
                 question.options.append(option.toObject().value("label").toString());
+                question.optionDescriptions.append(option.toObject().value("description").toString());
+            }
             questions.append(question);
         }
         const int id = event.value("id").toInt();

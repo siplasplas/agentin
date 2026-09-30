@@ -63,7 +63,7 @@ public:
     void interrupt() override;
     void loadHistory(const QString &id, const QString &workingDirectory, bool older) override;
     void cancelHistory() override {}
-    void answerApproval(int, bool) override {}
+    void answerApproval(int, ApprovalDecision) override {}
     void answerQuestions(int, const QHash<QString, QString> &) override {}
 
 private:

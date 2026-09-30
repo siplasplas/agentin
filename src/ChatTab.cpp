@@ -4,6 +4,7 @@
 #include <QInputDialog>
 #include <QLineEdit>
 #include <QMessageBox>
+#include <QPushButton>
 #include <QPlainTextDocumentLayout>
 #include <QTextCursor>
 #include <QTextDocument>
@@ -154,11 +155,9 @@ void ChatTab::setAgent(AgentBackend *agent)
             emit logMessage("[" + name + " response: " + status + (details.isEmpty() ? "" : ": " + details) + "]");
     });
     connect(agent, &AgentBackend::approvalRequested, this,
-            [this, agent](int id, const QString &title, const QString &description) {
+            [this, agent](int id, const QString &title, const QString &description, bool canAcceptForSession) {
         emit activateRequested();
-        const auto answer = QMessageBox::question(dialogParent_, title, description + "\n\nAllow this action?",
-                                                   QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
-        agent->answerApproval(id, answer == QMessageBox::Yes);
+        agent->answerApproval(id, askApproval(title, description, canAcceptForSession));
     });
     connect(agent, &AgentBackend::questionsRequested, this, [this, agent](int id, const QList<AgentQuestion> &questions) {
         emit activateRequested();
@@ -223,15 +222,49 @@ void ChatTab::showHistory(const QList<ChatEntry> &entries, bool hasMore, const Q
     emit textAppended();
 }
 
-// Asks each question in a dialog and stops at the first one the user cancels.
+// Closing the dialog declines, which lets the agent continue without the action.
+ApprovalDecision ChatTab::askApproval(const QString &title, const QString &description, bool canAcceptForSession)
+{
+    QMessageBox box(QMessageBox::Question, title, description + "\n\nAllow this action?", QMessageBox::NoButton,
+                    dialogParent_);
+    box.setInformativeText("Decline lets the agent continue without this action; Decline and stop also ends its turn.");
+    QPushButton *once = box.addButton("Allow once", QMessageBox::AcceptRole);
+    QPushButton *session = canAcceptForSession ? box.addButton("Allow for this session", QMessageBox::AcceptRole)
+                                               : nullptr;
+    QPushButton *decline = box.addButton("Decline", QMessageBox::RejectRole);
+    QPushButton *stop = box.addButton("Decline and stop", QMessageBox::DestructiveRole);
+    box.setDefaultButton(decline);
+    box.setEscapeButton(decline);
+    box.exec();
+    if (box.clickedButton() == once) return ApprovalDecision::Accept;
+    if (session && box.clickedButton() == session) return ApprovalDecision::AcceptForSession;
+    if (box.clickedButton() == stop) return ApprovalDecision::Cancel;
+    return ApprovalDecision::Decline;
+}
+
+// Asks each question in a dialog and stops at the first one the user cancels. Options are numbered
+// with their descriptions; where the agent accepts it, the list is editable for an own answer.
 QHash<QString, QString> ChatTab::askQuestions(const QList<AgentQuestion> &questions)
 {
     QHash<QString, QString> answers;
     for (const AgentQuestion &question : questions) {
         bool accepted = false;
-        const QString reply = question.multiSelect || question.options.isEmpty()
-            ? QInputDialog::getText(dialogParent_, question.header, question.text, QLineEdit::Normal, {}, &accepted)
-            : QInputDialog::getItem(dialogParent_, question.header, question.text, question.options, 0, false, &accepted);
+        QString prompt = question.text;
+        for (int i = 0; i < question.options.size(); ++i) {
+            const QString description = question.optionDescriptions.value(i);
+            prompt += QString("\n%1. %2").arg(i + 1).arg(question.options.at(i))
+                + (description.isEmpty() ? QString() : " — " + description);
+        }
+        if (question.allowOther && !question.options.isEmpty()) prompt += "\nOr type your own answer.";
+        QString reply;
+        if (question.secret) {
+            reply = QInputDialog::getText(dialogParent_, question.header, prompt, QLineEdit::Password, {}, &accepted);
+        } else if (question.multiSelect || question.options.isEmpty()) {
+            reply = QInputDialog::getText(dialogParent_, question.header, prompt, QLineEdit::Normal, {}, &accepted);
+        } else {
+            reply = QInputDialog::getItem(dialogParent_, question.header, prompt, question.options, 0,
+                                          question.allowOther, &accepted);
+        }
         if (!accepted) break;
         answers.insert(question.id, reply);
     }

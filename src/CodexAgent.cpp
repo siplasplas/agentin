@@ -161,13 +161,15 @@ void CodexAgent::cancelHistory()
     historyPending_ = false;
 }
 
-void CodexAgent::answerApproval(int id, bool allow)
+void CodexAgent::answerApproval(int id, ApprovalDecision decision)
 {
     const QJsonValue requestId = serverRequests_.take(id);
     if (requestId.isUndefined() || !connection_) return;
-    const QString decision = allow ? "accept" : "decline";
-    connection_->respond(requestId, {{"decision", decision}});
-    emit message("[Approval: " + decision + "]");
+    const QString value = decision == ApprovalDecision::Accept ? "accept"
+        : decision == ApprovalDecision::AcceptForSession ? "acceptForSession"
+        : decision == ApprovalDecision::Cancel ? "cancel" : "decline";
+    connection_->respond(requestId, {{"decision", value}});
+    emit message("[Approval: " + value + "]");
 }
 
 void CodexAgent::answerQuestions(int id, const QHash<QString, QString> &answers)
@@ -374,7 +376,7 @@ void CodexAgent::handleServerRequest(const QString &method, const QJsonValue &id
         }
         const int requestId = nextServerRequest_++;
         serverRequests_.insert(requestId, id);
-        emit approvalRequested(requestId, "Approve Codex action", description.trimmed());
+        emit approvalRequested(requestId, "Approve Codex action", description.trimmed(), true);
     } else if (method == "item/tool/requestUserInput") {
         QList<AgentQuestion> questions;
         for (const QJsonValue &value : params.value("questions").toArray()) {
@@ -383,8 +385,12 @@ void CodexAgent::handleServerRequest(const QString &method, const QJsonValue &id
             question.id = object.value("id").toString();
             question.header = object.value("header").toString("Codex question");
             question.text = object.value("question").toString();
-            for (const QJsonValue &option : object.value("options").toArray())
+            question.allowOther = object.value("isOther").toBool();
+            question.secret = object.value("isSecret").toBool();
+            for (const QJsonValue &option : object.value("options").toArray()) {
                 question.options.append(option.toObject().value("label").toString());
+                question.optionDescriptions.append(option.toObject().value("description").toString());
+            }
             questions.append(question);
         }
         const int requestId = nextServerRequest_++;

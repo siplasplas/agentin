@@ -38,7 +38,22 @@ struct AgentQuestion
     QString header;
     QString text;
     QStringList options;
+    QStringList optionDescriptions;
     bool multiSelect = false;
+    // The agent also accepts an answer in the user's own words.
+    bool allowOther = false;
+    // The answer is a secret and is not shown while typed.
+    bool secret = false;
+};
+
+enum class ApprovalDecision {
+    Accept,
+    // Also allow the same kind of action for the rest of the session.
+    AcceptForSession,
+    // The agent continues without the action.
+    Decline,
+    // Decline and stop the agent's turn.
+    Cancel,
 };
 
 // Help shown for the selected agent: introductory lines, then the output of program with arguments.
@@ -164,7 +179,7 @@ public:
     virtual void loadHistory(const QString &id, const QString &workingDirectory, bool older) = 0;
     virtual void cancelHistory() = 0;
 
-    virtual void answerApproval(int id, bool allow) = 0;
+    virtual void answerApproval(int id, ApprovalDecision decision) = 0;
     // Answers are keyed by AgentQuestion::id; a missing key means the question was not answered.
     virtual void answerQuestions(int id, const QHash<QString, QString> &answers) = 0;
 
@@ -178,7 +193,7 @@ signals:
     void toolOutput(const QString &text);
     void toolFinished(const QString &name, const QString &status);
     void turnCompleted(const QString &status, const QString &details);
-    void approvalRequested(int id, const QString &title, const QString &description);
+    void approvalRequested(int id, const QString &title, const QString &description, bool canAcceptForSession);
     void questionsRequested(int id, const QList<AgentQuestion> &questions);
     void conversationOpened(const QString &id, bool resumed);
     void conversationOpenFailed(const QString &id, const QString &reason);
