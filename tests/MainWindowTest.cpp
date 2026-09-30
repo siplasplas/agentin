@@ -176,13 +176,13 @@ for line in sys.stdin:
     QTest::keyClick(input, Qt::Key_Return);
     QTRY_VERIFY(stopButton->isEnabled());
     QTest::mouseClick(stopButton, Qt::LeftButton);
-    QTRY_VERIFY(output->toPlainText().contains("[Response: interrupted]"));
+    QTRY_VERIFY(output->toPlainText().contains("[Codex response: interrupted]"));
 
     QTest::keyClicks(input, "long race");
     QTest::keyClick(input, Qt::Key_Return);
     QTest::keyClicks(input, "stop");
     QTest::keyClick(input, Qt::Key_Return);
-    QTRY_VERIFY(output->toPlainText().count("[Response: interrupted]") == 2);
+    QTRY_VERIFY(output->toPlainText().count("[Codex response: interrupted]") == 2);
 }
 
 void MainWindowTest::claudeConversationAndStop()

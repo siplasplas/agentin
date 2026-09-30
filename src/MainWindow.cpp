@@ -1,4 +1,5 @@
 #include "ClaudeBridge.h"
+#include "CodexAgent.h"
 #include "GeminiBridge.h"
 #include "AntigravityBridge.h"
 #include "MainWindow.h"
@@ -137,28 +138,6 @@ QList<ChatEntry> readGeminiHistory(const QString &filePath)
     return entries;
 }
 
-// Converts one Codex App Server thread item into chat entries.
-QList<ChatEntry> codexHistoryEntries(const QJsonObject &item)
-{
-    const QString type = item.value("type").toString();
-    if (type == "userMessage") {
-        QStringList parts;
-        for (const QJsonValue &input : item.value("content").toArray()) {
-            const QString text = input.toObject().value("text").toString();
-            if (!text.isEmpty()) parts.append(text);
-        }
-        if (!parts.isEmpty()) return {{"user", parts.join('\n')}};
-    } else if (type == "agentMessage") {
-        const QString text = item.value("text").toString().trimmed();
-        if (!text.isEmpty()) return {{"assistant", text}};
-    } else if (type == "commandExecution") {
-        return {{"tool", "$ " + item.value("command").toString()}};
-    } else if (type == "fileChange") {
-        return {{"tool", "file changes"}};
-    }
-    return {};
-}
-
 // Returns the /proc/<pid>/stat fields that follow the command name (state, ppid, ...).
 QStringList processStatFields(qint64 pid)
 {
@@ -220,13 +199,11 @@ QString commandLineLock(const QString &sessionId)
     return {};
 }
 
-void limitCodexPreview(QJsonObject &thread)
+QString codexIndexFile(const QString &path)
 {
-    if (!thread.value("preview").isString()) return;
-    QString preview = thread.value("preview").toString().simplified();
-    constexpr int limit = 200;
-    if (preview.size() > limit) preview = preview.left(limit - 1) + QChar(0x2026);
-    thread.insert("preview", preview);
+    return path.isEmpty()
+        ? QDir(QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation)).filePath("codex-conversations.json")
+        : path;
 }
 }
 
@@ -234,25 +211,21 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
                        const QString &claudePython, const QString &claudeScript,
                        const QString &geminiProgram, QWidget *parent, const QString &codexIndexPath,
                        const QString &antigravityProgram, const QString &geminiDataDirectory)
-    : QMainWindow(parent), codexProgram_(codexProgram), workingDirectory_(workingDirectory),
-      codexIndexPath_(codexIndexPath.isEmpty()
-          ? QDir(QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation)).filePath("codex-conversations.json")
-          : codexIndexPath),
+    : QMainWindow(parent), workingDirectory_(workingDirectory),
       geminiDataDirectory_(geminiDataDirectory.isEmpty()
           ? QDir(QDir::homePath()).filePath(".gemini") : geminiDataDirectory),
       claudePython_(claudePython), claudeScript_(claudeScript),
-      server_(new QProcess(this)),
+      codex_(new CodexAgent(codexProgram, workingDirectory, codexIndexFile(codexIndexPath), this)),
       claude_(new ClaudeBridge(claudePython, claudeScript, workingDirectory, "claude", this)),
       glm_(new ClaudeBridge(claudePython, claudeScript, workingDirectory, "glm", this)),
       gemini_(new GeminiBridge(geminiProgram, workingDirectory, this)),
       antigravity_(new AntigravityBridge(antigravityProgram, workingDirectory, this))
 {
-    codexWorkingDirectory_ = workingDirectory_;
     claudeWorkingDirectory_ = workingDirectory_;
     glmWorkingDirectory_ = workingDirectory_;
     geminiWorkingDirectory_ = workingDirectory_;
     antigravityWorkingDirectory_ = workingDirectory_;
-    localIndexPath_ = QDir(QFileInfo(codexIndexPath_).absolutePath()).filePath("claude-conversations.json");
+    localIndexPath_ = QDir(QFileInfo(codexIndexFile(codexIndexPath)).absolutePath()).filePath("claude-conversations.json");
     setWindowTitle("agentdeskt — Codex, Claude, GLM, Gemini and Antigravity");
     resize(900, 700);
     auto *conversationMenu = menuBar()->addMenu("Conversations");
@@ -332,7 +305,7 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
         expandedProviders_.insert(provider);
         if (provider == "GLM") loadLocalConversations();
         refreshConversationTree();
-        if (provider == "Codex" && initialized_) syncCodexConversations();
+        if (provider == "Codex" && codex_->isConnected()) codex_->syncConversations();
         else if (provider == "Claude") fetchClaudeSessions();
         else if (provider == "Gemini") fetchGeminiSessions();
         else if (provider == "Antigravity") loadLocalConversations();
@@ -556,53 +529,17 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
         if (viewLive_ && viewProvider_ == "Antigravity") viewId_ = id;
         rememberLocalConversation("Antigravity", id);
     });
-    connect(server_, &QProcess::started, this, [this] {
-        sendRequest("initialize", {{"clientInfo", QJsonObject{
-            {"name", "agentdeskt"}, {"title", "agentdeskt Qt"}, {"version", "0.1.0"}}}});
+    connectAgent(codex_);
+    connect(codex_, &CodexAgent::connected, this, [this] {
+        if (expandedProviders_.contains("Codex")) codex_->syncConversations();
     });
-    connect(server_, &QProcess::readyReadStandardOutput, this, [this] {
-        readBuffer_ += server_->readAllStandardOutput();
-        qsizetype newline;
-        while ((newline = readBuffer_.indexOf('\n')) >= 0) {
-            const QByteArray line = readBuffer_.left(newline).trimmed();
-            readBuffer_.remove(0, newline + 1);
-            if (!line.isEmpty()) handleLine(line);
-        }
-    });
-    connect(server_, &QProcess::readyReadStandardError, this, [this] {
-        const QString message = QString::fromUtf8(server_->readAllStandardError()).trimmed();
-        if (!message.isEmpty()) appendLine("[Server] " + message);
-    });
-    connect(server_, &QProcess::errorOccurred, this, [this, codexProgram](QProcess::ProcessError) {
-        appendLine("[Server startup error] " + server_->errorString());
-        appendLine("Executable: " + codexProgram);
-        appendLine("Working directory: " + workingDirectory_);
-        appendLine("Try --codex /absolute/path/to/codex if the executable was not found.");
-        updateStatus();
-    });
-    connect(server_, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this,
-            [this](int code, QProcess::ExitStatus) {
-        if (syncingCodexConversations_) {
-            syncingCodexConversations_ = false;
-            stagedCodexConversations_.clear();
-            appendLine("[Codex conversation sync stopped: server disconnected]");
-        }
-        initialized_ = false;
-        busy_ = false;
-        codexThreadOpening_ = false;
-        stopRequested_ = false;
-        stopSent_ = false;
-        threadId_.clear();
-        activeTurnId_.clear();
-        refreshConversationTree();
-        appendLine(QString("[Server exited with code %1]").arg(code));
-        updateStatus();
-    });
+    connect(codex_, &CodexAgent::disconnected, this, &MainWindow::refreshConversationTree);
+    connect(codex_, &CodexAgent::conversationsChanged, this, &MainWindow::refreshConversationTree);
 
     appendLine("Directory: " + workingDirectory_);
     appendLine("Type help to see the available commands.\n");
-    if (loadCodexConversationIndex()) {
-        appendLine(QString("[Cached Codex conversations: %1]").arg(cachedCodexConversations_.size()));
+    if (codex_->loadConversationIndex()) {
+        appendLine(QString("[Cached Codex conversations: %1]").arg(codex_->conversations().size()));
     }
     loadLocalConversations();
     loadRecentDirectories();
@@ -612,8 +549,7 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
         appendLine("[Working directory does not exist: " + workingDirectory_ + "]");
         return;
     }
-    server_->setWorkingDirectory(workingDirectory_);
-    server_->start(codexProgram, {"app-server", "--stdio"});
+    codex_->start();
     input_->setFocus();
 }
 
@@ -633,13 +569,7 @@ MainWindow::~MainWindow()
     disconnect(glm_, nullptr, this, nullptr);
     disconnect(gemini_, nullptr, this, nullptr);
     disconnect(antigravity_, nullptr, this, nullptr);
-    if (server_->state() != QProcess::NotRunning) {
-        server_->terminate();
-        if (!server_->waitForFinished(1000)) {
-            server_->kill();
-            server_->waitForFinished(1000);
-        }
-    }
+    disconnect(codex_, nullptr, this, nullptr);
 }
 
 void MainWindow::submitCommand()
@@ -694,14 +624,7 @@ void MainWindow::submitCommand()
             sendNextClaudePrompt();
             return;
         }
-        if (server_->state() == QProcess::NotRunning) {
-            appendLine("[Server is not running. Check the codex executable and restart.]");
-            return;
-        }
-        appendChatText("Codex", "\nYou: " + command + '\n');
-        queuedPrompts_.append(command);
-        if (threadId_.isEmpty()) startThread();
-        sendNextPrompt();
+        if (codex_->prompt(command)) appendChatText("Codex", "\nYou: " + command + '\n');
     }
 }
 
@@ -776,7 +699,7 @@ void MainWindow::showHelp()
     } else {
         appendLine("Codex connection: codex app-server --stdio (direct JSONL).");
         appendLine("Installed Codex App Server commands and options (reference; CLI subcommands are not chat messages):");
-        helpProgram = codexProgram_;
+        helpProgram = codex_->program();
         helpArguments = {"app-server", "--help"};
         helpName = "App Server";
     }
@@ -805,7 +728,7 @@ QString MainWindow::providerName(int index)
 
 QString MainWindow::providerWorkingDirectory(int index) const
 {
-    return index == 0 ? codexWorkingDirectory_
+    return index == 0 ? codex_->workingDirectory()
         : (index == 1 ? claudeWorkingDirectory_ : (index == 2 ? glmWorkingDirectory_
            : (index == 3 ? geminiWorkingDirectory_ : antigravityWorkingDirectory_)));
 }
@@ -820,7 +743,7 @@ int MainWindow::providerIndex(const QString &name)
 
 QString MainWindow::liveSessionId(int index) const
 {
-    return index == 0 ? threadId_ : (index == 1 ? claudeSessionId_ : (index == 2 ? glmSessionId_
+    return index == 0 ? codex_->sessionId() : (index == 1 ? claudeSessionId_ : (index == 2 ? glmSessionId_
         : (index == 3 ? gemini_->sessionId() : antigravity_->conversationId())));
 }
 
@@ -842,49 +765,6 @@ void MainWindow::selectProvider(int index)
     updateStatus();
 }
 
-void MainWindow::newCodexConversation(const QString &path)
-{
-    if (!initialized_) {
-        appendLine("[Codex App Server is not connected.]");
-        return;
-    }
-    if (busy_ || codexThreadOpening_) {
-        appendLine("[Wait for the current Codex response to finish.]");
-        return;
-    }
-    const QFileInfo directory(path);
-    if (!directory.isDir()) {
-        appendLine("[Directory does not exist: " + directory.absoluteFilePath() + "]");
-        return;
-    }
-    codexWorkingDirectory_ = directory.canonicalFilePath();
-    queuedPrompts_.clear();
-    threadId_.clear();
-    activeTurnId_.clear();
-    selectProvider(0);
-    showLiveChat("Codex", codexWorkingDirectory_);
-    startThread();
-    refreshConversationTree();
-}
-
-void MainWindow::resumeCodexConversation(const QString &id, const QString &path)
-{
-    if (id.isEmpty() || !initialized_) return;
-    if (busy_ || codexThreadOpening_) {
-        appendLine("[Wait for the current Codex response to finish.]");
-        return;
-    }
-    if (!path.isEmpty()) codexWorkingDirectory_ = path;
-    queuedPrompts_.clear();
-    activeTurnId_.clear();
-    threadId_.clear();
-    codexThreadOpening_ = true;
-    selectProvider(0);
-    appendLine("[Resuming Codex conversation: " + id + "]");
-    sendRequest("thread/resume", {{"threadId", id}});
-    updateStatus();
-}
-
 void MainWindow::refreshConversationTree()
 {
     const QSignalBlocker blocker(conversationTree_);
@@ -901,12 +781,14 @@ void MainWindow::refreshConversationTree()
         root->setExpanded(true);
     }
     if (expandedProviders_.contains("Codex")) {
-    QList<QJsonObject> threads = cachedCodexConversations_.values();
+    QList<QJsonObject> threads = codex_->conversations();
+    QSet<QString> listedIds;
     std::sort(threads.begin(), threads.end(), [](const QJsonObject &left, const QJsonObject &right) {
         return left.value("createdAt").toInteger() > right.value("createdAt").toInteger();
     });
     for (const QJsonObject &thread : threads) {
         const QString id = thread.value("id").toString();
+        listedIds.insert(id);
         const QString path = thread.value("cwd").toString();
         const QString directoryName = path.isEmpty() ? "(unknown directory)" : QDir::toNativeSeparators(path);
         const QString key = "Codex\n" + path;
@@ -929,19 +811,21 @@ void MainWindow::refreshConversationTree()
         chat->setData(0, Qt::UserRole + 2, path);
         chat->setToolTip(0, fullTitle + "\n\n" + id);
     }
-    if (!threadId_.isEmpty() && !cachedCodexConversations_.contains(threadId_)) {
-        const QString key = "Codex\n" + codexWorkingDirectory_;
+    const QString liveId = codex_->sessionId();
+    if (!liveId.isEmpty() && !listedIds.contains(liveId)) {
+        const QString livePath = codex_->workingDirectory();
+        const QString key = "Codex\n" + livePath;
         QTreeWidgetItem *directory = directories.value(key);
         if (!directory) {
-            directory = new QTreeWidgetItem(roots.value("Codex"), {QDir::toNativeSeparators(codexWorkingDirectory_)});
+            directory = new QTreeWidgetItem(roots.value("Codex"), {QDir::toNativeSeparators(livePath)});
             directory->setExpanded(true);
             directories.insert(key, directory);
         }
         auto *chat = new QTreeWidgetItem(directory, {"Current chat"});
         chat->setData(0, Qt::UserRole, "codex-chat");
-        chat->setData(0, Qt::UserRole + 1, threadId_);
-        chat->setData(0, Qt::UserRole + 2, codexWorkingDirectory_);
-        chat->setToolTip(0, threadId_);
+        chat->setData(0, Qt::UserRole + 1, liveId);
+        chat->setData(0, Qt::UserRole + 2, livePath);
+        chat->setToolTip(0, liveId);
     }
     }
     QList<QJsonObject> localThreads = localConversations_.values();
@@ -1092,58 +976,6 @@ void MainWindow::fetchGeminiSessions()
     appendLine(QString("[Gemini sessions discovered: %1]").arg(discoveredIds.size()));
 }
 
-bool MainWindow::loadCodexConversationIndex()
-{
-    QFile file(codexIndexPath_);
-    if (!file.exists()) return false;
-    if (!file.open(QIODevice::ReadOnly)) {
-        appendLine("[Could not read Codex conversation index: " + file.errorString() + "]");
-        return false;
-    }
-    QJsonParseError error;
-    const QJsonDocument document = QJsonDocument::fromJson(file.readAll(), &error);
-    if (!document.isObject() || document.object().value("version").toInt() != 1
-        || !document.object().value("threads").isArray()) {
-        appendLine("[Invalid Codex conversation index: " + error.errorString() + "]");
-        return false;
-    }
-    for (const QJsonValue &value : document.object().value("threads").toArray()) {
-        QJsonObject thread = value.toObject();
-        limitCodexPreview(thread);
-        const QString id = thread.value("id").toString();
-        if (!id.isEmpty()) cachedCodexConversations_.insert(id, thread);
-    }
-    return true;
-}
-
-bool MainWindow::saveCodexConversationIndex()
-{
-    if (!QDir().mkpath(QFileInfo(codexIndexPath_).absolutePath())) {
-        appendLine("[Could not create directory for Codex conversation index]");
-        return false;
-    }
-    QList<QJsonObject> threads = cachedCodexConversations_.values();
-    std::sort(threads.begin(), threads.end(), [](const QJsonObject &left, const QJsonObject &right) {
-        const qint64 leftDate = left.value("createdAt").toInteger();
-        const qint64 rightDate = right.value("createdAt").toInteger();
-        return leftDate == rightDate ? left.value("id").toString() < right.value("id").toString()
-                                     : leftDate > rightDate;
-    });
-    QJsonArray data;
-    for (const QJsonObject &thread : threads) data.append(thread);
-    const QJsonObject root{{"version", 1},
-                           {"syncedAt", QDateTime::currentDateTimeUtc().toString(Qt::ISODate)},
-                           {"threads", data}};
-    QSaveFile file(codexIndexPath_);
-    if (!file.open(QIODevice::WriteOnly)
-        || file.write(QJsonDocument(root).toJson(QJsonDocument::Indented)) < 0
-        || !file.commit()) {
-        appendLine("[Could not save Codex conversation index: " + file.errorString() + "]");
-        return false;
-    }
-    return true;
-}
-
 bool MainWindow::loadLocalConversations()
 {
     const QDir directory(QFileInfo(localIndexPath_).absolutePath());
@@ -1255,14 +1087,15 @@ void MainWindow::rememberLocalConversation(const QString &provider, const QStrin
 
 void MainWindow::newProviderConversation(int providerIndex, const QString &path)
 {
-    if (providerIndex == 0) { newCodexConversation(path); return; }
     const QFileInfo directory(path);
     if (!directory.isDir()) {
         appendLine("[Directory does not exist: " + directory.absoluteFilePath() + "]");
         return;
     }
     const QString canonicalPath = directory.canonicalFilePath();
-    if (providerIndex == 1) {
+    if (providerIndex == 0) {
+        if (!codex_->newConversation(canonicalPath)) return;
+    } else if (providerIndex == 1) {
         if (claudeBusy_) { appendLine("[Wait for Claude to finish.]"); return; }
         claudeWorkingDirectory_ = canonicalPath;
         claudeSessionId_.clear();
@@ -1391,101 +1224,6 @@ void MainWindow::resumeProviderConversation(const QString &provider, const QStri
     updateStatus();
 }
 
-void MainWindow::syncCodexConversations()
-{
-    if (syncingCodexConversations_) return;
-    if (!initialized_) {
-        appendLine("[Codex App Server is not connected.]");
-        return;
-    }
-    stagedCodexConversations_ = cachedCodexConversations_;
-    newCodexConversationIds_.clear();
-    activeConversationWatermark_ = 0;
-    for (const QJsonObject &thread : cachedCodexConversations_) {
-        if (!thread.value("archived").toBool()) {
-            activeConversationWatermark_ = qMax(activeConversationWatermark_, thread.value("createdAt").toInteger());
-        }
-    }
-    syncCursor_.clear();
-    syncPages_ = 0;
-    syncingArchivedCodexConversations_ = false;
-    syncingCodexConversations_ = true;
-    appendLine("[Syncing Codex conversations…]");
-    updateStatus();
-    requestCodexConversationPage();
-}
-
-void MainWindow::requestCodexConversationPage()
-{
-    QJsonArray sources{"cli", "vscode", "exec", "appServer", "subAgent", "subAgentReview",
-                       "subAgentCompact", "subAgentThreadSpawn", "subAgentOther", "unknown"};
-    QJsonObject params{{"limit", 100}, {"sortKey", "created_at"}, {"sortDirection", "desc"},
-                       {"sourceKinds", sources}, {"archived", syncingArchivedCodexConversations_}};
-    if (!syncCursor_.isEmpty()) params.insert("cursor", syncCursor_);
-    sendRequest("thread/list", params);
-}
-
-void MainWindow::handleCodexConversationPage(const QJsonObject &result)
-{
-    if (!syncingCodexConversations_) return;
-    if (!result.value("data").isArray()) {
-        appendLine("[Codex conversation sync failed: invalid thread/list response]");
-        syncingCodexConversations_ = false;
-        stagedCodexConversations_.clear();
-        updateStatus();
-        return;
-    }
-    ++syncPages_;
-    bool olderThanCached = false;
-    for (const QJsonValue &value : result.value("data").toArray()) {
-        QJsonObject thread = value.toObject();
-        limitCodexPreview(thread);
-        const QString id = thread.value("id").toString();
-        if (id.isEmpty()) continue;
-        if (!syncingArchivedCodexConversations_ && activeConversationWatermark_ > 0
-            && thread.value("createdAt").toInteger() < activeConversationWatermark_) {
-            olderThanCached = true;
-        }
-        if (!cachedCodexConversations_.contains(id)) newCodexConversationIds_.insert(id);
-        thread.insert("archived", syncingArchivedCodexConversations_);
-        stagedCodexConversations_.insert(id, thread);
-    }
-    const QString nextCursor = result.value("nextCursor").toString();
-    if (!nextCursor.isEmpty() && nextCursor == syncCursor_) {
-        appendLine("[Codex conversation sync failed: repeated pagination cursor]");
-        syncingCodexConversations_ = false;
-        stagedCodexConversations_.clear();
-        updateStatus();
-        return;
-    }
-    if (!nextCursor.isEmpty() && !(olderThanCached && !syncingArchivedCodexConversations_)) {
-        syncCursor_ = nextCursor;
-        requestCodexConversationPage();
-        return;
-    }
-    if (!syncingArchivedCodexConversations_) {
-        syncingArchivedCodexConversations_ = true;
-        syncCursor_.clear();
-        requestCodexConversationPage();
-    } else {
-        finishCodexConversationSync();
-    }
-}
-
-void MainWindow::finishCodexConversationSync()
-{
-    cachedCodexConversations_ = std::move(stagedCodexConversations_);
-    stagedCodexConversations_.clear();
-    syncingCodexConversations_ = false;
-    const bool saved = saveCodexConversationIndex();
-    appendLine(QString("[Codex conversations: %1 total, %2 new; fetched %3 pages%4]")
-                   .arg(cachedCodexConversations_.size()).arg(newCodexConversationIds_.size()).arg(syncPages_)
-                   .arg(saved ? "" : "; index not saved"));
-    if (saved) appendLine("[Index: " + codexIndexPath_ + "]");
-    refreshConversationTree();
-    updateStatus();
-}
-
 void MainWindow::sendNextClaudePrompt()
 {
     if (!claudeReady_ || claudeBusy_ || claudeQueuedPrompts_.isEmpty()) return;
@@ -1523,29 +1261,6 @@ void MainWindow::sendNextAntigravityPrompt()
     antigravityStopRequested_ = false;
     antigravityTextStarted_ = false;
     antigravity_->prompt(antigravityQueuedPrompts_.takeFirst());
-    updateStatus();
-}
-
-void MainWindow::startThread()
-{
-    if (!initialized_ || codexThreadOpening_) return;
-    codexThreadOpening_ = true;
-    appendLine("[Starting a new conversation]");
-    sendRequest("thread/start", {{"cwd", codexWorkingDirectory_}, {"serviceName", "agentdeskt"}});
-    updateStatus();
-}
-
-void MainWindow::sendNextPrompt()
-{
-    if (!initialized_ || threadId_.isEmpty() || busy_ || queuedPrompts_.isEmpty()) return;
-    const QString prompt = queuedPrompts_.takeFirst();
-    busy_ = true;
-    activeTurnId_.clear();
-    stopRequested_ = false;
-    stopSent_ = false;
-    QJsonObject params{{"threadId", threadId_},
-                       {"input", QJsonArray{QJsonObject{{"type", "text"}, {"text", prompt}}}}};
-    sendRequest("turn/start", params);
     updateStatus();
 }
 
@@ -1591,247 +1306,86 @@ void MainWindow::requestStop()
         }
         return;
     }
-    if (!busy_) {
+    if (!codex_->isResponding()) {
         appendLine("[No active response.]");
         return;
     }
-    if (stopRequested_) return;
-    stopRequested_ = true;
+    if (!codex_->canInterrupt()) return;
     appendLine("[Interrupting response]");
-    sendStopIfPossible();
-    updateStatus();
+    codex_->interrupt();
 }
 
-void MainWindow::sendStopIfPossible()
+void MainWindow::connectAgent(AgentBackend *agent)
 {
-    if (!busy_ || !stopRequested_ || stopSent_ || threadId_.isEmpty() || activeTurnId_.isEmpty()) return;
-    stopSent_ = true;
-    sendRequest("turn/interrupt", {{"threadId", threadId_}, {"turnId", activeTurnId_}});
-}
-
-qint64 MainWindow::sendRequest(const QString &method, const QJsonObject &params)
-{
-    const qint64 id = nextRequestId_++;
-    pendingRequests_.insert(id, method);
-    sendJson({{"id", id}, {"method", method}, {"params", params}});
-    return id;
-}
-
-void MainWindow::sendNotification(const QString &method, const QJsonObject &params)
-{
-    sendJson({{"method", method}, {"params", params}});
-}
-
-void MainWindow::sendJson(const QJsonObject &message)
-{
-    if (server_->state() == QProcess::NotRunning) return;
-    server_->write(QJsonDocument(message).toJson(QJsonDocument::Compact) + '\n');
-}
-
-void MainWindow::handleLine(const QByteArray &line)
-{
-    QJsonParseError error;
-    const QJsonDocument document = QJsonDocument::fromJson(line, &error);
-    if (error.error != QJsonParseError::NoError || !document.isObject()) {
-        appendLine("[Invalid server response: " + error.errorString() + "]");
-        return;
-    }
-    const QJsonObject message = document.object();
-    if (message.contains("method")) {
-        const QString method = message.value("method").toString();
-        if (message.contains("id")) {
-            handleServerRequest(method, message.value("id"), message.value("params").toObject());
-        } else {
-            handleNotification(method, message.value("params").toObject());
-        }
-    } else if (message.contains("id")) {
-        handleResponse(message);
-    }
-}
-
-void MainWindow::handleResponse(const QJsonObject &message)
-{
-    const qint64 id = message.value("id").toInteger();
-    const QString method = pendingRequests_.take(id);
-    const QJsonObject error = message.value("error").toObject();
-    if (!error.isEmpty()) {
-        appendLine("[Error in " + method + "] " + error.value("message").toString());
-        if (method == "thread/items/list" && id == codexHistoryRequest_) {
-            codexHistoryRequest_ = 0;
-            showHistory(historyEntries_, false, "Could not load this conversation: " + error.value("message").toString());
-        } else if (method == "thread/list") {
-            syncingCodexConversations_ = false;
-            stagedCodexConversations_.clear();
-        } else if (method == "thread/start" || method == "thread/resume") {
-            codexThreadOpening_ = false;
-            if (method == "thread/resume" && !pendingCodexAttachId_.isEmpty()) {
-                if (viewProvider_ == "Codex" && viewId_ == pendingCodexAttachId_) {
-                    lockNotice_ = "the Codex App Server refused to open it: " + error.value("message").toString();
-                    updateChatHeader();
-                }
-                pendingCodexAttachId_.clear();
-            }
-        } else if (method == "turn/start") {
-            busy_ = false;
-            activeTurnId_.clear();
-            stopRequested_ = false;
-            stopSent_ = false;
-            sendNextPrompt();
-        } else if (method == "turn/interrupt") {
-            stopRequested_ = false;
-            stopSent_ = false;
-        }
-        updateStatus();
-        return;
-    }
-    const QJsonObject result = message.value("result").toObject();
-    if (method == "initialize") {
-        initialized_ = true;
-        sendNotification("initialized", {});
-        if (expandedProviders_.contains("Codex")) syncCodexConversations();
-        if (pendingCodexHistory_ && !viewLive_ && viewProvider_ == "Codex") loadHistory(true);
-    } else if (method == "thread/items/list") {
-        if (id != codexHistoryRequest_) return;
-        codexHistoryRequest_ = 0;
-        // Items arrive newest first; older pages are prepended to what is already shown.
-        QList<ChatEntry> page;
-        const QJsonArray items = result.value("data").toArray();
-        for (qsizetype i = items.size() - 1; i >= 0; --i)
-            page.append(codexHistoryEntries(items.at(i).toObject().value("item").toObject()));
-        historyEntries_ = page + historyEntries_;
-        codexHistoryCursor_ = result.value("nextCursor").toString();
-        showHistory(historyEntries_, !codexHistoryCursor_.isEmpty());
-    } else if (method == "thread/list") {
-        handleCodexConversationPage(result);
-    } else if (method == "thread/start" || method == "thread/resume") {
-        codexThreadOpening_ = false;
-        threadId_ = result.value("thread").toObject().value("id").toString();
-        if (threadId_.isEmpty()) appendLine("[Server did not return a conversation ID.]");
-        else appendLine(method == "thread/start" ? "[Connected to Codex]" : "[Resumed Codex conversation: " + threadId_ + "]");
-        if (method == "thread/resume" && !pendingCodexAttachId_.isEmpty()) {
-            if (threadId_ == pendingCodexAttachId_ && viewProvider_ == "Codex" && viewId_ == threadId_) {
+    const QString name = agent->name();
+    connect(agent, &AgentBackend::message, this, &MainWindow::appendLine);
+    connect(agent, &AgentBackend::stateChanged, this, &MainWindow::updateStatus);
+    connect(agent, &AgentBackend::messageStarted, this, [this, name] { appendChatText(name, "\n" + name + ": "); });
+    connect(agent, &AgentBackend::messageDelta, this, [this, name](const QString &text) { appendChatText(name, text); });
+    connect(agent, &AgentBackend::messageFinished, this, [this, name] { appendChatText(name, "\n"); });
+    connect(agent, &AgentBackend::toolStarted, this, [this, name](const QString &tool, const QString &details) {
+        appendChatText(name, "\n[" + tool + "] " + details + '\n');
+    });
+    connect(agent, &AgentBackend::toolOutput, this, [this, name](const QString &text) { appendChatText(name, text); });
+    connect(agent, &AgentBackend::toolFinished, this, [this, name](const QString &tool, const QString &status) {
+        appendChatText(name, "\n[" + tool + ": " + status + "]\n");
+    });
+    connect(agent, &AgentBackend::turnCompleted, this, [this, name](const QString &status, const QString &details) {
+        if (status != "completed")
+            appendLine("[" + name + " response: " + status + (details.isEmpty() ? "" : ": " + details) + "]");
+    });
+    connect(agent, &AgentBackend::approvalRequested, this,
+            [this, agent](int id, const QString &title, const QString &description) {
+        const auto answer = QMessageBox::question(this, title, description + "\n\nAllow this action?",
+                                                   QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+        agent->answerApproval(id, answer == QMessageBox::Yes);
+    });
+    connect(agent, &AgentBackend::questionsRequested, this, [this, agent](int id, const QList<AgentQuestion> &questions) {
+        agent->answerQuestions(id, askQuestions(questions));
+    });
+    // A resumed conversation becomes live only if the user is still looking at the chat they attached.
+    connect(agent, &AgentBackend::conversationOpened, this, [this, name](const QString &id, bool resumed) {
+        if (resumed && !pendingAttachId_.isEmpty()) {
+            if (id == pendingAttachId_ && viewProvider_ == name && viewId_ == id) {
                 viewLive_ = true;
                 lockNotice_.clear();
                 updateChatHeader();
             }
-            pendingCodexAttachId_.clear();
-        } else if (method == "thread/start" && viewLive_ && viewProvider_ == "Codex") {
-            viewId_ = threadId_;
+            pendingAttachId_.clear();
+        } else if (!resumed && viewLive_ && viewProvider_ == name) {
+            viewId_ = id;
         }
         refreshConversationTree();
-        sendNextPrompt();
-    } else if (method == "turn/start") {
-        if (busy_) {
-            activeTurnId_ = result.value("turn").toObject().value("id").toString();
-            sendStopIfPossible();
+    });
+    connect(agent, &AgentBackend::conversationOpenFailed, this, [this, name](const QString &id, const QString &reason) {
+        if (id.isEmpty() || id != pendingAttachId_) return;
+        if (viewProvider_ == name && viewId_ == id) {
+            lockNotice_ = reason;
+            updateChatHeader();
         }
-    }
-    updateStatus();
+        pendingAttachId_.clear();
+    });
+    connect(agent, &AgentBackend::historyLoaded, this,
+            [this, name](const QString &id, const QList<ChatEntry> &entries, bool hasMore, const QString &notice) {
+        if (viewProvider_ != name || viewId_ != id) return;
+        historyEntries_ = entries;
+        showHistory(entries, hasMore, notice);
+    });
 }
 
-void MainWindow::handleNotification(const QString &method, const QJsonObject &params)
+// Asks each question in a dialog and stops at the first one the user cancels.
+QHash<QString, QString> MainWindow::askQuestions(const QList<AgentQuestion> &questions)
 {
-    const QJsonObject item = params.value("item").toObject();
-    const QString itemId = params.value("itemId").toString(item.value("id").toString());
-    if (method == "turn/started") {
-        if (busy_) {
-            activeTurnId_ = params.value("turn").toObject().value("id").toString();
-            sendStopIfPossible();
-        }
-        updateStatus();
-    } else if (method == "item/agentMessage/delta") {
-        if (!streamedMessages_.contains(itemId)) {
-            streamedMessages_.insert(itemId);
-            appendChatText("Codex", "\nCodex: ");
-        }
-        appendChatText("Codex", params.value("delta").toString());
-    } else if (method == "item/commandExecution/outputDelta") {
-        streamedCommands_.insert(itemId);
-        appendChatText("Codex", params.value("delta").toString());
-    } else if (method == "item/started" && item.value("type") == "commandExecution") {
-        appendChatText("Codex", "\n[Command] " + item.value("command").toString() + '\n');
-    } else if (method == "item/completed") {
-        const QString type = item.value("type").toString();
-        const QString completedId = item.value("id").toString();
-        if (type == "agentMessage") {
-            if (streamedMessages_.remove(completedId)) appendChatText("Codex", "\n");
-            else appendChatText("Codex", "\nCodex: " + item.value("text").toString() + '\n');
-        } else if (type == "commandExecution") {
-            if (!streamedCommands_.remove(completedId)) {
-                const QString output = item.value("aggregatedOutput").toString();
-                if (!output.isEmpty()) appendChatText("Codex", output);
-            }
-            appendChatText("Codex", QString("\n[Command: %1]\n").arg(item.value("status").toString()));
-        } else if (type == "fileChange") {
-            appendChatText("Codex", QString("[File changes: %1]\n").arg(item.value("status").toString()));
-        }
-    } else if (method == "turn/completed") {
-        const QJsonObject turn = params.value("turn").toObject();
-        const QString state = turn.value("status").toString();
-        if (state != "completed") {
-            QString details = turn.value("error").toObject().value("message").toString();
-            if (!details.isEmpty()) details.prepend(": ");
-            appendLine("[Response: " + state + details + "]");
-        }
-        busy_ = false;
-        activeTurnId_.clear();
-        stopRequested_ = false;
-        stopSent_ = false;
-        updateStatus();
-        sendNextPrompt();
-    } else if (method == "error") {
-        appendLine("[Error] " + params.value("error").toObject().value("message").toString());
-    } else if (method == "warning" || method == "configWarning") {
-        appendLine("[Warning] " + params.value("message").toString(params.value("summary").toString()));
+    QHash<QString, QString> answers;
+    for (const AgentQuestion &question : questions) {
+        bool accepted = false;
+        const QString reply = question.multiSelect || question.options.isEmpty()
+            ? QInputDialog::getText(this, question.header, question.text, QLineEdit::Normal, {}, &accepted)
+            : QInputDialog::getItem(this, question.header, question.text, question.options, 0, false, &accepted);
+        if (!accepted) break;
+        answers.insert(question.id, reply);
     }
-}
-
-void MainWindow::handleServerRequest(const QString &method, const QJsonValue &id, const QJsonObject &params)
-{
-    if (method == "item/commandExecution/requestApproval" || method == "item/fileChange/requestApproval") {
-        QString description = params.value("reason").toString();
-        if (method == "item/commandExecution/requestApproval") {
-            const QJsonObject network = params.value("networkApprovalContext").toObject();
-            if (!network.isEmpty()) {
-                description += "\nNetwork access: " + network.value("protocol").toString()
-                    + "://" + network.value("host").toString();
-            } else {
-                description += "\n" + params.value("command").toString();
-                description += "\nDirectory: " + params.value("cwd").toString();
-            }
-        } else {
-            description += "\n" + params.value("grantRoot").toString();
-        }
-        const auto answer = QMessageBox::question(this, "Approve Codex action",
-                                                   description.trimmed() + "\n\nAllow this action?",
-                                                   QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
-        const QString decision = answer == QMessageBox::Yes ? "accept" : "decline";
-        sendJson({{"id", id}, {"result", QJsonObject{{"decision", decision}}}});
-        appendLine("[Approval: " + decision + "]");
-    } else if (method == "item/tool/requestUserInput") {
-        QJsonObject answers;
-        for (const QJsonValue &value : params.value("questions").toArray()) {
-            const QJsonObject question = value.toObject();
-            const QString key = question.value("id").toString();
-            const QString title = question.value("header").toString("Codex question");
-            const QString prompt = question.value("question").toString();
-            const QJsonArray options = question.value("options").toArray();
-            bool accepted = false;
-            QString reply;
-            if (options.isEmpty()) {
-                reply = QInputDialog::getText(this, title, prompt, QLineEdit::Normal, {}, &accepted);
-            } else {
-                QStringList labels;
-                for (const QJsonValue &option : options) labels.append(option.toObject().value("label").toString());
-                reply = QInputDialog::getItem(this, title, prompt, labels, 0, false, &accepted);
-            }
-            answers.insert(key, QJsonObject{{"answers", accepted ? QJsonArray{reply} : QJsonArray{}}});
-        }
-        sendJson({{"id", id}, {"result", QJsonObject{{"answers", answers}}}});
-    } else {
-        appendLine("[Unsupported server request: " + method + "]");
-        sendJson({{"id", id}, {"error", QJsonObject{{"code", -32601}, {"message", "Unsupported request"}}}});
-    }
+    return answers;
 }
 
 void MainWindow::appendText(const QString &text)
@@ -1863,8 +1417,7 @@ void MainWindow::appendChatText(const QString &provider, const QString &text)
 void MainWindow::showLiveChat(const QString &provider, const QString &path)
 {
     ++historyGeneration_;
-    codexHistoryRequest_ = 0;
-    pendingCodexHistory_ = false;
+    codex_->cancelHistory();
     viewProvider_ = provider;
     viewId_.clear();
     viewPath_ = path;
@@ -1911,9 +1464,9 @@ void MainWindow::attachChat(QTreeWidgetItem *item)
         lockNotice_.clear();
         updateChatHeader();
         if (provider == "Codex") {
-            pendingCodexAttachId_ = id;
-            resumeCodexConversation(id, path);
-            if (!codexThreadOpening_) pendingCodexAttachId_.clear();
+            pendingAttachId_ = id;
+            if (codex_->resumeConversation(id, path)) selectProvider(index);
+            else pendingAttachId_.clear();
             return;
         }
         resumeProviderConversation(provider, id, path);
@@ -1937,7 +1490,6 @@ void MainWindow::openChat(const QString &provider, const QString &id, const QStr
     historyLimit_ = kHistoryPageSize;
     historyTotal_ = 0;
     historyEntries_.clear();
-    codexHistoryCursor_.clear();
     chatView_->setPlainText("Loading the latest messages…");
     loadEarlierButton_->setVisible(false);
     updateChatHeader();
@@ -1948,17 +1500,9 @@ void MainWindow::openChat(const QString &provider, const QString &id, const QStr
 void MainWindow::loadHistory(bool reset)
 {
     const quint64 generation = ++historyGeneration_;
-    codexHistoryRequest_ = 0;
-    pendingCodexHistory_ = false;
+    codex_->cancelHistory();
     if (viewProvider_ == "Codex") {
-        if (!initialized_) {
-            pendingCodexHistory_ = true;
-            showHistory(historyEntries_, false, "Waiting for the Codex App Server to load this conversation.");
-            return;
-        }
-        QJsonObject params{{"threadId", viewId_}, {"limit", 2 * kHistoryPageSize}, {"sortDirection", "desc"}};
-        if (!reset && !codexHistoryCursor_.isEmpty()) params.insert("cursor", codexHistoryCursor_);
-        codexHistoryRequest_ = sendRequest("thread/items/list", params);
+        codex_->loadHistory(viewId_, viewPath_, !reset);
     } else if (viewProvider_ == "Claude" || viewProvider_ == "GLM") {
         if (!reset) liveTranscript_.clear();
         if (claudePython_.isEmpty() || claudeScript_.isEmpty()) {
@@ -2073,12 +1617,8 @@ void MainWindow::updateStatus()
         else state = "Claude bridge is not running";
         stopButton_->setEnabled(claudeBusy_ && !claudeStopRequested_);
     } else {
-        if (server_->state() == QProcess::NotRunning) state = "Server: not running";
-        else if (busy_) state = "Codex is responding…";
-        else if (codexThreadOpening_) state = "Opening Codex conversation…";
-        else if (initialized_) state = "Codex ready";
-        else state = "Connecting to Codex App Server…";
-        stopButton_->setEnabled(busy_ && !stopRequested_);
+        state = codex_->statusText();
+        stopButton_->setEnabled(codex_->canInterrupt());
     }
     const QString currentDirectory = providerWorkingDirectory(currentProvider_);
     status_->setText(state + "  •  " + QDir::toNativeSeparators(currentDirectory));
@@ -2087,10 +1627,10 @@ void MainWindow::updateStatus()
                          : (index == 2 ? "Send to GLM" : (index == 3 ? "Send to Gemini" : "Send to Antigravity"))));
     sendButton_->setEnabled(viewLive_);
     // Reloading a longer tail while a live response streams would drop the partial answer.
-    const bool viewBusy = viewLive_ && (currentProvider_ == 0 ? busy_ : (currentProvider_ == 1 ? claudeBusy_
+    const bool viewBusy = viewLive_ && (currentProvider_ == 0 ? codex_->isResponding() : (currentProvider_ == 1 ? claudeBusy_
         : (currentProvider_ == 2 ? glmBusy_ : (currentProvider_ == 3 ? geminiBusy_ : antigravityBusy_))));
     loadEarlierButton_->setEnabled(!viewBusy);
     input_->setPlaceholderText(viewLive_ ? "Enter a message or help, then press Enter"
                                          : "Read-only preview. Type help, new or clear, then press Enter");
-    newChatButton_->setEnabled(!busy_ && !claudeBusy_ && !glmBusy_ && !geminiBusy_ && !antigravityBusy_);
+    newChatButton_->setEnabled(!codex_->isResponding() && !claudeBusy_ && !glmBusy_ && !geminiBusy_ && !antigravityBusy_);
 }
