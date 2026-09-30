@@ -760,12 +760,14 @@ void MainWindow::showNotificationsDialog()
     auto *voiceRow = new QHBoxLayout;
     auto *voiceChoice = new QComboBox(&dialog);
     voiceChoice->setObjectName("voiceChoice");
-    voiceChoice->addItem("Automatic", QString());
+    voiceChoice->addItem("Automatic (the first voice found)", QString());
     if (!Notifier::findPiper({}).isEmpty()) {
-        for (const QString &model : Notifier::piperModels())
-            voiceChoice->addItem("Piper: " + QFileInfo(model).completeBaseName(), model);
+        for (const QString &model : Notifier::piperModels()) {
+            voiceChoice->addItem(Notifier::voiceLabel(model), model);
+            voiceChoice->setItemData(voiceChoice->count() - 1, model, Qt::ToolTipRole);
+        }
     }
-    if (!Notifier::findEspeak().isEmpty()) voiceChoice->addItem("espeak-ng", QStringLiteral("espeak-ng"));
+    if (!Notifier::findEspeak().isEmpty()) voiceChoice->addItem("English — espeak-ng", QStringLiteral("espeak-ng"));
     const QString chosenVoice = settings.voiceEngine == "espeak-ng" ? QStringLiteral("espeak-ng") : settings.piperModel;
     voiceChoice->setCurrentIndex(qMax(0, voiceChoice->findData(chosenVoice)));
     auto *tryVoice = new QPushButton("Try", &dialog);

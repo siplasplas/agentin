@@ -4,6 +4,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QLocale>
 #include <QProcess>
 #include <QStandardPaths>
 #include <QStyle>
@@ -130,6 +131,18 @@ QStringList Notifier::piperModels()
         }
     }
     return models;
+}
+
+// Piper voices are named <language>_<region>-<speaker>-<quality>.
+QString Notifier::voiceLabel(const QString &modelPath)
+{
+    const QString name = QFileInfo(modelPath).completeBaseName();
+    const QStringList parts = name.split('-');
+    const QLocale locale(parts.value(0));
+    if (parts.size() < 2 || locale.language() == QLocale::C) return "Piper: " + name;
+    QStringList details{"Piper"};
+    if (parts.size() > 2) details.append(parts.mid(2).join('-'));
+    return QLocale::languageToString(locale.language()) + " — " + parts.at(1) + " (" + details.join(", ") + ")";
 }
 
 QString Notifier::findEspeak()

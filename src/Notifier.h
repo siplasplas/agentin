@@ -63,6 +63,8 @@ public:
     static QString findPiperModel(const Settings &settings);
     // All installed Piper voices, for choosing one.
     static QStringList piperModels();
+    // A readable name for a Piper voice, such as "Polish — gosia (Piper, medium)" for pl_PL-gosia-medium.
+    static QString voiceLabel(const QString &modelPath);
     static QString findEspeak();
     // "piper" or "espeak-ng" when the settings can speak, otherwise an empty string.
     static QString voiceEngine(const Settings &settings);
