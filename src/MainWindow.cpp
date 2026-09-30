@@ -11,6 +11,7 @@
 
 #include <QCheckBox>
 #include <QButtonGroup>
+#include <QCloseEvent>
 #include <QComboBox>
 #include <QFrame>
 #include <QRadioButton>
@@ -319,6 +320,13 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
         if (QWidget *page = tabs_->currentWidget()) tabs_->requestCloseTab(page);
     });
     newChatButton_->setToolTip("New chat (Ctrl+T)");
+    connect(codex_, &CodexConnection::connected, this, [this] {
+        const QList<QPointer<QWidget>> pages = continueWhenConnected_;
+        continueWhenConnected_.clear();
+        for (const QPointer<QWidget> &page : pages) {
+            if (ChatTab *tab = page ? chatTab(page) : nullptr) tab->continueChat();
+        }
+    });
     for (AgentProvider *listed : providers_) {
         connect(listed, &AgentProvider::message, this, &MainWindow::appendLine);
         connect(listed, &AgentProvider::stateChanged, this, &MainWindow::updateStatus);
@@ -356,6 +364,77 @@ MainWindow::~MainWindow()
         tabs_->removeTab(0);
         delete page;
     }
+}
+
+void MainWindow::closeEvent(QCloseEvent *event)
+{
+    if (sessionEnabled_) saveSession();
+    QMainWindow::closeEvent(event);
+}
+
+// open-tabs.json keeps the tabs except the preview tab, with their model, effort and read-only mode.
+void MainWindow::saveSession()
+{
+    QJsonArray saved;
+    int current = -1;
+    for (int i = 0; i < tabs_->count(); ++i) {
+        QWidget *page = tabs_->widget(i);
+        const ChatTab *tab = chatTab(page);
+        if (!tab || page == tabs_->previewTab()) continue;
+        if (page == tabs_->currentWidget()) current = saved.size();
+        const AgentBackend *agent = tab->agent();
+        saved.append(QJsonObject{{"provider", tab->provider()->name()}, {"id", tab->conversationId()},
+                                 {"directory", tab->workingDirectory()}, {"title", tab->title()},
+                                 {"live", tab->isLive()}, {"model", agent->model()}, {"effort", agent->effort()},
+                                 {"readOnly", agent->isReadOnly()}});
+    }
+    if (!QDir().mkpath(dataDirectory_)) return;
+    QSaveFile file(QDir(dataDirectory_).filePath("open-tabs.json"));
+    if (!file.open(QIODevice::WriteOnly)
+        || file.write(QJsonDocument(QJsonObject{{"version", 1}, {"current", current}, {"tabs", saved}})
+                          .toJson(QJsonDocument::Indented)) < 0
+        || !file.commit()) {
+        appendLine("[Could not save the open tabs: " + file.errorString() + "]");
+    }
+}
+
+void MainWindow::restoreSession(bool keepStartChat)
+{
+    sessionEnabled_ = true;
+    QFile file(QDir(dataDirectory_).filePath("open-tabs.json"));
+    if (!file.open(QIODevice::ReadOnly)) return;
+    const QJsonObject session = QJsonDocument::fromJson(file.readAll()).object();
+    const QJsonArray saved = session.value("tabs").toArray();
+    if (saved.isEmpty()) return;
+    QWidget *startChat = tabs_->widget(0);
+    QWidget *current = nullptr;
+    for (int i = 0; i < saved.size(); ++i) {
+        const QJsonObject entry = saved.at(i).toObject();
+        AgentProvider *selected = provider(entry.value("provider").toString());
+        const QString directory = entry.value("directory").toString();
+        if (!selected || !QFileInfo(directory).isDir()) continue;
+        QWidget *page = addChatTab(selected, directory);
+        ChatTab *tab = chatTab(page);
+        AgentBackend *agent = tab->agent();
+        if (!entry.value("model").toString().isEmpty() || !entry.value("effort").toString().isEmpty())
+            agent->setModel(entry.value("model").toString(), entry.value("effort").toString());
+        if (entry.value("readOnly").toBool() && agent->supportsReadOnly()) agent->setReadOnly(true);
+        const QString id = entry.value("id").toString();
+        if (id.isEmpty()) {
+            tab->startDraft();
+        } else {
+            tab->showPreview(selected, id, directory, entry.value("title").toString());
+            if (entry.value("live").toBool()) {
+                // Codex resumes only once its App Server is connected.
+                if (selected == codex_ && !codex_->isConnected()) continueWhenConnected_.append(page);
+                else tab->continueChat();
+            }
+        }
+        if (i == session.value("current").toInt(-1)) current = page;
+    }
+    if (!keepStartChat && startChat && tabs_->count() > 1) tabs_->requestCloseTab(startChat);
+    if (current) tabs_->setCurrentWidget(current);
+    appendLine(QString("[Reopened %1 tabs from the last session]").arg(saved.size()));
 }
 
 void MainWindow::submitCommand()

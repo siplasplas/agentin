@@ -112,6 +112,12 @@ tab and has one working directory; files under that directory are available
 subject to the selected agent's permissions. At startup one Codex tab is ready
 in the working directory, and its conversation starts with the first message.
 
+When the window closes, the open tabs are saved in `open-tabs.json` in the
+application data directory, with their model, effort and read-only mode, and
+the next start reopens them and continues the chats that were live; Codex chats
+continue once the App Server is connected. The preview tab is not saved. When a
+directory is given with `-C`, its new chat opens next to the reopened tabs.
+
 Chats in different tabs run independently, also several chats with the same
 agent. All Codex chats share one App Server process. A tab whose agent is
 responding shows a busy marker, and a background tab that receives output is

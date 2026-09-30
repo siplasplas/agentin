@@ -2,6 +2,7 @@
 
 #include <QList>
 #include <QMainWindow>
+#include <QPointer>
 #include <QSet>
 #include <QStringList>
 
@@ -38,7 +39,15 @@ public:
                const QString &geminiDataDirectory = {});
     ~MainWindow() override;
 
+    // Reopens the tabs saved when the window was last closed, and saves them on close from now on.
+    // The chat that opens at start stays when keepStartChat is true, otherwise it is replaced.
+    void restoreSession(bool keepStartChat);
+
+protected:
+    void closeEvent(QCloseEvent *event) override;
+
 private:
+    void saveSession();
     void submitCommand();
     void showHelp();
     void requestStop();
@@ -112,4 +121,7 @@ private:
     QStringList recentDirectories_;
     // Ctrl+Z in the message field can bring back the message just sent.
     bool undoAfterSend_ = true;
+    bool sessionEnabled_ = false;
+    // Restored Codex chats that continue once the App Server is connected.
+    QList<QPointer<QWidget>> continueWhenConnected_;
 };

@@ -43,6 +43,8 @@ int main(int argc, char *argv[])
         : QDir(QCoreApplication::applicationDirPath()).filePath("claude_bridge.py");
     MainWindow window(codexProgram, QDir(parser.value(cwdOption)).absolutePath(), claudePython, claudeScript,
                       parser.value(geminiOption), nullptr, {}, parser.value(antigravityOption));
+    // A directory given with -C keeps its new chat next to the reopened tabs.
+    window.restoreSession(parser.isSet(cwdOption));
     window.show();
     return app.exec();
 }
