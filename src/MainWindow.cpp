@@ -120,9 +120,14 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     auto *layout = new QVBoxLayout(central);
     newChatButton_ = new QPushButton("New chat…", central);
     newChatButton_->setObjectName("newChatButton");
+    // Long status texts are cut off instead of widening the window; the tooltip keeps the full text.
     status_ = new QLabel(central);
+    status_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+    status_->setMinimumWidth(0);
     usage_ = new QLabel(central);
     usage_->setObjectName("usageLabel");
+    usage_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+    usage_->setMinimumWidth(0);
     tabs_ = new MruTabWidget(central);
     tabs_->setObjectName("chatTabs");
     tabs_->setTabsClosable(true);
@@ -134,6 +139,10 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     effortInput_ = new QComboBox(this);
     effortInput_->setObjectName("effortSelect");
     effortInput_->setToolTip("Reasoning effort for the next messages in this chat");
+    for (QComboBox *combo : {modelInput_, effortInput_}) {
+        combo->setSizeAdjustPolicy(QComboBox::AdjustToMinimumContentsLengthWithIcon);
+        combo->setMinimumContentsLength(6);
+    }
     input_ = new MessageInput(central);
     input_->setObjectName("commandInput");
     enterIndicator_ = new QLabel(central);
@@ -150,7 +159,8 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     panelLayout->setContentsMargins(0, 0, 0, 0);
     chatHeader_ = new QLabel(chatPanel_);
     chatHeader_->setObjectName("chatHeader");
-    chatHeader_->setWordWrap(true);
+    chatHeader_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+    chatHeader_->setMinimumWidth(0);
     loadEarlierButton_ = new QPushButton("Show earlier messages", chatPanel_);
     loadEarlierButton_->setObjectName("loadEarlierButton");
     loadEarlierButton_->setVisible(false);
@@ -193,9 +203,12 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     conversationTree_ = new QTreeWidget(chatSplitter);
     conversationTree_->setObjectName("conversationTree");
     conversationTree_->setHeaderHidden(true);
-    conversationTree_->setMinimumWidth(180);
+    conversationTree_->setMinimumWidth(0);
     chatSplitter->addWidget(conversationTree_);
     chatSplitter->addWidget(central);
+    // The tree can be dragged down to nothing and widened to read long directories; the chat stays.
+    chatSplitter->setCollapsible(0, true);
+    chatSplitter->setCollapsible(1, false);
     chatSplitter->setStretchFactor(1, 1);
     chatSplitter->setSizes({260, 590});
     auto *logSplitter = new QSplitter(Qt::Vertical, this);
@@ -751,6 +764,7 @@ void MainWindow::updateStatus()
     const ChatTab *tab = currentTab();
     if (!tab) {
         status_->setText("No chat open");
+        status_->setToolTip({});
         chatHeader_->clear();
         loadEarlierButton_->setVisible(false);
         sendButton_->setText("Send");
@@ -763,8 +777,10 @@ void MainWindow::updateStatus()
     }
     const AgentBackend *agent = tab->agent();
     status_->setText(agent->statusText() + "  •  " + QDir::toNativeSeparators(tab->workingDirectory()));
+    status_->setToolTip(status_->text());
     chatHeader_->setText(tab->headerText());
-    chatHeader_->setToolTip(tab->conversationId());
+    chatHeader_->setToolTip(tab->conversationId().isEmpty() ? tab->headerText()
+                                                             : tab->headerText() + "\n" + tab->conversationId());
     loadEarlierButton_->setVisible(tab->hasMoreHistory());
     // Reloading a longer tail while a live response streams would drop the partial answer.
     loadEarlierButton_->setEnabled(!(tab->isLive() && agent->isResponding()));
