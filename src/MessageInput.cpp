@@ -17,6 +17,7 @@ MessageInput::MessageInput(QWidget *parent)
         if (document()->isEmpty()) typed_ = false;
         if (!toPlainText().contains('\n')) typedLineBreak_ = false;
         fitHeight();
+        updateEnterAction();
     });
     fitHeight();
 }
@@ -62,6 +63,27 @@ void MessageInput::keyPressEvent(QKeyEvent *event)
     const int revision = document()->revision();
     QPlainTextEdit::keyPressEvent(event);
     if (document()->revision() != revision && !event->matches(QKeySequence::Paste)) typed_ = true;
+    updateEnterAction();
+}
+
+void MessageInput::setEnterPolicy(EnterPolicy policy)
+{
+    enterPolicy_ = policy;
+    updateEnterAction();
+}
+
+void MessageInput::setShortMessageLength(int length)
+{
+    shortMessageLength_ = length;
+    updateEnterAction();
+}
+
+void MessageInput::updateEnterAction()
+{
+    const bool sends = enterSends();
+    if (sends == enterSendsNow_) return;
+    enterSendsNow_ = sends;
+    emit enterActionChanged(sends);
 }
 
 bool MessageInput::enterSends() const
@@ -76,6 +98,7 @@ void MessageInput::insertLineBreak()
     insertPlainText("\n");
     typed_ = true;
     typedLineBreak_ = true;
+    updateEnterAction();
 }
 
 void MessageInput::submit()
@@ -112,6 +135,7 @@ void MessageInput::recall(int step)
     position_ = target;
     setPlainText(position_ == history_.size() ? draft_ : history_.at(position_));
     typed_ = false;
+    updateEnterAction();
     moveCursor(step < 0 ? QTextCursor::End : QTextCursor::Start);
 }
 

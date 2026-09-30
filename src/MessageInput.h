@@ -24,16 +24,19 @@ public:
     explicit MessageInput(QWidget *parent = nullptr);
 
     EnterPolicy enterPolicy() const { return enterPolicy_; }
-    void setEnterPolicy(EnterPolicy policy) { enterPolicy_ = policy; }
+    void setEnterPolicy(EnterPolicy policy);
     // 0 means that Enter never sends typed text in the Smart policy.
     int shortMessageLength() const { return shortMessageLength_; }
-    void setShortMessageLength(int length) { shortMessageLength_ = length; }
+    void setShortMessageLength(int length);
+    // What Enter does for the current text; Shift+Enter and Ctrl+Enter do the other.
+    bool enterSends() const;
 
     // Earlier messages of the conversation, oldest first. Resets browsing.
     void setHistory(const QStringList &messages);
 
 signals:
     void submitted();
+    void enterActionChanged(bool sends);
 
 protected:
     void keyPressEvent(QKeyEvent *event) override;
@@ -42,7 +45,7 @@ private:
     bool onFirstLine() const;
     bool onLastLine() const;
     void recall(int step);
-    bool enterSends() const;
+    void updateEnterAction();
     void insertLineBreak();
     void submit();
     void fitHeight();
@@ -56,4 +59,5 @@ private:
     bool typed_ = false;
     bool typedLineBreak_ = false;
     int shortMessageLength_ = 60;
+    bool enterSendsNow_ = true;
 };

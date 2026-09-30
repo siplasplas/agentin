@@ -59,6 +59,7 @@ private:
     void updateStatus();
     void updateModelControls();
     void updateUsage();
+    void showEnterAction(bool sends);
     void chooseModel();
 
     QString workingDirectory_;
@@ -83,6 +84,7 @@ private:
     // What the model controls last showed; rebuilding them would close an open drop-down list.
     QString modelControlsState_;
     MessageInput *input_;
+    QLabel *enterIndicator_;
     QPushButton *sendButton_;
     QPushButton *stopButton_;
     QPushButton *newChatButton_;

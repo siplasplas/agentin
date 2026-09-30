@@ -22,6 +22,7 @@
 #include <QLineEdit>
 #include <QMenuBar>
 #include <QMessageBox>
+#include <QPainter>
 #include <QPlainTextDocumentLayout>
 #include <QPlainTextEdit>
 #include <QProcess>
@@ -127,14 +128,16 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     tabs_->setTabsClosable(true);
     tabs_->setMovable(true);
     tabs_->setUsesScrollButtons(true);
-    modelInput_ = new QComboBox(central);
+    modelInput_ = new QComboBox(this);
     modelInput_->setObjectName("modelSelect");
     modelInput_->setToolTip("Model for the next messages in this chat");
-    effortInput_ = new QComboBox(central);
+    effortInput_ = new QComboBox(this);
     effortInput_->setObjectName("effortSelect");
     effortInput_->setToolTip("Reasoning effort for the next messages in this chat");
     input_ = new MessageInput(central);
     input_->setObjectName("commandInput");
+    enterIndicator_ = new QLabel(central);
+    enterIndicator_->setObjectName("enterIndicator");
     sendButton_ = new QPushButton("Send", central);
     sendButton_->setObjectName("sendButton");
     stopButton_ = new QPushButton("Stop", central);
@@ -159,7 +162,12 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     emptyDocument_ = new QTextDocument(chatView_);
     emptyDocument_->setDocumentLayout(new QPlainTextDocumentLayout(emptyDocument_));
     chatView_->setDocument(emptyDocument_);
-    panelLayout->addWidget(chatHeader_);
+    // The model and effort belong to the chat, so they sit in its header.
+    auto *headerRow = new QHBoxLayout;
+    headerRow->addWidget(chatHeader_, 1);
+    headerRow->addWidget(modelInput_);
+    headerRow->addWidget(effortInput_);
+    panelLayout->addLayout(headerRow);
     panelLayout->addWidget(loadEarlierButton_);
     panelLayout->addWidget(chatView_, 1);
 
@@ -170,9 +178,8 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     log_->setPlaceholderText("Application messages will appear here.");
 
     auto *inputRow = new QHBoxLayout;
-    inputRow->addWidget(modelInput_);
-    inputRow->addWidget(effortInput_);
     inputRow->addWidget(input_, 1);
+    inputRow->addWidget(enterIndicator_);
     inputRow->addWidget(sendButton_);
     inputRow->addWidget(stopButton_);
     auto *statusRow = new QHBoxLayout;
@@ -245,6 +252,7 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     connect(modelInput_, QOverload<int>::of(&QComboBox::activated), this, &MainWindow::chooseModel);
     connect(effortInput_, QOverload<int>::of(&QComboBox::activated), this, &MainWindow::chooseModel);
     connect(input_, &MessageInput::submitted, this, &MainWindow::submitCommand);
+    connect(input_, &MessageInput::enterActionChanged, this, &MainWindow::showEnterAction);
     connect(sendButton_, &QPushButton::clicked, this, &MainWindow::submitCommand);
     connect(stopButton_, &QPushButton::clicked, this, &MainWindow::requestStop);
     connect(newChatButton_, &QPushButton::clicked, this, &MainWindow::showNewConversationDialog);
@@ -260,6 +268,7 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     appendLine("Type help to see the available commands.\n");
     for (AgentProvider *listed : providers_) listed->loadConversations();
     loadSettings();
+    showEnterAction(input_->enterSends());
     loadRecentDirectories();
     refreshConversationTree();
     chatTab(addChatTab(codex_, workingDirectory_))->startDraft();
@@ -371,16 +380,15 @@ AgentProvider *MainWindow::provider(const QString &name) const
 void MainWindow::loadSettings()
 {
     QFile file(QDir(dataDirectory_).filePath("settings.json"));
-    const QJsonObject agents = file.open(QIODevice::ReadOnly)
-        ? QJsonDocument::fromJson(file.readAll()).object().value("agents").toObject() : QJsonObject();
+    const QJsonObject settings = file.open(QIODevice::ReadOnly) ? QJsonDocument::fromJson(file.readAll()).object()
+                                                                : QJsonObject();
+    const QJsonObject agents = settings.value("agents").toObject();
     for (AgentProvider *listed : providers_) {
         const QJsonObject options = agents.value(listed->name()).toObject();
         listed->setDefaults(options.value("model").toString(), options.value("effort").toString("medium"));
     }
-    file.seek(0);
-    const QString enterKey = QJsonDocument::fromJson(file.readAll()).object().value("enterKey").toString();
-    file.seek(0);
-    input_->setShortMessageLength(QJsonDocument::fromJson(file.readAll()).object().value("enterSendsUpTo").toInt(60));
+    const QString enterKey = settings.value("enterKey").toString();
+    input_->setShortMessageLength(settings.value("enterSendsUpTo").toInt(60));
     input_->setEnterPolicy(enterKey == "send" ? MessageInput::EnterPolicy::Send
                            : (enterKey == "newline" ? MessageInput::EnterPolicy::NewLine
                                                     : MessageInput::EnterPolicy::Smart));
@@ -767,6 +775,32 @@ void MainWindow::updateStatus()
                                              : "Read-only preview. Type help, new or clear, then press Enter");
     updateModelControls();
     updateUsage();
+}
+
+// A colored badge next to Send tells what Enter does now; the tooltip names the key for the other action.
+void MainWindow::showEnterAction(bool sends)
+{
+    const int size = fontMetrics().height() + 8;
+    const qreal ratio = devicePixelRatioF();
+    QPixmap badge(QSize(size, size) * ratio);
+    badge.setDevicePixelRatio(ratio);
+    badge.fill(Qt::transparent);
+    QPainter painter(&badge);
+    painter.setRenderHint(QPainter::Antialiasing);
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(sends ? QColor(0x2e, 0x7d, 0x32) : QColor(0x54, 0x6e, 0x7a));
+    painter.drawRoundedRect(QRectF(0, 0, size, size), 4, 4);
+    painter.setPen(Qt::white);
+    QFont font = painter.font();
+    font.setBold(true);
+    font.setPixelSize(size * 2 / 3);
+    painter.setFont(font);
+    painter.drawText(QRectF(0, 0, size, size), Qt::AlignCenter, sends ? QString(QChar(0x27A4)) : QString(QChar(0x21B5)));
+    painter.end();
+    enterIndicator_->setPixmap(badge);
+    enterIndicator_->setToolTip(sends ? "Enter sends this message; Shift+Enter starts a new line"
+                                      : "Enter starts a new line; Ctrl+Enter sends this message");
+    enterIndicator_->setAccessibleName(sends ? "Enter sends" : "Enter starts a new line");
 }
 
 // Shows how much of each usage limit window is left for the current tab's agent.

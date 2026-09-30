@@ -119,7 +119,7 @@ marked until you switch to it. Closing a tab while its agent is responding asks
 first and then stops the response. Ctrl+Tab switches tabs in most recently used
 order.
 
-In a Codex tab, choose the model and reasoning effort next to the message field.
+In a Codex tab, choose the model and reasoning effort in the chat header.
 The lists come from the App Server (`model/list`); each model offers only the
 efforts it supports, and hovering shows their descriptions. A new choice applies
 from the next message on and stays with that conversation. When a saved
@@ -199,7 +199,9 @@ Enter keeps adding lines. A recalled message or pasted text is sent with Enter
 as long as you do not change it. **Settings → Options…** sets the length of a
 short message (0 never sends typed text with Enter) or makes Enter always send
 or always start a new line; the choices are saved as `enterKey` and
-`enterSendsUpTo` in `settings.json`.
+`enterSendsUpTo` in `settings.json`. A badge next to **Send** shows what Enter
+does now: a green arrow when it sends and a gray return sign when it starts a new
+line; its tooltip names the key for the other action.
 
 Up and Down move between lines and, on the first or last line, recall the
 previous or next message you wrote in the current tab's conversation; Page Up
