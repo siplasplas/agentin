@@ -19,16 +19,11 @@ public:
     ~CodexAgent() override;
 
     QString name() const override { return "Codex"; }
-    QString program() const override;
     QString workingDirectory() const override { return workingDirectory_; }
     QString sessionId() const override { return threadId_; }
     QString statusText() const override;
     bool isResponding() const override { return busy_; }
     bool canInterrupt() const override { return busy_ && !stopRequested_; }
-    AgentHelp help() const override;
-    void loadConversations() override;
-    void refreshConversations() override;
-    QList<QJsonObject> conversations() const override;
     bool newConversation(const QString &workingDirectory) override;
     bool resumeConversation(const QString &id, const QString &workingDirectory) override;
     bool prompt(const QString &text) override;

@@ -4,31 +4,56 @@
 #include "ConversationIndex.h"
 
 #include <QJsonObject>
+#include <QPointer>
 
 class QProcess;
 
-// Gemini backend that runs one headless `gemini --output-format stream-json` process per turn.
-class GeminiAgent : public AgentBackend
+// Gemini CLI. The provider reads the CLI's saved sessions and keeps the conversation index; each chat
+// runs one headless `gemini --output-format stream-json` process per turn.
+class GeminiProvider : public AgentProvider
 {
     Q_OBJECT
 public:
-    GeminiAgent(const QString &program, const QString &workingDirectory, const QString &dataDirectory,
-                const QString &indexPath, QObject *parent = nullptr);
-    ~GeminiAgent() override;
+    GeminiProvider(const QString &program, const QString &dataDirectory, const QString &indexPath,
+                   QObject *parent = nullptr);
 
     QString name() const override { return "Gemini"; }
-    QString program() const override { return program_; }
-    QString workingDirectory() const override { return workingDirectory_; }
-    QString sessionId() const override { return sessionId_; }
-    QString statusText() const override;
-    bool isResponding() const override { return busy_; }
-    bool canInterrupt() const override { return busy_ && !stopRequested_; }
     AgentHelp help() const override;
     QString externalLock(const QString &id) const override;
     void loadConversations() override;
     // Lists sessions saved by Gemini CLI under its data directory across all projects.
     void refreshConversations() override;
     QList<QJsonObject> conversations() const override { return index_.treeEntries(); }
+    AgentBackend *createChat(const QString &workingDirectory, QObject *parent) override;
+
+    QString program() const { return program_; }
+    QString sessionFile(const QString &id);
+    void rememberConversation(const QString &id, const QString &workingDirectory, const QString &firstPrompt);
+
+private:
+    QList<QJsonObject> discoverSessions();
+    void reportIndexError(const QString &error);
+
+    QString program_;
+    QString dataDirectory_;
+    ConversationIndex index_;
+    QHash<QString, QString> sessionFiles_;
+    bool executableChecked_ = false;
+};
+
+class GeminiAgent : public AgentBackend
+{
+    Q_OBJECT
+public:
+    GeminiAgent(GeminiProvider *provider, const QString &workingDirectory, QObject *parent = nullptr);
+    ~GeminiAgent() override;
+
+    QString name() const override { return "Gemini"; }
+    QString workingDirectory() const override { return workingDirectory_; }
+    QString sessionId() const override { return sessionId_; }
+    QString statusText() const override;
+    bool isResponding() const override { return busy_; }
+    bool canInterrupt() const override { return busy_ && !stopRequested_; }
     bool newConversation(const QString &workingDirectory) override;
     bool resumeConversation(const QString &id, const QString &workingDirectory) override;
     bool prompt(const QString &text) override;
@@ -39,26 +64,21 @@ public:
     void answerQuestions(int, const QHash<QString, QString> &) override {}
 
 private:
-    QList<QJsonObject> discoverSessions();
-    void reportIndexError(const QString &error);
     bool isRunning() const;
     void sendNextPrompt();
     void handleLine(const QByteArray &line);
     void finish(int code);
 
+    QPointer<GeminiProvider> provider_;
     QString program_;
     QString workingDirectory_;
-    QString dataDirectory_;
     QProcess *process_;
     QByteArray buffer_;
     QString sessionId_;
     QString firstPrompt_;
-    ConversationIndex index_;
     QString errorDetails_;
     QStringList queuedPrompts_;
-    QHash<QString, QString> sessionFiles_;
     HistoryPages history_;
-    bool executableChecked_ = false;
     bool busy_ = false;
     bool stopRequested_ = false;
     bool textStarted_ = false;

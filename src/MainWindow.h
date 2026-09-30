@@ -1,22 +1,22 @@
 #pragma once
 
-#include "AgentBackend.h"
-
-#include <QHash>
 #include <QList>
 #include <QMainWindow>
 #include <QSet>
 #include <QStringList>
 
+class AgentProvider;
+class AntigravityProvider;
+class ChatTab;
+class ClaudeProvider;
+class CodexConnection;
+class GeminiProvider;
+class MruTabWidget;
 class QLabel;
 class QLineEdit;
 class QPlainTextEdit;
 class QPushButton;
-class AntigravityAgent;
-class ClaudeAgent;
-class CodexAgent;
-class CodexConnection;
-class GeminiAgent;
+class QTextDocument;
 class QTreeWidget;
 class QTreeWidgetItem;
 
@@ -35,46 +35,41 @@ public:
 private:
     void submitCommand();
     void showHelp();
-    void connectAgent(AgentBackend *agent);
-    QHash<QString, QString> askQuestions(const QList<AgentQuestion> &questions);
-    AgentBackend *agent(int index) const { return agents_.value(index); }
-    AgentBackend *currentAgent() const { return agent(currentProvider_); }
+    void requestStop();
+    AgentProvider *provider(const QString &name) const;
     void loadRecentDirectories();
     void saveRecentDirectories();
     void rememberRecentDirectory(const QString &path);
-    void newProviderConversation(int providerIndex, const QString &path);
     void showNewConversationDialog();
+    void newConversation(AgentProvider *provider, const QString &path);
     void refreshConversationTree();
-    QString providerName(int index) const;
-    int providerIndex(const QString &name) const;
-    void selectProvider(int index);
-    void requestStop();
+    void openConversation(QTreeWidgetItem *item, bool continueChat);
+    QWidget *addChatTab(AgentProvider *provider, const QString &workingDirectory);
+    ChatTab *chatTab(QWidget *page) const;
+    ChatTab *currentTab() const;
+    void showCurrentTab();
+    void updateTab(QWidget *page);
     void appendText(const QString &text);
     void appendLine(const QString &text);
-    void appendChatText(const QString &provider, const QString &text);
-    void showChatPreview(QTreeWidgetItem *item);
-    void attachChat(QTreeWidgetItem *item);
-    void openChat(const QString &provider, const QString &id, const QString &path, const QString &title);
-    void showLiveChat(const QString &provider, const QString &path);
-    void loadHistory(bool reset);
-    void showHistory(const QList<ChatEntry> &entries, bool hasMore, const QString &notice = {});
-    void updateChatHeader();
     void updateStatus();
 
     QString workingDirectory_;
     QString dataDirectory_;
-    CodexConnection *codexConnection_;
-    CodexAgent *codex_;
-    ClaudeAgent *claude_;
-    ClaudeAgent *glm_;
-    GeminiAgent *gemini_;
-    AntigravityAgent *antigravity_;
-    // Provider order in the tree and the New chat dialog; providerName() and providerIndex() follow it.
-    QList<AgentBackend *> agents_;
-    QPlainTextEdit *chatView_;
-    QPlainTextEdit *log_;
+    CodexConnection *codex_;
+    ClaudeProvider *claude_;
+    ClaudeProvider *glm_;
+    GeminiProvider *gemini_;
+    AntigravityProvider *antigravity_;
+    // Provider order in the tree and the New chat dialog.
+    QList<AgentProvider *> providers_;
+    MruTabWidget *tabs_;
+    // One chat view shared by all tabs; it moves into the current tab's page and shows its document.
+    QWidget *chatPanel_;
     QLabel *chatHeader_;
     QPushButton *loadEarlierButton_;
+    QPlainTextEdit *chatView_;
+    QTextDocument *emptyDocument_;
+    QPlainTextEdit *log_;
     QLineEdit *input_;
     QPushButton *sendButton_;
     QPushButton *stopButton_;
@@ -82,14 +77,5 @@ private:
     QLabel *status_;
     QTreeWidget *conversationTree_;
     QSet<QString> expandedProviders_;
-    int currentProvider_ = 0;
-    QString viewProvider_;
-    QString viewId_;
-    QString viewPath_;
-    QString viewTitle_;
-    QString liveTranscript_;
     QStringList recentDirectories_;
-    QString lockNotice_;
-    QString pendingAttachId_;
-    bool viewLive_ = false;
 };

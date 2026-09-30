@@ -1,5 +1,7 @@
 #pragma once
 
+#include "AgentBackend.h"
+
 #include <QHash>
 #include <QJsonObject>
 #include <QJsonValue>
@@ -16,7 +18,7 @@ class QProcess;
 // One `codex app-server --stdio` process shared by all Codex chats. It sends requests, routes
 // notifications and server requests to the chat that owns their threadId, and keeps the thread
 // list with its local index.
-class CodexConnection : public QObject
+class CodexConnection : public AgentProvider
 {
     Q_OBJECT
 
@@ -28,7 +30,13 @@ public:
                     QObject *parent = nullptr);
     ~CodexConnection() override;
 
-    QString program() const { return program_; }
+    QString name() const override { return "Codex"; }
+    AgentHelp help() const override;
+    void loadConversations() override;
+    void refreshConversations() override;
+    QList<QJsonObject> conversations() const override;
+    AgentBackend *createChat(const QString &workingDirectory, QObject *parent) override;
+
     void start();
     bool isRunning() const;
     bool isConnected() const { return initialized_; }
@@ -43,16 +51,9 @@ public:
     void registerThread(const QString &threadId, CodexAgent *chat, const QString &workingDirectory);
     void unregisterThread(const QString &threadId);
 
-    void loadConversations();
-    void refreshConversations();
-    QList<QJsonObject> conversations() const;
-
 signals:
-    void message(const QString &text);
-    void stateChanged();
     void connected();
     void disconnected();
-    void conversationsChanged();
 
 private:
     struct PendingRequest

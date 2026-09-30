@@ -8,9 +8,9 @@ Agent SDK. Gemini and Antigravity run through their respective CLIs in headless 
 
 ## Build and run
 
-Requires Qt 6 Widgets, CMake, a C++17 compiler, the `qt-extra` library
-(installed so that `find_package(qt-extra)` finds it; it provides the directory
-chooser), and an installed `codex` CLI for Codex. Claude requires Python 3, `claude-agent-sdk`, and a configured API
+Requires Qt 6 Widgets, CMake, a C++17 compiler, the `qt-extra` library version 2
+(installed so that `find_package(qt-extra 2)` finds it; it provides the chat tabs
+and the directory chooser), and an installed `codex` CLI for Codex. Claude requires Python 3, `claude-agent-sdk`, and a configured API
 key. GLM uses the same Python SDK with a Z.AI API key. Gemini requires an
 installed and authenticated Gemini CLI. Antigravity requires an installed and
 authenticated `agy` CLI. The optional test also requires Qt 6
@@ -107,20 +107,30 @@ Use the **New chat…** button, **Conversations → New conversation in
 directory…**, or type `new` to start a chat. In the dialog, choose the agent,
 then enter a directory path or choose one with **Browse…**, which also lists
 recently used directories. The **Create chat**
-button is available only when that directory exists. Each chat has one working
-directory, and files under that directory are available subject to the
-selected agent's permissions.
+button is available only when that directory exists. Each chat opens in its own
+tab and has one working directory; files under that directory are available
+subject to the selected agent's permissions. At startup one Codex tab is ready
+in the working directory, and its conversation starts with the first message.
+
+Chats in different tabs run independently, also several chats with the same
+agent. All Codex chats share one App Server process. A tab whose agent is
+responding shows a busy marker, and a background tab that receives output is
+marked until you switch to it. Closing a tab while its agent is responding asks
+first and then stops the response. Ctrl+Tab switches tabs in most recently used
+order.
 
 Select a chat in the conversation tree to show a read-only preview of its
-latest messages. Only the last 20 entries are loaded at first; use **Show
+latest messages in the preview tab, whose title is shown in italics. Selecting
+another chat replaces the preview; a chat that is already open in a tab is shown
+there instead. Only the last 20 entries are loaded at first; use **Show
 earlier messages** to load older ones. Codex history is paged through the App
 Server (`thread/items/list`), Claude and GLM history is read through the Claude
 Agent SDK, and Gemini history is read from the saved CLI session file.
 Antigravity does not expose its history, so no preview is available. Messages
 cannot be sent to a previewed chat; `help`, `new`, `clear`, and `quit` still work.
 
-Double-click a chat to continue it. Its history stays visible and new messages
-are added below it. A chat that is open in another tool stays read-only and the
+Double-click a chat to keep its tab and continue it. Its history stays visible
+and new messages are added below it. A chat that is open in another tool stays read-only and the
 chat header shows it as locked:
 
 - Codex: the App Server decides; if `thread/resume` fails, its error is shown.
@@ -132,29 +142,29 @@ chat header shows it as locked:
   a heuristic, because these CLIs do not publish which sessions are open.
 
 Type `help` (or `/help`) in the command field to see the available commands.
-With Codex selected, it shows the complete output of `codex app-server --help`
+In a Codex tab, it shows the complete output of `codex app-server --help`
 and explains that the client uses direct stdio mode. CLI subcommands shown in
 that output are reference information and are not chat messages.
-With Claude or GLM selected, it explains the SDK workflow
+In a Claude or GLM tab, it explains the SDK workflow
 and shows `claude --help` when the Claude CLI is installed. CLI options are shown for reference; this window
 communicates through the SDK. Claude Code's interactive slash commands are
 listed in the [Claude Code commands reference](https://code.claude.com/docs/en/commands).
 See [Z.AI's Claude Code setup](https://docs.z.ai/devpack/tool/claude) for GLM.
 
-With Gemini selected, `help` shows `gemini --help`. If [folder trust](https://geminicli.com/docs/cli/trusted-folders/)
+In a Gemini tab, `help` shows `gemini --help`. If [folder trust](https://geminicli.com/docs/cli/trusted-folders/)
 is enabled, trust the working folder in Gemini CLI before starting a headless
 conversation. Headless tool approvals follow Gemini CLI's configured policy;
 they are not shown as Qt approval dialogs.
 
-With Antigravity selected, `help` shows `agy --help`. The selected working
+In an Antigravity tab, `help` shows `agy --help`. The selected working
 directory is passed as the CLI process directory. Headless mode uses the CLI's cached authentication and its configured permission
 policy; approval prompts are not shown as Qt dialogs.
 
 The client also supports `new`, `clear` (clears the log), `stop`, and `quit`.
-Any other text is sent to the displayed chat when it is not a read-only preview. Messages entered while a response is
-in progress are queued. Requests to approve an action or answer a question
-appear in a separate dialog. Each agent keeps its own conversation while the
-application is open.
+Any other text is sent to the chat in the current tab when it is not a read-only
+preview. Messages entered while a response is in progress are queued. Requests to
+approve an action or answer a question switch to their tab and appear in a
+separate dialog.
 
 ## Test
 

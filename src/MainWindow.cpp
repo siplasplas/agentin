@@ -1,26 +1,25 @@
 #include "AntigravityAgent.h"
+#include "ChatTab.h"
 #include "ClaudeAgent.h"
-#include "CodexAgent.h"
 #include "CodexConnection.h"
 #include "GeminiAgent.h"
 #include "MainWindow.h"
 
 #include <QComboBox>
-#include <QCoreApplication>
-#include <QDateTime>
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
 #include <QHBoxLayout>
-#include <QInputDialog>
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QJsonObject>
 #include <QLabel>
 #include <QLineEdit>
 #include <QMenuBar>
 #include <QMessageBox>
+#include <QPlainTextDocumentLayout>
 #include <QPlainTextEdit>
 #include <QProcess>
 #include <QPushButton>
@@ -29,19 +28,20 @@
 #include <QSplitter>
 #include <QStandardPaths>
 #include <QTextCursor>
+#include <QTextDocument>
 #include <QTreeWidget>
 #include <QVBoxLayout>
 #include <QWidget>
 
+#include <mrutabwidget.h>
 #include <qxfiledialog.h>
 
 #include <algorithm>
 
 namespace {
-QString shortPreview(const QString &value)
+QString shortPreview(const QString &value, int limit = 72)
 {
     const QString singleLine = value.simplified();
-    constexpr int limit = 72;
     return singleLine.size() > limit ? singleLine.left(limit - 1) + QChar(0x2026) : singleLine;
 }
 
@@ -59,18 +59,17 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
                        const QString &antigravityProgram, const QString &geminiDataDirectory)
     : QMainWindow(parent), workingDirectory_(workingDirectory),
       dataDirectory_(QFileInfo(codexIndexFile(codexIndexPath)).absolutePath()),
-      codexConnection_(new CodexConnection(codexProgram, workingDirectory, codexIndexFile(codexIndexPath), this)),
-      codex_(new CodexAgent(codexConnection_, workingDirectory, this)),
-      claude_(new ClaudeAgent(claudePython, claudeScript, workingDirectory, "claude",
-                              QDir(dataDirectory_).filePath("claude-conversations.json"), this)),
-      glm_(new ClaudeAgent(claudePython, claudeScript, workingDirectory, "glm",
-                           QDir(dataDirectory_).filePath("glm-conversations.json"), this)),
-      gemini_(new GeminiAgent(geminiProgram, workingDirectory, geminiDataDirectory.isEmpty()
+      codex_(new CodexConnection(codexProgram, workingDirectory, codexIndexFile(codexIndexPath), this)),
+      claude_(new ClaudeProvider(claudePython, claudeScript, workingDirectory, "claude",
+                                 QDir(dataDirectory_).filePath("claude-conversations.json"), this)),
+      glm_(new ClaudeProvider(claudePython, claudeScript, workingDirectory, "glm",
+                              QDir(dataDirectory_).filePath("glm-conversations.json"), this)),
+      gemini_(new GeminiProvider(geminiProgram, geminiDataDirectory.isEmpty()
           ? QDir(QDir::homePath()).filePath(".gemini") : geminiDataDirectory,
           QDir(dataDirectory_).filePath("gemini-conversations.json"), this)),
-      antigravity_(new AntigravityAgent(antigravityProgram, workingDirectory,
-                                        QDir(dataDirectory_).filePath("antigravity-conversations.json"), this)),
-      agents_{codex_, claude_, gemini_, glm_, antigravity_}
+      antigravity_(new AntigravityProvider(antigravityProgram,
+                                           QDir(dataDirectory_).filePath("antigravity-conversations.json"), this)),
+      providers_{codex_, claude_, gemini_, glm_, antigravity_}
 {
     claude_->excludeSessionsOf(glm_);
     setWindowTitle("agentdeskt — Codex, Claude, GLM, Gemini and Antigravity");
@@ -84,22 +83,11 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     newChatButton_ = new QPushButton("New chat…", central);
     newChatButton_->setObjectName("newChatButton");
     status_ = new QLabel(central);
-    chatHeader_ = new QLabel(central);
-    chatHeader_->setObjectName("chatHeader");
-    chatHeader_->setWordWrap(true);
-    loadEarlierButton_ = new QPushButton("Show earlier messages", central);
-    loadEarlierButton_->setObjectName("loadEarlierButton");
-    loadEarlierButton_->setVisible(false);
-    chatView_ = new QPlainTextEdit(central);
-    chatView_->setObjectName("chatView");
-    chatView_->setReadOnly(true);
-    chatView_->setLineWrapMode(QPlainTextEdit::WidgetWidth);
-    chatView_->setPlaceholderText("Select a chat in the tree or start a new one.");
-    log_ = new QPlainTextEdit(this);
-    log_->setObjectName("log");
-    log_->setReadOnly(true);
-    log_->setLineWrapMode(QPlainTextEdit::WidgetWidth);
-    log_->setPlaceholderText("Application messages will appear here.");
+    tabs_ = new MruTabWidget(central);
+    tabs_->setObjectName("chatTabs");
+    tabs_->setTabsClosable(true);
+    tabs_->setMovable(true);
+    tabs_->setUsesScrollButtons(true);
     input_ = new QLineEdit(central);
     input_->setObjectName("commandInput");
     sendButton_ = new QPushButton("Send", central);
@@ -107,6 +95,34 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     stopButton_ = new QPushButton("Stop", central);
     stopButton_->setObjectName("stopButton");
     stopButton_->setEnabled(false);
+
+    chatPanel_ = new QWidget(this);
+    chatPanel_->hide();
+    auto *panelLayout = new QVBoxLayout(chatPanel_);
+    panelLayout->setContentsMargins(0, 0, 0, 0);
+    chatHeader_ = new QLabel(chatPanel_);
+    chatHeader_->setObjectName("chatHeader");
+    chatHeader_->setWordWrap(true);
+    loadEarlierButton_ = new QPushButton("Show earlier messages", chatPanel_);
+    loadEarlierButton_->setObjectName("loadEarlierButton");
+    loadEarlierButton_->setVisible(false);
+    chatView_ = new QPlainTextEdit(chatPanel_);
+    chatView_->setObjectName("chatView");
+    chatView_->setReadOnly(true);
+    chatView_->setLineWrapMode(QPlainTextEdit::WidgetWidth);
+    chatView_->setPlaceholderText("Select a chat in the tree or start a new one.");
+    emptyDocument_ = new QTextDocument(chatView_);
+    emptyDocument_->setDocumentLayout(new QPlainTextDocumentLayout(emptyDocument_));
+    chatView_->setDocument(emptyDocument_);
+    panelLayout->addWidget(chatHeader_);
+    panelLayout->addWidget(loadEarlierButton_);
+    panelLayout->addWidget(chatView_, 1);
+
+    log_ = new QPlainTextEdit(this);
+    log_->setObjectName("log");
+    log_->setReadOnly(true);
+    log_->setLineWrapMode(QPlainTextEdit::WidgetWidth);
+    log_->setPlaceholderText("Application messages will appear here.");
 
     auto *inputRow = new QHBoxLayout;
     inputRow->addWidget(input_, 1);
@@ -116,9 +132,7 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     statusRow->addWidget(status_, 1);
     statusRow->addWidget(newChatButton_);
     layout->addLayout(statusRow);
-    layout->addWidget(chatHeader_);
-    layout->addWidget(loadEarlierButton_);
-    layout->addWidget(chatView_, 1);
+    layout->addWidget(tabs_, 1);
     layout->addLayout(inputRow);
     auto *chatSplitter = new QSplitter(Qt::Horizontal, this);
     conversationTree_ = new QTreeWidget(chatSplitter);
@@ -135,53 +149,88 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     logSplitter->setStretchFactor(0, 1);
     logSplitter->setSizes({450, 150});
     setCentralWidget(logSplitter);
-    // Selecting a chat shows a read-only preview of its latest messages; double-clicking continues it.
+
+    // Selecting a chat previews it in the preview tab; double-clicking keeps the tab and continues the chat.
     connect(conversationTree_, &QTreeWidget::currentItemChanged, this, [this](QTreeWidgetItem *item) {
-        if (item) showChatPreview(item);
+        if (item) openConversation(item, false);
     });
     connect(conversationTree_, &QTreeWidget::itemDoubleClicked, this, [this](QTreeWidgetItem *item, int) {
-        attachChat(item);
-    });
-    connect(loadEarlierButton_, &QPushButton::clicked, this, [this] {
-        loadHistory(false);
+        openConversation(item, true);
     });
     connect(conversationTree_, &QTreeWidget::itemExpanded, this, [this](QTreeWidgetItem *item) {
         if (item->data(0, Qt::UserRole).toString() != "provider") return;
         // Rebuilding the tree deletes item, so read its provider first.
-        const QString provider = item->text(0);
-        expandedProviders_.insert(provider);
+        const QString name = item->text(0);
+        expandedProviders_.insert(name);
         refreshConversationTree();
-        if (AgentBackend *expanded = agent(providerIndex(provider))) expanded->refreshConversations();
+        if (AgentProvider *expanded = provider(name)) expanded->refreshConversations();
     });
     connect(conversationTree_, &QTreeWidget::itemCollapsed, this, [this](QTreeWidgetItem *item) {
         if (item->data(0, Qt::UserRole).toString() != "provider") return;
         expandedProviders_.remove(item->text(0));
         refreshConversationTree();
     });
+    connect(loadEarlierButton_, &QPushButton::clicked, this, [this] {
+        if (ChatTab *tab = currentTab()) tab->loadEarlier();
+    });
+    connect(tabs_, &QTabWidget::currentChanged, this, &MainWindow::showCurrentTab);
+    connect(tabs_, &MruTabWidget::tabAboutToClose, this, [this](QWidget *page, bool, bool &allow) {
+        ChatTab *tab = chatTab(page);
+        if (!allow || !tab || !tab->agent()->isResponding()) return;
+        const auto answer = QMessageBox::question(this, "Close chat",
+                                                   tab->provider()->name() + " is still responding in this chat. "
+                                                   "Stop the response and close the tab?",
+                                                   QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
+        if (answer == QMessageBox::Yes) tab->agent()->interrupt();
+        else allow = false;
+    }, Qt::DirectConnection);
+    // The shared chat view must leave a page before the page and its document are deleted.
+    connect(tabs_, &MruTabWidget::tabClosing, this, [this](QWidget *page) {
+        if (chatPanel_->parentWidget() == page) {
+            chatPanel_->hide();
+            chatPanel_->setParent(this);
+        }
+        ChatTab *tab = chatTab(page);
+        if (tab && chatView_->document() == tab->document()) chatView_->setDocument(emptyDocument_);
+    });
 
     connect(input_, &QLineEdit::returnPressed, this, &MainWindow::submitCommand);
     connect(sendButton_, &QPushButton::clicked, this, &MainWindow::submitCommand);
     connect(stopButton_, &QPushButton::clicked, this, &MainWindow::requestStop);
     connect(newChatButton_, &QPushButton::clicked, this, &MainWindow::showNewConversationDialog);
-    for (AgentBackend *agent : agents_) connectAgent(agent);
+    for (AgentProvider *listed : providers_) {
+        connect(listed, &AgentProvider::message, this, &MainWindow::appendLine);
+        connect(listed, &AgentProvider::stateChanged, this, &MainWindow::updateStatus);
+        connect(listed, &AgentProvider::conversationsChanged, this, &MainWindow::refreshConversationTree);
+    }
 
     appendLine("Directory: " + workingDirectory_);
     appendLine("Type help to see the available commands.\n");
-    for (AgentBackend *agent : agents_) agent->loadConversations();
+    for (AgentProvider *listed : providers_) listed->loadConversations();
     loadRecentDirectories();
     refreshConversationTree();
-    showLiveChat(codex_->name(), workingDirectory_);
+    chatTab(addChatTab(codex_, workingDirectory_))->startDraft();
     if (!QDir(workingDirectory_).exists()) {
         appendLine("[Working directory does not exist: " + workingDirectory_ + "]");
         return;
     }
-    codexConnection_->start();
+    codex_->start();
     input_->setFocus();
 }
 
+// Chats go first, while their providers still exist.
 MainWindow::~MainWindow()
 {
-    for (AgentBackend *agent : agents_) disconnect(agent, nullptr, this, nullptr);
+    disconnect(tabs_, nullptr, this, nullptr);
+    for (AgentProvider *listed : providers_) disconnect(listed, nullptr, this, nullptr);
+    chatView_->setDocument(emptyDocument_);
+    chatPanel_->setParent(this);
+    while (tabs_->count() > 0) {
+        QWidget *page = tabs_->widget(0);
+        disconnect(chatTab(page), nullptr, this, nullptr);
+        tabs_->removeTab(0);
+        delete page;
+    }
 }
 
 void MainWindow::submitCommand()
@@ -201,14 +250,10 @@ void MainWindow::submitCommand()
         requestStop();
     } else if (local == "quit" || local == "/quit" || local == "exit") {
         close();
+    } else if (ChatTab *tab = currentTab()) {
+        tab->send(command);
     } else {
-        if (!viewLive_) {
-            appendLine("[The displayed chat is a read-only preview. Double-click it in the tree to continue it.]");
-            return;
-        }
-        AgentBackend *current = currentAgent();
-        const QString name = current->name();
-        if (current->prompt(command)) appendChatText(name, "\nYou: " + command + '\n');
+        appendLine("[No chat is open. Use New chat… to start one.]");
     }
 }
 
@@ -220,8 +265,9 @@ void MainWindow::showHelp()
     appendLine("  clear      clear the log pane");
     appendLine("  stop       interrupt the current response");
     appendLine("  quit       close the application");
-    appendLine("All other text is sent to the selected agent as a message.\n");
-    const AgentHelp help = currentAgent()->help();
+    appendLine("All other text is sent to the chat in the current tab as a message.\n");
+    const ChatTab *tab = currentTab();
+    const AgentHelp help = (tab ? tab->provider() : providers_.first())->help();
     for (const QString &line : help.lines) appendLine(line);
     if (help.program.isEmpty()) {
         appendLine("[" + help.name + " is not installed or not in PATH.]\n");
@@ -245,64 +291,26 @@ void MainWindow::showHelp()
     helpProcess->start(help.program, help.arguments);
 }
 
-QString MainWindow::providerName(int index) const
+void MainWindow::requestStop()
 {
-    const AgentBackend *indexed = agent(index);
-    return indexed ? indexed->name() : QString();
-}
-
-
-int MainWindow::providerIndex(const QString &name) const
-{
-    for (int i = 0; i < agents_.size(); ++i) {
-        if (agents_.at(i)->name() == name) return i;
+    ChatTab *tab = currentTab();
+    if (!tab) return;
+    AgentBackend *agent = tab->agent();
+    if (!agent->isResponding()) {
+        appendLine("[No active " + agent->name() + " response.]");
+        return;
     }
-    return -1;
+    if (!agent->canInterrupt()) return;
+    appendLine("[Interrupting " + agent->name() + " response]");
+    agent->interrupt();
 }
 
-
-void MainWindow::selectProvider(int index)
+AgentProvider *MainWindow::provider(const QString &name) const
 {
-    if (index == currentProvider_) return;
-    currentProvider_ = index;
-    appendLine("[" + providerName(index) + " selected]");
-    updateStatus();
-}
-
-void MainWindow::refreshConversationTree()
-{
-    const QSignalBlocker blocker(conversationTree_);
-    conversationTree_->clear();
-    for (AgentBackend *listed : agents_) {
-        const QString provider = listed->name();
-        auto *root = new QTreeWidgetItem(conversationTree_, {provider});
-        root->setData(0, Qt::UserRole, "provider");
-        root->setChildIndicatorPolicy(QTreeWidgetItem::ShowIndicator);
-        if (!expandedProviders_.contains(provider)) continue;
-        root->setExpanded(true);
-        QList<QJsonObject> chats = listed->conversations();
-        std::stable_sort(chats.begin(), chats.end(), [](const QJsonObject &left, const QJsonObject &right) {
-            return left.value("createdAt").toInteger() > right.value("createdAt").toInteger();
-        });
-        QHash<QString, QTreeWidgetItem *> directories;
-        for (const QJsonObject &chat : chats) {
-            const QString path = chat.value("cwd").toString();
-            QTreeWidgetItem *directory = directories.value(path);
-            if (!directory) {
-                directory = new QTreeWidgetItem(root, {path.isEmpty() ? "(unknown directory)" : QDir::toNativeSeparators(path)});
-                directory->setToolTip(0, path);
-                directory->setExpanded(true);
-                directories.insert(path, directory);
-            }
-            QString title = shortPreview(chat.value("title").toString());
-            if (chat.value("archived").toBool()) title += " (archived)";
-            auto *item = new QTreeWidgetItem(directory, {title});
-            item->setData(0, Qt::UserRole, provider);
-            item->setData(0, Qt::UserRole + 1, chat.value("id").toString());
-            item->setData(0, Qt::UserRole + 2, path);
-            item->setToolTip(0, chat.value("tooltip").toString());
-        }
+    for (AgentProvider *listed : providers_) {
+        if (listed->name() == name) return listed;
     }
+    return nullptr;
 }
 
 // Recently used working directories are shown in the directory chooser of the New chat dialog.
@@ -337,34 +345,18 @@ void MainWindow::rememberRecentDirectory(const QString &path)
     saveRecentDirectories();
 }
 
-void MainWindow::newProviderConversation(int providerIndex, const QString &path)
-{
-    const QFileInfo directory(path);
-    if (!directory.isDir()) {
-        appendLine("[Directory does not exist: " + directory.absoluteFilePath() + "]");
-        return;
-    }
-    const QString canonicalPath = directory.canonicalFilePath();
-    AgentBackend *selected = agent(providerIndex);
-    if (!selected->newConversation(canonicalPath)) return;
-    selectProvider(providerIndex);
-    showLiveChat(selected->name(), canonicalPath);
-    appendLine("[Starting a new " + selected->name() + " conversation in " + canonicalPath + "]");
-    refreshConversationTree();
-    updateStatus();
-}
-
 void MainWindow::showNewConversationDialog()
 {
-    const QString currentPath = currentAgent()->workingDirectory();
+    const ChatTab *tab = currentTab();
+    const QString currentPath = tab ? tab->workingDirectory() : workingDirectory_;
     QDialog dialog(this);
     dialog.setWindowTitle("New conversation");
     auto *layout = new QVBoxLayout(&dialog);
     layout->addWidget(new QLabel("Agent:", &dialog));
     auto *providerInput = new QComboBox(&dialog);
     providerInput->setObjectName("newConversationProvider");
-    for (const AgentBackend *listed : agents_) providerInput->addItem(listed->name());
-    providerInput->setCurrentIndex(currentProvider_);
+    for (const AgentProvider *listed : providers_) providerInput->addItem(listed->name());
+    if (tab) providerInput->setCurrentText(tab->provider()->name());
     layout->addWidget(providerInput);
     layout->addWidget(new QLabel("Working directory:", &dialog));
     auto *pathRow = new QHBoxLayout;
@@ -397,92 +389,151 @@ void MainWindow::showNewConversationDialog()
     if (dialog.exec() == QDialog::Accepted) {
         const QString path = QDir::cleanPath(pathInput->text().trimmed());
         rememberRecentDirectory(path);
-        newProviderConversation(providerInput->currentIndex(), path);
+        newConversation(providers_.value(providerInput->currentIndex()), path);
     }
 }
 
-void MainWindow::requestStop()
+void MainWindow::newConversation(AgentProvider *selected, const QString &path)
 {
-    AgentBackend *current = currentAgent();
-    if (!current->isResponding()) {
-        appendLine("[No active " + current->name() + " response.]");
+    const QFileInfo directory(path);
+    if (!selected || !directory.isDir()) {
+        appendLine("[Directory does not exist: " + directory.absoluteFilePath() + "]");
         return;
     }
-    if (!current->canInterrupt()) return;
-    appendLine("[Interrupting " + current->name() + " response]");
-    current->interrupt();
-}
-
-void MainWindow::connectAgent(AgentBackend *agent)
-{
-    const QString name = agent->name();
-    connect(agent, &AgentBackend::message, this, &MainWindow::appendLine);
-    connect(agent, &AgentBackend::stateChanged, this, &MainWindow::updateStatus);
-    connect(agent, &AgentBackend::conversationsChanged, this, &MainWindow::refreshConversationTree);
-    connect(agent, &AgentBackend::messageStarted, this, [this, name] { appendChatText(name, "\n" + name + ": "); });
-    connect(agent, &AgentBackend::messageDelta, this, [this, name](const QString &text) { appendChatText(name, text); });
-    connect(agent, &AgentBackend::messageFinished, this, [this, name] { appendChatText(name, "\n"); });
-    connect(agent, &AgentBackend::toolStarted, this, [this, name](const QString &tool, const QString &details) {
-        appendChatText(name, "\n[" + name + " tool: " + tool + "] " + details + '\n');
-    });
-    connect(agent, &AgentBackend::toolOutput, this, [this, name](const QString &text) { appendChatText(name, text); });
-    connect(agent, &AgentBackend::toolFinished, this, [this, name](const QString &tool, const QString &status) {
-        appendChatText(name, "\n[" + tool + ": " + status + "]\n");
-    });
-    connect(agent, &AgentBackend::turnCompleted, this, [this, name](const QString &status, const QString &details) {
-        if (status != "completed")
-            appendLine("[" + name + " response: " + status + (details.isEmpty() ? "" : ": " + details) + "]");
-    });
-    connect(agent, &AgentBackend::approvalRequested, this,
-            [this, agent](int id, const QString &title, const QString &description) {
-        const auto answer = QMessageBox::question(this, title, description + "\n\nAllow this action?",
-                                                   QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
-        agent->answerApproval(id, answer == QMessageBox::Yes);
-    });
-    connect(agent, &AgentBackend::questionsRequested, this, [this, agent](int id, const QList<AgentQuestion> &questions) {
-        agent->answerQuestions(id, askQuestions(questions));
-    });
-    // A resumed conversation becomes live only if the user is still looking at the chat they attached.
-    connect(agent, &AgentBackend::conversationOpened, this, [this, name](const QString &id, bool resumed) {
-        if (resumed && !pendingAttachId_.isEmpty()) {
-            if (id == pendingAttachId_ && viewProvider_ == name && viewId_ == id) {
-                viewLive_ = true;
-                lockNotice_.clear();
-                updateChatHeader();
-            }
-            pendingAttachId_.clear();
-        } else if (!resumed && viewLive_ && viewProvider_ == name) {
-            viewId_ = id;
-        }
-    });
-    connect(agent, &AgentBackend::conversationOpenFailed, this, [this, name](const QString &id, const QString &reason) {
-        if (id.isEmpty() || id != pendingAttachId_) return;
-        if (viewProvider_ == name && viewId_ == id) {
-            lockNotice_ = reason;
-            updateChatHeader();
-        }
-        pendingAttachId_.clear();
-    });
-    connect(agent, &AgentBackend::historyLoaded, this,
-            [this, name](const QString &id, const QList<ChatEntry> &entries, bool hasMore, const QString &notice) {
-        if (viewProvider_ != name || viewId_ != id) return;
-        showHistory(entries, hasMore, notice);
-    });
-}
-
-// Asks each question in a dialog and stops at the first one the user cancels.
-QHash<QString, QString> MainWindow::askQuestions(const QList<AgentQuestion> &questions)
-{
-    QHash<QString, QString> answers;
-    for (const AgentQuestion &question : questions) {
-        bool accepted = false;
-        const QString reply = question.multiSelect || question.options.isEmpty()
-            ? QInputDialog::getText(this, question.header, question.text, QLineEdit::Normal, {}, &accepted)
-            : QInputDialog::getItem(this, question.header, question.text, question.options, 0, false, &accepted);
-        if (!accepted) break;
-        answers.insert(question.id, reply);
+    const QString canonicalPath = directory.canonicalFilePath();
+    QWidget *page = addChatTab(selected, canonicalPath);
+    if (!chatTab(page)->startNew(canonicalPath)) {
+        tabs_->requestCloseTab(page);
+        return;
     }
-    return answers;
+    tabs_->setCurrentWidget(page);
+    appendLine("[Starting a new " + selected->name() + " conversation in " + canonicalPath + "]");
+}
+
+void MainWindow::refreshConversationTree()
+{
+    const QSignalBlocker blocker(conversationTree_);
+    conversationTree_->clear();
+    for (AgentProvider *listed : providers_) {
+        const QString name = listed->name();
+        auto *root = new QTreeWidgetItem(conversationTree_, {name});
+        root->setData(0, Qt::UserRole, "provider");
+        root->setChildIndicatorPolicy(QTreeWidgetItem::ShowIndicator);
+        if (!expandedProviders_.contains(name)) continue;
+        root->setExpanded(true);
+        QList<QJsonObject> chats = listed->conversations();
+        std::stable_sort(chats.begin(), chats.end(), [](const QJsonObject &left, const QJsonObject &right) {
+            return left.value("createdAt").toInteger() > right.value("createdAt").toInteger();
+        });
+        QHash<QString, QTreeWidgetItem *> directories;
+        for (const QJsonObject &chat : chats) {
+            const QString path = chat.value("cwd").toString();
+            QTreeWidgetItem *directory = directories.value(path);
+            if (!directory) {
+                directory = new QTreeWidgetItem(root, {path.isEmpty() ? "(unknown directory)" : QDir::toNativeSeparators(path)});
+                directory->setToolTip(0, path);
+                directory->setExpanded(true);
+                directories.insert(path, directory);
+            }
+            QString title = shortPreview(chat.value("title").toString());
+            if (chat.value("archived").toBool()) title += " (archived)";
+            auto *item = new QTreeWidgetItem(directory, {title});
+            item->setData(0, Qt::UserRole, name);
+            item->setData(0, Qt::UserRole + 1, chat.value("id").toString());
+            item->setData(0, Qt::UserRole + 2, path);
+            item->setToolTip(0, chat.value("tooltip").toString());
+        }
+    }
+}
+
+// A chat already open in a tab is shown there; otherwise the preview tab shows it read-only.
+void MainWindow::openConversation(QTreeWidgetItem *item, bool continueChat)
+{
+    const QString name = item->data(0, Qt::UserRole).toString();
+    const QString id = item->data(0, Qt::UserRole + 1).toString();
+    AgentProvider *selected = name == "provider" ? nullptr : provider(name);
+    if (!selected || id.isEmpty()) return;
+    QWidget *page = tabs_->findTab(ChatTab::key(name, id));
+    if (!page) {
+        const QString path = item->data(0, Qt::UserRole + 2).toString();
+        page = tabs_->previewTab();
+        if (!page) {
+            page = addChatTab(selected, path);
+            tabs_->setTabPreview(page, true);
+        }
+        chatTab(page)->showPreview(selected, id, path, item->text(0));
+    }
+    tabs_->setCurrentWidget(page);
+    if (!continueChat) return;
+    if (page == tabs_->previewTab()) tabs_->promotePreviewTab();
+    chatTab(page)->continueChat();
+}
+
+QWidget *MainWindow::addChatTab(AgentProvider *selected, const QString &workingDirectory)
+{
+    auto *page = new QWidget;
+    auto *layout = new QVBoxLayout(page);
+    layout->setContentsMargins(0, 0, 0, 0);
+    auto *tab = new ChatTab(selected, workingDirectory, this, page);
+    connect(tab, &ChatTab::logMessage, this, &MainWindow::appendLine);
+    connect(tab, &ChatTab::changed, this, [this, page] { updateTab(page); });
+    connect(tab, &ChatTab::textAppended, this, [this, page] {
+        if (tabs_->currentWidget() != page) {
+            tabs_->setTabAttention(page, true);
+            return;
+        }
+        chatView_->moveCursor(QTextCursor::End);
+        chatView_->ensureCursorVisible();
+    });
+    connect(tab, &ChatTab::activateRequested, this, [this, page] { tabs_->setCurrentWidget(page); });
+    tabs_->addTab(page, selected->name());
+    updateTab(page);
+    return page;
+}
+
+ChatTab *MainWindow::chatTab(QWidget *page) const
+{
+    return page ? page->findChild<ChatTab *>(QString(), Qt::FindDirectChildrenOnly) : nullptr;
+}
+
+ChatTab *MainWindow::currentTab() const
+{
+    return chatTab(tabs_->currentWidget());
+}
+
+void MainWindow::showCurrentTab()
+{
+    QWidget *page = tabs_->currentWidget();
+    ChatTab *tab = chatTab(page);
+    if (!tab) {
+        chatPanel_->hide();
+        chatPanel_->setParent(this);
+        chatView_->setDocument(emptyDocument_);
+    } else {
+        if (chatPanel_->parentWidget() != page) {
+            page->layout()->addWidget(chatPanel_);
+            chatPanel_->show();
+        }
+        if (chatView_->document() != tab->document()) {
+            chatView_->setDocument(tab->document());
+            chatView_->moveCursor(QTextCursor::End);
+            chatView_->ensureCursorVisible();
+        }
+    }
+    updateStatus();
+}
+
+void MainWindow::updateTab(QWidget *page)
+{
+    ChatTab *tab = chatTab(page);
+    const int index = tabs_->indexOf(page);
+    if (!tab || index < 0) return;
+    tabs_->setTabText(index, tab->provider()->name() + ": " + shortPreview(tab->title(), 32));
+    tabs_->setTabToolTip(index, tab->headerText());
+    tabs_->setTabPopupText(index, tab->headerText());
+    tabs_->setTabKey(page, tab->key());
+    tabs_->setTabBusy(page, tab->agent()->isResponding());
+    if (page == tabs_->currentWidget()) updateStatus();
 }
 
 void MainWindow::appendText(const QString &text)
@@ -499,137 +550,29 @@ void MainWindow::appendLine(const QString &text)
     appendText(text + '\n');
 }
 
-void MainWindow::appendChatText(const QString &provider, const QString &text)
-{
-    // Live output is shown only while its conversation is displayed; saved history covers the rest.
-    if (!viewLive_ || viewProvider_ != provider) return;
-    liveTranscript_ += text;
-    QTextCursor cursor = chatView_->textCursor();
-    cursor.movePosition(QTextCursor::End);
-    cursor.insertText(text);
-    chatView_->setTextCursor(cursor);
-    chatView_->ensureCursorVisible();
-}
-
-void MainWindow::showLiveChat(const QString &provider, const QString &path)
-{
-    for (AgentBackend *agent : agents_) agent->cancelHistory();
-    viewProvider_ = provider;
-    viewId_.clear();
-    viewPath_ = path;
-    viewTitle_ = "New chat";
-    viewLive_ = true;
-    lockNotice_.clear();
-    liveTranscript_.clear();
-    chatView_->clear();
-    loadEarlierButton_->setVisible(false);
-    updateChatHeader();
-    updateStatus();
-}
-
-void MainWindow::showChatPreview(QTreeWidgetItem *item)
-{
-    const QString provider = item->data(0, Qt::UserRole).toString();
-    if (provider.isEmpty() || provider == "provider") return;
-    const QString id = item->data(0, Qt::UserRole + 1).toString();
-    if (viewProvider_ == provider && viewId_ == id) return;
-    openChat(provider, id, item->data(0, Qt::UserRole + 2).toString(), item->text(0));
-}
-
-void MainWindow::attachChat(QTreeWidgetItem *item)
-{
-    const QString provider = item->data(0, Qt::UserRole).toString();
-    if (provider.isEmpty() || provider == "provider") return;
-    const QString id = item->data(0, Qt::UserRole + 1).toString();
-    const QString path = item->data(0, Qt::UserRole + 2).toString();
-    const int index = providerIndex(provider);
-    if (id.isEmpty() || index < 0 || (viewLive_ && viewProvider_ == provider && viewId_ == id)) return;
-    if (viewProvider_ != provider || viewId_ != id) openChat(provider, id, path, item->text(0));
-    AgentBackend *selected = agent(index);
-    if (selected->sessionId() != id) {
-        const QString lock = selected->externalLock(id);
-        if (!lock.isEmpty()) {
-            lockNotice_ = "open in " + lock;
-            updateChatHeader();
-            appendLine("[" + provider + " conversation is open in another tool and stays read-only: " + lock + "]");
-            return;
-        }
-        lockNotice_.clear();
-        updateChatHeader();
-        pendingAttachId_ = id;
-        if (!selected->resumeConversation(id, path)) {
-            pendingAttachId_.clear();
-            return;
-        }
-        selectProvider(index);
-        // Codex confirms asynchronously through conversationOpened; the other agents switch at once.
-        if (selected->sessionId() != id) return;
-        pendingAttachId_.clear();
-    }
-    selectProvider(index);
-    viewLive_ = true;
-    updateChatHeader();
-    updateStatus();
-}
-
-void MainWindow::openChat(const QString &provider, const QString &id, const QString &path, const QString &title)
-{
-    viewProvider_ = provider;
-    viewId_ = id;
-    viewPath_ = path;
-    viewTitle_ = title;
-    viewLive_ = false;
-    lockNotice_.clear();
-    liveTranscript_.clear();
-    chatView_->setPlainText("Loading the latest messages…");
-    loadEarlierButton_->setVisible(false);
-    updateChatHeader();
-    updateStatus();
-    loadHistory(true);
-}
-
-void MainWindow::loadHistory(bool reset)
-{
-    for (AgentBackend *agent : agents_) agent->cancelHistory();
-    if (AgentBackend *viewed = agent(providerIndex(viewProvider_))) viewed->loadHistory(viewId_, viewPath_, !reset);
-}
-
-void MainWindow::showHistory(const QList<ChatEntry> &entries, bool hasMore, const QString &notice)
-{
-    QStringList blocks;
-    for (const ChatEntry &entry : entries) {
-        if (entry.role == "user") blocks.append("You: " + entry.text);
-        else if (entry.role == "tool") blocks.append("[" + viewProvider_ + " tool: " + entry.text + "]");
-        else blocks.append(viewProvider_ + ": " + entry.text);
-    }
-    if (!notice.isEmpty()) blocks.append("[" + notice + "]");
-    else if (blocks.isEmpty()) blocks.append("[This conversation has no messages to show.]");
-    chatView_->setPlainText(blocks.join("\n\n") + '\n' + (viewLive_ ? liveTranscript_ : QString()));
-    chatView_->moveCursor(QTextCursor::End);
-    chatView_->ensureCursorVisible();
-    loadEarlierButton_->setVisible(hasMore);
-}
-
-void MainWindow::updateChatHeader()
-{
-    QStringList parts{viewProvider_, viewTitle_, QDir::toNativeSeparators(viewPath_)};
-    if (!lockNotice_.isEmpty()) parts.append("locked: " + lockNotice_);
-    else if (!viewLive_) parts.append("read-only preview");
-    chatHeader_->setText(parts.join("  •  "));
-    chatHeader_->setToolTip(viewId_);
-}
-
 void MainWindow::updateStatus()
 {
-    AgentBackend *current = currentAgent();
-    status_->setText(current->statusText() + "  •  " + QDir::toNativeSeparators(current->workingDirectory()));
-    stopButton_->setEnabled(current->canInterrupt());
-    sendButton_->setText("Send to " + current->name());
-    sendButton_->setEnabled(viewLive_);
+    const ChatTab *tab = currentTab();
+    if (!tab) {
+        status_->setText("No chat open");
+        chatHeader_->clear();
+        loadEarlierButton_->setVisible(false);
+        sendButton_->setText("Send");
+        sendButton_->setEnabled(false);
+        stopButton_->setEnabled(false);
+        input_->setPlaceholderText("Type help or new, then press Enter");
+        return;
+    }
+    const AgentBackend *agent = tab->agent();
+    status_->setText(agent->statusText() + "  •  " + QDir::toNativeSeparators(tab->workingDirectory()));
+    chatHeader_->setText(tab->headerText());
+    chatHeader_->setToolTip(tab->conversationId());
+    loadEarlierButton_->setVisible(tab->hasMoreHistory());
     // Reloading a longer tail while a live response streams would drop the partial answer.
-    loadEarlierButton_->setEnabled(!(viewLive_ && current->isResponding()));
-    input_->setPlaceholderText(viewLive_ ? "Enter a message or help, then press Enter"
-                                         : "Read-only preview. Type help, new or clear, then press Enter");
-    newChatButton_->setEnabled(std::none_of(agents_.begin(), agents_.end(),
-                                            [](AgentBackend *agent) { return agent->isResponding(); }));
+    loadEarlierButton_->setEnabled(!(tab->isLive() && agent->isResponding()));
+    stopButton_->setEnabled(agent->canInterrupt());
+    sendButton_->setText("Send to " + tab->provider()->name());
+    sendButton_->setEnabled(tab->isLive());
+    input_->setPlaceholderText(tab->isLive() ? "Enter a message or help, then press Enter"
+                                             : "Read-only preview. Type help, new or clear, then press Enter");
 }

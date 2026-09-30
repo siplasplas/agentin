@@ -3,30 +3,49 @@
 #include "AgentBackend.h"
 #include "ConversationIndex.h"
 
+#include <QPointer>
+
 class QProcess;
 
-// Antigravity backend that runs one headless `agy --output-format stream-json` process per turn.
+// Antigravity CLI. The CLI cannot list its conversations, so the provider shows only chats recorded
+// here; each chat runs one headless `agy --output-format stream-json` process per turn.
+class AntigravityProvider : public AgentProvider
+{
+    Q_OBJECT
+public:
+    AntigravityProvider(const QString &program, const QString &indexPath, QObject *parent = nullptr);
+
+    QString name() const override { return "Antigravity"; }
+    AgentHelp help() const override;
+    QString externalLock(const QString &id) const override;
+    void loadConversations() override;
+    void refreshConversations() override;
+    QList<QJsonObject> conversations() const override { return index_.treeEntries(); }
+    AgentBackend *createChat(const QString &workingDirectory, QObject *parent) override;
+
+    QString program() const { return program_; }
+    void rememberConversation(const QString &id, const QString &workingDirectory, const QString &firstPrompt);
+
+private:
+    void reportIndexError(const QString &error);
+
+    QString program_;
+    ConversationIndex index_;
+};
+
 class AntigravityAgent : public AgentBackend
 {
     Q_OBJECT
 public:
-    AntigravityAgent(const QString &program, const QString &workingDirectory, const QString &indexPath,
-                     QObject *parent = nullptr);
+    AntigravityAgent(AntigravityProvider *provider, const QString &workingDirectory, QObject *parent = nullptr);
     ~AntigravityAgent() override;
 
     QString name() const override { return "Antigravity"; }
-    QString program() const override { return program_; }
     QString workingDirectory() const override { return workingDirectory_; }
     QString sessionId() const override { return conversationId_; }
     QString statusText() const override;
     bool isResponding() const override { return busy_; }
     bool canInterrupt() const override { return busy_ && !stopRequested_; }
-    AgentHelp help() const override;
-    QString externalLock(const QString &id) const override;
-    // The CLI cannot list its conversations, so only chats recorded here are shown.
-    void loadConversations() override;
-    void refreshConversations() override;
-    QList<QJsonObject> conversations() const override { return index_.treeEntries(); }
     bool newConversation(const QString &workingDirectory) override;
     bool resumeConversation(const QString &id, const QString &workingDirectory) override;
     bool prompt(const QString &text) override;
@@ -40,16 +59,15 @@ private:
     bool isRunning() const;
     void sendNextPrompt();
     void rememberConversation();
-    void reportIndexError(const QString &error);
     void handleLine(const QByteArray &line);
     void drainOutput();
     void finish(int code);
 
+    QPointer<AntigravityProvider> provider_;
     QString program_;
     QString workingDirectory_;
     QString conversationId_;
     QString firstPrompt_;
-    ConversationIndex index_;
     QString errorDetails_;
     QString diagnostics_;
     QByteArray buffer_;

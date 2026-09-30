@@ -108,10 +108,123 @@ QList<ChatEntry> readHistory(const QString &filePath)
 }
 }
 
-GeminiAgent::GeminiAgent(const QString &program, const QString &workingDirectory, const QString &dataDirectory,
-                         const QString &indexPath, QObject *parent)
-    : AgentBackend(parent), program_(program), workingDirectory_(workingDirectory), dataDirectory_(dataDirectory),
-      process_(new QProcess(this)), index_("Gemini", indexPath)
+GeminiProvider::GeminiProvider(const QString &program, const QString &dataDirectory, const QString &indexPath,
+                               QObject *parent)
+    : AgentProvider(parent), program_(program), dataDirectory_(dataDirectory), index_("Gemini", indexPath)
+{
+}
+
+AgentHelp GeminiProvider::help() const
+{
+    return {{"Gemini CLI headless mode:",
+             "  Send messages with Enter or Send to Gemini.",
+             "  Each response streams JSON events; later messages resume the same session.",
+             "  Authenticate Gemini CLI before using this window.",
+             "  If folder trust is enabled, trust the working folder in Gemini CLI first.",
+             "  Headless mode: https://geminicli.com/docs/cli/headless/",
+             "Installed Gemini CLI commands and options:"},
+            "Gemini CLI", program_, {"--help"}};
+}
+
+QString GeminiProvider::externalLock(const QString &id) const
+{
+    return commandLineLock(id);
+}
+
+void GeminiProvider::loadConversations()
+{
+    reportIndexError(index_.load());
+}
+
+void GeminiProvider::refreshConversations()
+{
+    if (!executableChecked_) {
+        executableChecked_ = true;
+        if (QStandardPaths::findExecutable(program_).isEmpty())
+            emit message("[Gemini CLI is not installed or is not in PATH. Install it or use --gemini /absolute/path/to/gemini.]");
+    }
+    QSet<QString> discoveredIds;
+    bool changed = false;
+    for (QJsonObject entry : discoverSessions()) {
+        const QString id = entry.value("id").toString();
+        discoveredIds.insert(id);
+        // Keep what the index knows when the session file lacks a first prompt or start time.
+        const QJsonObject old = index_.value(id);
+        if (entry.value("title").toString() == id && !old.value("title").toString().isEmpty())
+            entry.insert("title", old.value("title"));
+        if (entry.value("createdAt").toInteger() <= 0 && old.value("createdAt").toInteger() > 0)
+            entry.insert("createdAt", old.value("createdAt"));
+        changed = index_.insert(entry) || changed;
+    }
+    if (changed) reportIndexError(index_.save());
+    emit conversationsChanged();
+    emit message(QString("[Gemini sessions discovered: %1]").arg(discoveredIds.size()));
+}
+
+void GeminiProvider::reportIndexError(const QString &error)
+{
+    if (!error.isEmpty()) emit message("[" + error + "]");
+}
+
+AgentBackend *GeminiProvider::createChat(const QString &workingDirectory, QObject *parent)
+{
+    return new GeminiAgent(this, workingDirectory, parent);
+}
+
+// Prefers the file recorded in the index and scans the data directory only when it is gone.
+QString GeminiProvider::sessionFile(const QString &id)
+{
+    QString filePath = sessionFiles_.value(id, index_.value(id).value("file").toString());
+    if (!QFileInfo(filePath).isFile()) {
+        discoverSessions();
+        filePath = sessionFiles_.value(id);
+    }
+    return filePath;
+}
+
+void GeminiProvider::rememberConversation(const QString &id, const QString &workingDirectory, const QString &firstPrompt)
+{
+    if (!index_.remember(id, workingDirectory, firstPrompt)) return;
+    reportIndexError(index_.save());
+    emit conversationsChanged();
+}
+
+QList<QJsonObject> GeminiProvider::discoverSessions()
+{
+    QHash<QString, QString> projectPaths;
+    QFile projects(QDir(dataDirectory_).filePath("projects.json"));
+    if (projects.open(QIODevice::ReadOnly)) {
+        const QJsonObject entries = QJsonDocument::fromJson(projects.readAll()).object()
+                                        .value("projects").toObject();
+        for (auto it = entries.begin(); it != entries.end(); ++it) {
+            if (QFileInfo(it.key()).isAbsolute() && !it.value().toString().isEmpty())
+                projectPaths.insert(it.value().toString(), it.key());
+        }
+    }
+    QList<QJsonObject> sessions;
+    const QDir profileRoot(QDir(dataDirectory_).filePath("tmp"));
+    for (const QFileInfo &profile : profileRoot.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot)) {
+        QString path = projectPaths.value(profile.fileName());
+        if (path.isEmpty()) {
+            QFile root(QDir(profile.filePath()).filePath(".project_root"));
+            if (root.open(QIODevice::ReadOnly)) path = QString::fromUtf8(root.readAll()).trimmed();
+        }
+        if (!QFileInfo(path).isAbsolute()) continue;
+        const QDir chats(QDir(profile.filePath()).filePath("chats"));
+        for (const QFileInfo &file : chats.entryInfoList({"session-*.jsonl", "session-*.json"}, QDir::Files, QDir::Name)) {
+            const QJsonObject session = readSession(file, path);
+            const QString id = session.value("id").toString();
+            if (id.isEmpty()) continue;
+            sessionFiles_.insert(id, session.value("file").toString());
+            sessions.append(session);
+        }
+    }
+    return sessions;
+}
+
+GeminiAgent::GeminiAgent(GeminiProvider *provider, const QString &workingDirectory, QObject *parent)
+    : AgentBackend(parent), provider_(provider), program_(provider->program()), workingDirectory_(workingDirectory),
+      process_(new QProcess(this))
 {
     connect(process_, &QProcess::readyReadStandardOutput, this, [this] {
         buffer_ += process_->readAllStandardOutput();
@@ -153,58 +266,6 @@ bool GeminiAgent::isRunning() const { return process_->state() != QProcess::NotR
 QString GeminiAgent::statusText() const
 {
     return busy_ ? "Gemini is responding…" : "Gemini ready";
-}
-
-AgentHelp GeminiAgent::help() const
-{
-    return {{"Gemini CLI headless mode:",
-             "  Send messages with Enter or Send to Gemini.",
-             "  Each response streams JSON events; later messages resume the same session.",
-             "  Authenticate Gemini CLI before using this window.",
-             "  If folder trust is enabled, trust the working folder in Gemini CLI first.",
-             "  Headless mode: https://geminicli.com/docs/cli/headless/",
-             "Installed Gemini CLI commands and options:"},
-            "Gemini CLI", program_, {"--help"}};
-}
-
-QString GeminiAgent::externalLock(const QString &id) const
-{
-    return commandLineLock(id);
-}
-
-void GeminiAgent::loadConversations()
-{
-    reportIndexError(index_.load());
-}
-
-void GeminiAgent::refreshConversations()
-{
-    if (!executableChecked_) {
-        executableChecked_ = true;
-        if (QStandardPaths::findExecutable(program_).isEmpty())
-            emit message("[Gemini CLI is not installed or is not in PATH. Install it or use --gemini /absolute/path/to/gemini.]");
-    }
-    QSet<QString> discoveredIds;
-    bool changed = false;
-    for (QJsonObject entry : discoverSessions()) {
-        const QString id = entry.value("id").toString();
-        discoveredIds.insert(id);
-        // Keep what the index knows when the session file lacks a first prompt or start time.
-        const QJsonObject old = index_.value(id);
-        if (entry.value("title").toString() == id && !old.value("title").toString().isEmpty())
-            entry.insert("title", old.value("title"));
-        if (entry.value("createdAt").toInteger() <= 0 && old.value("createdAt").toInteger() > 0)
-            entry.insert("createdAt", old.value("createdAt"));
-        changed = index_.insert(entry) || changed;
-    }
-    if (changed) reportIndexError(index_.save());
-    emit conversationsChanged();
-    emit message(QString("[Gemini sessions discovered: %1]").arg(discoveredIds.size()));
-}
-
-void GeminiAgent::reportIndexError(const QString &error)
-{
-    if (!error.isEmpty()) emit message("[" + error + "]");
 }
 
 bool GeminiAgent::newConversation(const QString &workingDirectory)
@@ -266,50 +327,13 @@ void GeminiAgent::loadHistory(const QString &id, const QString &, bool older)
         return;
     }
     history_ = {};
-    QString filePath = sessionFiles_.value(id, index_.value(id).value("file").toString());
-    if (!QFileInfo(filePath).isFile()) {
-        discoverSessions();
-        filePath = sessionFiles_.value(id);
-    }
+    const QString filePath = provider_ ? provider_->sessionFile(id) : QString();
     if (filePath.isEmpty()) {
         emit historyLoaded(id, {}, false, "The Gemini session file was not found.");
         return;
     }
     history_.reset(id, readHistory(filePath), kHistoryPageSize);
     emit historyLoaded(id, history_.visible(), history_.hasMore(), {});
-}
-
-QList<QJsonObject> GeminiAgent::discoverSessions()
-{
-    QHash<QString, QString> projectPaths;
-    QFile projects(QDir(dataDirectory_).filePath("projects.json"));
-    if (projects.open(QIODevice::ReadOnly)) {
-        const QJsonObject entries = QJsonDocument::fromJson(projects.readAll()).object()
-                                        .value("projects").toObject();
-        for (auto it = entries.begin(); it != entries.end(); ++it) {
-            if (QFileInfo(it.key()).isAbsolute() && !it.value().toString().isEmpty())
-                projectPaths.insert(it.value().toString(), it.key());
-        }
-    }
-    QList<QJsonObject> sessions;
-    const QDir profileRoot(QDir(dataDirectory_).filePath("tmp"));
-    for (const QFileInfo &profile : profileRoot.entryInfoList(QDir::Dirs | QDir::NoDotAndDotDot)) {
-        QString path = projectPaths.value(profile.fileName());
-        if (path.isEmpty()) {
-            QFile root(QDir(profile.filePath()).filePath(".project_root"));
-            if (root.open(QIODevice::ReadOnly)) path = QString::fromUtf8(root.readAll()).trimmed();
-        }
-        if (!QFileInfo(path).isAbsolute()) continue;
-        const QDir chats(QDir(profile.filePath()).filePath("chats"));
-        for (const QFileInfo &file : chats.entryInfoList({"session-*.jsonl", "session-*.json"}, QDir::Files, QDir::Name)) {
-            const QJsonObject session = readSession(file, path);
-            const QString id = session.value("id").toString();
-            if (id.isEmpty()) continue;
-            sessionFiles_.insert(id, session.value("file").toString());
-            sessions.append(session);
-        }
-    }
-    return sessions;
 }
 
 void GeminiAgent::sendNextPrompt()
@@ -347,10 +371,7 @@ void GeminiAgent::handleLine(const QByteArray &line)
         if (!id.isEmpty()) {
             sessionId_ = id;
             emit conversationOpened(id, false);
-            if (index_.remember(id, workingDirectory_, firstPrompt_)) {
-                reportIndexError(index_.save());
-                emit conversationsChanged();
-            }
+            if (provider_) provider_->rememberConversation(id, workingDirectory_, firstPrompt_);
         }
     } else if (type == "message" && event.value("role").toString() == "assistant") {
         const QString content = event.value("content").toString();

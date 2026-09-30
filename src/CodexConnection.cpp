@@ -26,7 +26,7 @@ void limitPreview(QJsonObject &thread)
 
 CodexConnection::CodexConnection(const QString &program, const QString &workingDirectory, const QString &indexPath,
                                  QObject *parent)
-    : QObject(parent), program_(program), workingDirectory_(workingDirectory), indexPath_(indexPath),
+    : AgentProvider(parent), program_(program), workingDirectory_(workingDirectory), indexPath_(indexPath),
       server_(new QProcess(this))
 {
     connect(server_, &QProcess::started, this, [this] {
@@ -92,6 +92,18 @@ CodexConnection::~CodexConnection()
             server_->waitForFinished(1000);
         }
     }
+}
+
+AgentHelp CodexConnection::help() const
+{
+    return {{"Codex connection: codex app-server --stdio (direct JSONL).",
+             "Installed Codex App Server commands and options (reference; CLI subcommands are not chat messages):"},
+            "App Server", program_, {"app-server", "--help"}};
+}
+
+AgentBackend *CodexConnection::createChat(const QString &workingDirectory, QObject *parent)
+{
+    return new CodexAgent(this, workingDirectory, parent);
 }
 
 void CodexConnection::start()

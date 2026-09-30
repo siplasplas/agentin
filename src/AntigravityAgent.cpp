@@ -9,9 +9,58 @@
 #include <QStandardPaths>
 #include <QTimer>
 
-AntigravityAgent::AntigravityAgent(const QString &program, const QString &workingDirectory, const QString &indexPath,
-                                   QObject *parent)
-    : AgentBackend(parent), program_(program), workingDirectory_(workingDirectory), index_("Antigravity", indexPath),
+AntigravityProvider::AntigravityProvider(const QString &program, const QString &indexPath, QObject *parent)
+    : AgentProvider(parent), program_(program), index_("Antigravity", indexPath)
+{
+}
+
+AgentHelp AntigravityProvider::help() const
+{
+    return {{"Antigravity CLI headless mode:",
+             "  Send messages with Enter or Send. Later messages resume the same conversation ID.",
+             "  Create a chat to choose its working directory, or double-click a saved chat to resume it.",
+             "  Authenticate once in the interactive agy CLI before using this window.",
+             "  CLI documentation: https://antigravity.google/docs/cli/headless/",
+             "Installed Antigravity CLI commands and options:"},
+            "Antigravity CLI", program_, {"--help"}};
+}
+
+QString AntigravityProvider::externalLock(const QString &id) const
+{
+    return commandLineLock(id);
+}
+
+void AntigravityProvider::loadConversations()
+{
+    reportIndexError(index_.load());
+}
+
+void AntigravityProvider::refreshConversations()
+{
+    reportIndexError(index_.load());
+    emit conversationsChanged();
+}
+
+AgentBackend *AntigravityProvider::createChat(const QString &workingDirectory, QObject *parent)
+{
+    return new AntigravityAgent(this, workingDirectory, parent);
+}
+
+void AntigravityProvider::rememberConversation(const QString &id, const QString &workingDirectory,
+                                               const QString &firstPrompt)
+{
+    if (!index_.remember(id, workingDirectory, firstPrompt)) return;
+    reportIndexError(index_.save());
+    emit conversationsChanged();
+}
+
+void AntigravityProvider::reportIndexError(const QString &error)
+{
+    if (!error.isEmpty()) emit message("[" + error + "]");
+}
+
+AntigravityAgent::AntigravityAgent(AntigravityProvider *provider, const QString &workingDirectory, QObject *parent)
+    : AgentBackend(parent), provider_(provider), program_(provider->program()), workingDirectory_(workingDirectory),
       process_(new QProcess(this))
 {
     connect(process_, &QProcess::readyReadStandardOutput, this, &AntigravityAgent::drainOutput);
@@ -53,45 +102,10 @@ QString AntigravityAgent::statusText() const
     return "Antigravity ready";
 }
 
-AgentHelp AntigravityAgent::help() const
-{
-    return {{"Antigravity CLI headless mode:",
-             "  Send messages with Enter or Send. Later messages resume the same conversation ID.",
-             "  Create a chat to choose its working directory, or double-click a saved chat to resume it.",
-             "  Authenticate once in the interactive agy CLI before using this window.",
-             "  CLI documentation: https://antigravity.google/docs/cli/headless/",
-             "Installed Antigravity CLI commands and options:"},
-            "Antigravity CLI", program_, {"--help"}};
-}
-
-QString AntigravityAgent::externalLock(const QString &id) const
-{
-    return commandLineLock(id);
-}
-
-void AntigravityAgent::loadConversations()
-{
-    reportIndexError(index_.load());
-}
-
-void AntigravityAgent::refreshConversations()
-{
-    reportIndexError(index_.load());
-    emit conversationsChanged();
-}
-
 void AntigravityAgent::rememberConversation()
 {
     emit conversationOpened(conversationId_, false);
-    if (index_.remember(conversationId_, workingDirectory_, firstPrompt_)) {
-        reportIndexError(index_.save());
-        emit conversationsChanged();
-    }
-}
-
-void AntigravityAgent::reportIndexError(const QString &error)
-{
-    if (!error.isEmpty()) emit message("[" + error + "]");
+    if (provider_) provider_->rememberConversation(conversationId_, workingDirectory_, firstPrompt_);
 }
 
 bool AntigravityAgent::newConversation(const QString &workingDirectory)

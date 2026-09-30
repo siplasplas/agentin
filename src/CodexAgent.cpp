@@ -33,10 +33,7 @@ QList<ChatEntry> historyEntries(const QJsonObject &item)
 CodexAgent::CodexAgent(CodexConnection *connection, const QString &workingDirectory, QObject *parent)
     : AgentBackend(parent), connection_(connection), workingDirectory_(workingDirectory)
 {
-    // Until chats get their own tabs, the only Codex chat also reports the connection's messages and list.
-    connect(connection, &CodexConnection::message, this, &AgentBackend::message);
     connect(connection, &CodexConnection::stateChanged, this, &AgentBackend::stateChanged);
-    connect(connection, &CodexConnection::conversationsChanged, this, &AgentBackend::conversationsChanged);
     connect(connection, &CodexConnection::connected, this, [this] {
         if (historyPending_) loadHistory(historyThreadId_, {}, false);
     });
@@ -52,11 +49,6 @@ CodexAgent::~CodexAgent()
     closeThread();
 }
 
-QString CodexAgent::program() const
-{
-    return connection_ ? connection_->program() : QString();
-}
-
 QString CodexAgent::statusText() const
 {
     if (!connection_ || !connection_->isRunning()) return "Server: not running";
@@ -64,28 +56,6 @@ QString CodexAgent::statusText() const
     if (threadOpening_) return "Opening Codex conversation…";
     if (connection_->isConnected()) return "Codex ready";
     return "Connecting to Codex App Server…";
-}
-
-AgentHelp CodexAgent::help() const
-{
-    return {{"Codex connection: codex app-server --stdio (direct JSONL).",
-             "Installed Codex App Server commands and options (reference; CLI subcommands are not chat messages):"},
-            "App Server", program(), {"app-server", "--help"}};
-}
-
-void CodexAgent::loadConversations()
-{
-    if (connection_) connection_->loadConversations();
-}
-
-void CodexAgent::refreshConversations()
-{
-    if (connection_) connection_->refreshConversations();
-}
-
-QList<QJsonObject> CodexAgent::conversations() const
-{
-    return connection_ ? connection_->conversations() : QList<QJsonObject>{};
 }
 
 bool CodexAgent::newConversation(const QString &workingDirectory)
@@ -228,9 +198,13 @@ void CodexAgent::openThread(const QString &threadId, bool resumed)
     emit stateChanged();
 }
 
+// Detaches this chat from its thread so the server can unload it once no client uses it.
 void CodexAgent::closeThread()
 {
-    if (connection_) connection_->unregisterThread(threadId_);
+    if (connection_ && !threadId_.isEmpty()) {
+        connection_->unregisterThread(threadId_);
+        connection_->request("thread/unsubscribe", {{"threadId", threadId_}});
+    }
     threadId_.clear();
     resetTurn();
 }
