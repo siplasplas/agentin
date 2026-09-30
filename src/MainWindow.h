@@ -44,6 +44,7 @@ private:
     void loadSettings();
     void saveSettings();
     void showOptionsDialog();
+    void showApprovalsDialog();
     void loadRecentDirectories();
     void saveRecentDirectories();
     void rememberRecentDirectory(const QString &path);

@@ -388,6 +388,20 @@ void ClaudeAgent::answerApproval(int id, ApprovalDecision decision)
     send({{"type", "approval_response"}, {"id", id}, {"allow", allow}, {"decision", value}});
 }
 
+// Session rules live in the Claude Code process, so the bridge reconnects and resumes the session.
+void ClaudeAgent::resetSessionApprovals()
+{
+    if (busy_) {
+        emit message("[Wait for " + name_ + " to finish before withdrawing its session approvals.]");
+        return;
+    }
+    if (!isRunning()) return;
+    ready_ = false;
+    send({{"type", "reset_permissions"}});
+    emit message("[" + name_ + " session approvals withdrawn; reconnecting]");
+    emit stateChanged();
+}
+
 void ClaudeAgent::answerQuestions(int id, const QHash<QString, QStringList> &answers)
 {
     const int count = pendingQuestionCounts_.take(id);

@@ -17,7 +17,7 @@ or without stopping the turn, numbered options with descriptions (several where 
 numbers or an own answer typed in the message field, hidden input for secrets, and lasting rules
 the agent proposes (Codex command prefixes, Claude Code's suggested permission rules). Still open:
 
-- **Managing rules:** list and remove the lasting rules added from agentdeskt.
+- **Codex session approvals:** find a way to withdraw them without restarting the App Server.
 
 ## Directory lock for running turns
 

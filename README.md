@@ -242,7 +242,13 @@ similar actions run without asking from now on: Codex allows commands with the
 proposed prefix (for example `git status`), and Claude saves its suggested rule
 where Claude Code proposes it, such as the project's local settings; the panel
 shows the rule first. Declining lets the agent continue, and **Decline and stop**
-also ends its turn. Question options are listed with numbers and descriptions: choose
+also ends its turn. **Settings → Approvals…** lists the lasting rules (Codex's
+`~/.codex/rules/*.rules`, and Claude Code's `permissions.allow` in the user
+settings and in the `.claude` settings of the directories of open chats and
+recent directories) and the approvals given for the session in open chats, and
+removes the selected ones. Codex may keep using a removed rule until its App
+Server restarts and cannot withdraw session approvals; for a Claude or GLM
+chat, withdrawing reconnects it and withdraws all of its session approvals. Question options are listed with numbers and descriptions: choose
 them in the panel (several where the question allows it) or type their numbers
 in the message field, for example `2` or `1, 3`. Where the agent accepts an
 answer in your own words, type it in the message field with the usual Enter

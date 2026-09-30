@@ -267,6 +267,14 @@ class Bridge:
             self.connected = False
             await self.connect(resume=True)
             send({"type": "directory_added", "path": path})
+        elif kind == "reset_permissions":
+            # Rules allowed for the session live in the CLI process; a new connection starts without them.
+            if self.turn_task is not None:
+                send({"type": "error", "message": f"Wait for {self.provider.upper()} to finish before withdrawing approvals"})
+                return
+            await self.client.disconnect()
+            self.connected = False
+            await self.connect(resume=self.session_id is not None)
         elif kind == "settings":
             # The model can change within a session; the effort is a connection option, so changing
             # it reconnects and resumes the session.

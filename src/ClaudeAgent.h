@@ -85,6 +85,8 @@ public:
     void loadHistory(const QString &id, const QString &workingDirectory, bool older) override;
     void cancelHistory() override;
     void answerApproval(int id, ApprovalDecision decision) override;
+    bool canResetSessionApprovals() const override { return true; }
+    void resetSessionApprovals() override;
     void answerQuestions(int id, const QHash<QString, QStringList> &answers) override;
 
 private:

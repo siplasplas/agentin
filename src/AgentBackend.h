@@ -189,6 +189,9 @@ public:
     virtual void cancelHistory() = 0;
 
     virtual void answerApproval(int id, ApprovalDecision decision) = 0;
+    // Withdraws everything allowed "for this session", where the agent can do that.
+    virtual bool canResetSessionApprovals() const { return false; }
+    virtual void resetSessionApprovals() {}
     // Answers are keyed by AgentQuestion::id; a missing key means the question was not answered.
     // A question with multiSelect may have several values.
     virtual void answerQuestions(int id, const QHash<QString, QStringList> &answers) = 0;

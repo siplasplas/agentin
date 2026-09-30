@@ -1,4 +1,5 @@
 #include "AntigravityAgent.h"
+#include "ApprovalRules.h"
 #include "ChatTab.h"
 #include "ClaudeAgent.h"
 #include "CodexConnection.h"
@@ -121,6 +122,8 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     auto *settingsMenu = menuBar()->addMenu("Settings");
     auto *optionsAction = settingsMenu->addAction("Options…");
     connect(optionsAction, &QAction::triggered, this, &MainWindow::showOptionsDialog);
+    auto *approvalsAction = settingsMenu->addAction("Approvals…");
+    connect(approvalsAction, &QAction::triggered, this, &MainWindow::showApprovalsDialog);
 
     auto *central = new QWidget(this);
     auto *layout = new QVBoxLayout(central);
@@ -548,6 +551,96 @@ void MainWindow::showOptionsDialog()
     saveSettings();
     modelControlsState_.clear();
     updateModelControls();
+}
+
+// Lists lasting "always" rules and the approvals given for the session in open chats, and removes
+// the selected ones where the agent allows it.
+void MainWindow::showApprovalsDialog()
+{
+    QDialog dialog(this);
+    dialog.setWindowTitle("Approvals");
+    dialog.resize(760, 420);
+    auto *layout = new QVBoxLayout(&dialog);
+    auto *tree = new QTreeWidget(&dialog);
+    tree->setObjectName("approvalsTree");
+    tree->setHeaderLabels({"Agent", "Allowed", "Where"});
+    tree->setRootIsDecorated(true);
+    layout->addWidget(tree);
+    auto *note = new QLabel("Codex may keep using a removed rule until its App Server restarts. Codex cannot "
+                            "withdraw approvals given for a session; they end when agentdeskt closes. Withdrawing "
+                            "the session approvals of a Claude or GLM chat reconnects it and withdraws all of them.",
+                            &dialog);
+    note->setWordWrap(true);
+    layout->addWidget(note);
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Close, &dialog);
+    QPushButton *remove = buttons->addButton("Remove", QDialogButtonBox::ActionRole);
+    layout->addWidget(buttons);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+
+    QList<ApprovalRule> rules;
+    const auto fill = [this, tree, &rules] {
+        tree->clear();
+        QStringList projects{workingDirectory_};
+        projects += recentDirectories_;
+        for (int i = 0; i < tabs_->count(); ++i) {
+            if (const ChatTab *tab = chatTab(tabs_->widget(i))) projects.append(tab->workingDirectory());
+        }
+        rules = codexRules() + claudeRules(projects);
+        auto *lasting = new QTreeWidgetItem(tree, {"Always allowed"});
+        for (int i = 0; i < rules.size(); ++i) {
+            auto *item = new QTreeWidgetItem(lasting, {rules.at(i).agent, rules.at(i).rule, rules.at(i).where});
+            item->setData(0, Qt::UserRole, i);
+            item->setToolTip(1, rules.at(i).rule);
+            item->setToolTip(2, rules.at(i).file);
+        }
+        auto *session = new QTreeWidgetItem(tree, {"Allowed for this session"});
+        for (int i = 0; i < tabs_->count(); ++i) {
+            const ChatTab *tab = chatTab(tabs_->widget(i));
+            if (!tab) continue;
+            for (const QString &approval : tab->sessionApprovals()) {
+                auto *item = new QTreeWidgetItem(session, {tab->provider()->name(), approval,
+                                                           "chat \"" + tab->title().left(40) + "\""});
+                item->setData(0, Qt::UserRole + 1, QVariant::fromValue<QObject *>(tabs_->widget(i)));
+                item->setToolTip(1, approval);
+            }
+        }
+        for (QTreeWidgetItem *group : {lasting, session}) {
+            group->setExpanded(true);
+            group->setFirstColumnSpanned(true);
+            if (group->childCount() == 0) new QTreeWidgetItem(group, {QString(), "(none)"});
+        }
+        tree->resizeColumnToContents(0);
+        tree->setColumnWidth(1, 380);
+    };
+    fill();
+    const auto updateRemove = [tree, remove] {
+        const QTreeWidgetItem *item = tree->currentItem();
+        remove->setEnabled(item && (item->data(0, Qt::UserRole).isValid() || item->data(0, Qt::UserRole + 1).isValid()));
+    };
+    connect(tree, &QTreeWidget::currentItemChanged, &dialog, updateRemove);
+    updateRemove();
+    connect(remove, &QPushButton::clicked, &dialog, [this, tree, &rules, fill, updateRemove] {
+        const QTreeWidgetItem *item = tree->currentItem();
+        if (!item) return;
+        if (item->data(0, Qt::UserRole).isValid()) {
+            const ApprovalRule rule = rules.value(item->data(0, Qt::UserRole).toInt());
+            const QString error = removeApprovalRule(rule);
+            appendLine(error.isEmpty() ? "[Removed the " + rule.agent + " rule allowing " + rule.rule + "]"
+                                       : "[Could not remove the rule: " + error + "]");
+        } else if (auto *page = qobject_cast<QWidget *>(item->data(0, Qt::UserRole + 1).value<QObject *>())) {
+            ChatTab *tab = tabs_->indexOf(page) >= 0 ? chatTab(page) : nullptr;
+            if (tab && !tab->agent()->canResetSessionApprovals()) {
+                appendLine("[" + tab->provider()->name() + " cannot withdraw approvals given for a session.]");
+            } else if (tab && tab->agent()->isResponding()) {
+                appendLine("[Wait for " + tab->provider()->name() + " to finish before withdrawing its session approvals.]");
+            } else if (tab) {
+                tab->resetSessionApprovals();
+            }
+        }
+        fill();
+        updateRemove();
+    });
+    dialog.exec();
 }
 
 // Recently used working directories are shown in the directory chooser of the New chat dialog.

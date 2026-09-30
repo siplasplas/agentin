@@ -319,9 +319,21 @@ void ChatTab::showHistory(const QList<ChatEntry> &entries, bool hasMore, const Q
 void ChatTab::answerApproval(ApprovalDecision decision)
 {
     if (requests_.isEmpty() || !requests_.first().approval) return;
-    const int id = requests_.takeFirst().id;
-    agent_->answerApproval(id, decision);
+    const PendingRequest request = requests_.takeFirst();
+    if (decision == ApprovalDecision::AcceptForSession) {
+        QStringList lines = request.description.split('\n', Qt::SkipEmptyParts);
+        for (QString &line : lines) line = line.trimmed();
+        sessionApprovals_.append(lines.join(" · "));
+    }
+    agent_->answerApproval(request.id, decision);
     emit requestsChanged();
+}
+
+void ChatTab::resetSessionApprovals()
+{
+    if (!agent_->canResetSessionApprovals() || agent_->isResponding()) return;
+    agent_->resetSessionApprovals();
+    sessionApprovals_.clear();
 }
 
 void ChatTab::answerQuestion(const QStringList &values)

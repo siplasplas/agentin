@@ -70,6 +70,9 @@ public:
     const PendingRequest *pendingRequest() const { return requests_.isEmpty() ? nullptr : &requests_.first(); }
     qsizetype pendingRequestCount() const { return requests_.size(); }
     void answerApproval(ApprovalDecision decision);
+    // Approvals given "for this session" in this chat, as the user reads them.
+    QStringList sessionApprovals() const { return sessionApprovals_; }
+    void resetSessionApprovals();
     void answerQuestion(const QStringList &values);
     // Sends the answers given so far and leaves the remaining questions unanswered.
     void skipQuestions();
@@ -106,6 +109,7 @@ private:
     QStringList sentMessages_;
     QString lockNotice_;
     QList<PendingRequest> requests_;
+    QStringList sessionApprovals_;
     TurnLocks *locks_ = nullptr;
     QTimer *retry_;
     QStringList outgoing_;
