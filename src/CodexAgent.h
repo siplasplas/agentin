@@ -53,6 +53,7 @@ private:
     void sendNextPrompt();
     void sendStopIfPossible();
     void resetTurn();
+    void refreshAfterCompaction();
     QJsonObject sandboxPolicy() const;
 
     QPointer<CodexConnection> connection_;
@@ -85,6 +86,8 @@ private:
     QList<ChatEntry> historyEntries_;
     quint64 historyGeneration_ = 0;
     bool historyPending_ = false;
+    bool refreshingHistory_ = false;
+    bool compactedHistoryPending_ = false;
     bool threadOpening_ = false;
     bool busy_ = false;
     bool stopRequested_ = false;

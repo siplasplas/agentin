@@ -169,6 +169,8 @@ bool ChatTab::startNew(const QString &workingDirectory)
     title_ = "New chat";
     live_ = true;
     liveTranscript_.clear();
+    historyRefreshCutoff_ = 0;
+    historyRefreshQueuedText_.clear();
     toolGroup_ = 0;
     turnUsage_ = {};
     conversationUsage_ = {};
@@ -198,6 +200,8 @@ void ChatTab::showPreview(AgentProvider *provider, const QString &id, const QStr
     pendingAttach_ = false;
     hasMore_ = false;
     liveTranscript_.clear();
+    historyRefreshCutoff_ = 0;
+    historyRefreshQueuedText_.clear();
     toolGroup_ = 0;
     turnUsage_ = {};
     conversationUsage_ = {};
@@ -364,6 +368,27 @@ void ChatTab::setAgent(AgentBackend *agent)
         conversationUsageFromAgent_ = true;
         conversationUsage_ = usage;
         emit changed();
+    });
+    connect(agent, &AgentBackend::contextCompacted, this, [this] { appendText("\n[Context compacted]\n"); });
+    connect(agent, &AgentBackend::historyRefreshStarted, this, [this] {
+        historyRefreshCutoff_ = liveTranscript_.size();
+        historyRefreshQueuedText_.clear();
+        historyRefreshSentCount_ = sentMessages_.size() - outgoing_.size();
+        for (const QString &text : outgoing_) historyRefreshQueuedText_ += "\nYou: " + text + '\n';
+    });
+    connect(agent, &AgentBackend::historyRefreshed, this,
+            [this](const QString &id, const QList<ChatEntry> &entries, bool hasMore) {
+        if (id != id_) return;
+        // No next turn starts until the snapshot arrives. Keep prompts queued before and during it.
+        liveTranscript_ = historyRefreshQueuedText_ + liveTranscript_.mid(historyRefreshCutoff_);
+        historyRefreshCutoff_ = 0;
+        historyRefreshQueuedText_.clear();
+        sentMessages_ = sentMessages_.mid(historyRefreshSentCount_);
+        historyRefreshSentCount_ = 0;
+        // The retained live text now contains only queued prompts, so old tool offsets no longer apply.
+        for (QTextBlock block = document_->begin(); block.isValid(); block = block.next())
+            block.setUserData(nullptr);
+        showHistory(entries, hasMore, {});
     });
     connect(agent, &AgentBackend::historyLoaded, this,
             [this](const QString &id, const QList<ChatEntry> &entries, bool hasMore, const QString &notice) {

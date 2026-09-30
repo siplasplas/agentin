@@ -118,6 +118,9 @@ private:
     QString path_;
     QString title_;
     QString liveTranscript_;
+    qsizetype historyRefreshCutoff_ = 0;
+    QString historyRefreshQueuedText_;
+    qsizetype historyRefreshSentCount_ = 0;
     QStringList historyMessages_;
     QStringList sentMessages_;
     QString lockNotice_;

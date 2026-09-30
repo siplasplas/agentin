@@ -22,9 +22,14 @@ QList<ChatEntry> historyEntries(const QJsonObject &item)
         const QString text = item.value("text").toString().trimmed();
         if (!text.isEmpty()) return {{"assistant", text}};
     } else if (type == "commandExecution") {
-        return {{"tool", "$ " + item.value("command").toString()}};
+        QString text = "$ " + item.value("command").toString();
+        const QString output = item.value("aggregatedOutput").toString();
+        if (!output.isEmpty()) text += '\n' + output;
+        return {{"tool", text}};
     } else if (type == "fileChange") {
         return {{"tool", "file changes"}};
+    } else if (type == "contextCompaction") {
+        return {{"tool", "Context compacted"}};
     }
     return {};
 }
@@ -53,6 +58,9 @@ CodexAgent::CodexAgent(CodexConnection *connection, const QString &workingDirect
         threadOpening_ = false;
         threadId_.clear();
         queuedPrompts_.clear();
+        if (refreshingHistory_) ++historyGeneration_;
+        refreshingHistory_ = false;
+        compactedHistoryPending_ = false;
         resetTurn();
         // Every message sent ends with turnCompleted, so its tab can release the directory it holds.
         if (working) emit turnCompleted("failed", "the Codex App Server disconnected");
@@ -167,6 +175,44 @@ void CodexAgent::loadHistory(const QString &id, const QString &, bool older)
         historyEntries_ = page + historyEntries_;
         historyCursor_ = result.value("nextCursor").toString();
         emit historyLoaded(id, historyEntries_, !historyCursor_.isEmpty(), {});
+    });
+}
+
+void CodexAgent::refreshAfterCompaction()
+{
+    if (refreshingHistory_ || threadId_.isEmpty() || !connection_ || !connection_->isConnected()) return;
+    compactedHistoryPending_ = false;
+    refreshingHistory_ = true;
+    const quint64 generation = ++historyGeneration_;
+    historyPending_ = false;
+    emit historyRefreshStarted();
+    const QString id = threadId_;
+    connection_->request("thread/items/list", {{"threadId", id}, {"limit", kHistoryPageSize}, {"sortDirection", "desc"}}, this,
+                         [this, generation, id](const QJsonObject &result, const QString &error) {
+        if (id != threadId_) return;
+        if (generation != historyGeneration_) {
+            refreshingHistory_ = false;
+            sendNextPrompt();
+            return;
+        }
+        if (!error.isEmpty()) {
+            refreshingHistory_ = false;
+            emit message("[Could not refresh the conversation after compaction: " + error + "]");
+            sendNextPrompt();
+            return;
+        }
+        QList<ChatEntry> page;
+        const QJsonArray items = result.value("data").toArray();
+        for (qsizetype i = items.size() - 1; i >= 0; --i) {
+            const QJsonObject entry = items.at(i).toObject();
+            page.append(historyEntries(entry.value("item").toObject()));
+        }
+        historyThreadId_ = id;
+        historyEntries_ = page;
+        historyCursor_ = result.value("nextCursor").toString();
+        refreshingHistory_ = false;
+        emit historyRefreshed(id, historyEntries_, !historyCursor_.isEmpty());
+        sendNextPrompt();
     });
 }
 
@@ -288,6 +334,9 @@ void CodexAgent::closeThread()
         connection_->request("thread/unsubscribe", {{"threadId", threadId_}});
     }
     threadId_.clear();
+    if (refreshingHistory_) ++historyGeneration_;
+    refreshingHistory_ = false;
+    compactedHistoryPending_ = false;
     resetTurn();
 }
 
@@ -318,7 +367,7 @@ void CodexAgent::startThread()
 
 void CodexAgent::sendNextPrompt()
 {
-    if (!connection_ || !connection_->isConnected() || threadId_.isEmpty() || busy_ || queuedPrompts_.isEmpty()) return;
+    if (!connection_ || !connection_->isConnected() || threadId_.isEmpty() || busy_ || refreshingHistory_ || queuedPrompts_.isEmpty()) return;
     const QString text = queuedPrompts_.takeFirst();
     busy_ = true;
     activeTurnId_.clear();
@@ -404,11 +453,21 @@ void CodexAgent::handleNotification(const QString &method, const QJsonObject &pa
             emit toolFinished("shell", item.value("status").toString());
         } else if (type == "fileChange") {
             emit toolFinished("file changes", item.value("status").toString());
+        } else if (type == "contextCompaction") {
+            compactedHistoryPending_ = true;
+            emit contextCompacted();
+            if (!busy_) refreshAfterCompaction();
         }
+    } else if (method == "thread/compacted") {
+        // Older App Servers report the same event without a contextCompaction item.
+        compactedHistoryPending_ = true;
+        emit contextCompacted();
+        if (!busy_) refreshAfterCompaction();
     } else if (method == "turn/completed") {
         const QJsonObject turn = params.value("turn").toObject();
         resetTurn();
         emit turnCompleted(turn.value("status").toString(), turn.value("error").toObject().value("message").toString());
+        if (compactedHistoryPending_) refreshAfterCompaction();
         emit stateChanged();
         sendNextPrompt();
     } else if (method == "thread/tokenUsage/updated") {

@@ -171,6 +171,12 @@ input, cached and output tokens. For agents other than Codex, the conversation
 figure covers the turns sent from the tab. Antigravity's statistics are read
 where its result event carries them.
 
+After Codex compacts its context, a marker appears in the chat. When the running
+turn ends, the chat reloads its latest stored history from App Server before
+starting another turn. Messages queued before or during the refresh stay visible
+without being appended a second time. Older messages remain available through
+**Show earlier messages**. A refresh error leaves the existing transcript intact.
+
 The chat, message field and log use a 10-point monospace font by default.
 **Settings → Chat font…** changes the font and size and saves the choice.
 **Settings → Chat font size…** also accepts fractional sizes, such as 10.5 points,
