@@ -21,6 +21,7 @@ public:
     void loadConversations() override;
     void refreshConversations() override;
     QList<QJsonObject> conversations() const override { return index_.treeEntries(); }
+    QList<AgentModel> models() const override { return models_; }
     AgentBackend *createChat(const QString &workingDirectory, QObject *parent) override;
 
     QString program() const { return program_; }
@@ -28,9 +29,11 @@ public:
 
 private:
     void reportIndexError(const QString &error);
+    void requestModels();
 
     QString program_;
     ConversationIndex index_;
+    QList<AgentModel> models_;
 };
 
 class AntigravityAgent : public AgentBackend
@@ -46,6 +49,8 @@ public:
     QString statusText() const override;
     bool isResponding() const override { return busy_; }
     bool canInterrupt() const override { return busy_ && !stopRequested_; }
+    QString model() const override { return model_; }
+    void setModel(const QString &model, const QString &effort) override;
     bool newConversation(const QString &workingDirectory) override;
     bool resumeConversation(const QString &id, const QString &workingDirectory) override;
     bool prompt(const QString &text) override;
@@ -68,6 +73,7 @@ private:
     QString workingDirectory_;
     QString conversationId_;
     QString firstPrompt_;
+    QString model_;
     QString errorDetails_;
     QString diagnostics_;
     QByteArray buffer_;

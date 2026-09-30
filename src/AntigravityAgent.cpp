@@ -33,6 +33,32 @@ QString AntigravityProvider::externalLock(const QString &id) const
 void AntigravityProvider::loadConversations()
 {
     reportIndexError(index_.load());
+    requestModels();
+}
+
+// `agy models` prints one model per line as "<id>\t<name>". The reasoning level is part of the model
+// (for example gemini-3.8-flash-high), so Antigravity chats offer no separate effort.
+void AntigravityProvider::requestModels()
+{
+    auto *process = new QProcess(this);
+    connect(process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this,
+            [this, process](int code, QProcess::ExitStatus status) {
+        process->deleteLater();
+        if (status != QProcess::NormalExit || code != 0) return;
+        QList<AgentModel> models{{{}, "Default model", "The model configured in Antigravity CLI", {}, {}, {}, true}};
+        for (const QString &line : QString::fromUtf8(process->readAllStandardOutput()).split('\n')) {
+            const QStringList fields = line.split('\t');
+            if (fields.size() < 2 || fields.first().trimmed().isEmpty()) continue;
+            models.append({fields.first().trimmed(), fields.at(1).trimmed(), fields.at(1).trimmed(), {}, {}, {}, false});
+        }
+        if (models.size() == 1) return;
+        models_ = models;
+        emit modelsChanged();
+    });
+    connect(process, &QProcess::errorOccurred, process, [process](QProcess::ProcessError error) {
+        if (error == QProcess::FailedToStart) process->deleteLater();
+    });
+    process->start(program_, {"models"});
 }
 
 void AntigravityProvider::refreshConversations()
@@ -61,7 +87,7 @@ void AntigravityProvider::reportIndexError(const QString &error)
 
 AntigravityAgent::AntigravityAgent(AntigravityProvider *provider, const QString &workingDirectory, QObject *parent)
     : AgentBackend(parent), provider_(provider), program_(provider->program()), workingDirectory_(workingDirectory),
-      process_(new QProcess(this))
+      model_(provider->defaultModel()), process_(new QProcess(this))
 {
     connect(process_, &QProcess::readyReadStandardOutput, this, &AntigravityAgent::drainOutput);
     connect(process_, &QProcess::readyReadStandardError, this, [this] {
@@ -106,6 +132,12 @@ void AntigravityAgent::rememberConversation()
 {
     emit conversationOpened(conversationId_, false);
     if (provider_) provider_->rememberConversation(conversationId_, workingDirectory_, firstPrompt_);
+}
+
+void AntigravityAgent::setModel(const QString &model, const QString &)
+{
+    model_ = model;
+    emit stateChanged();
 }
 
 bool AntigravityAgent::newConversation(const QString &workingDirectory)
@@ -174,6 +206,7 @@ void AntigravityAgent::sendNextPrompt()
     completionSent_ = false;
     QStringList arguments{"--output-format", "stream-json"};
     if (!conversationId_.isEmpty()) arguments << "--conversation" << conversationId_;
+    if (!model_.isEmpty()) arguments << "--model" << model_;
     arguments << "--prompt" << queuedPrompts_.takeFirst();
     process_->setWorkingDirectory(workingDirectory_);
     process_->start(program_, arguments);

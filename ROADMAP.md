@@ -2,11 +2,6 @@
 
 Planned work, roughly in order. Items move to `README.md` once they are implemented.
 
-## Model choice for Antigravity
-
-Codex, Claude, GLM and Gemini chats choose a model (and an effort where the agent has one).
-Antigravity still uses its default model: check what `agy` offers once it is installed.
-
 ## Approvals and questions in the chat
 
 Agents ask for approvals (run a command, change files, access the network) and ask questions with
