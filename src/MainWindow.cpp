@@ -1,6 +1,7 @@
 #include "AntigravityAgent.h"
 #include "ClaudeAgent.h"
 #include "CodexAgent.h"
+#include "CodexConnection.h"
 #include "GeminiAgent.h"
 #include "MainWindow.h"
 
@@ -58,7 +59,8 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
                        const QString &antigravityProgram, const QString &geminiDataDirectory)
     : QMainWindow(parent), workingDirectory_(workingDirectory),
       dataDirectory_(QFileInfo(codexIndexFile(codexIndexPath)).absolutePath()),
-      codex_(new CodexAgent(codexProgram, workingDirectory, codexIndexFile(codexIndexPath), this)),
+      codexConnection_(new CodexConnection(codexProgram, workingDirectory, codexIndexFile(codexIndexPath), this)),
+      codex_(new CodexAgent(codexConnection_, workingDirectory, this)),
       claude_(new ClaudeAgent(claudePython, claudeScript, workingDirectory, "claude",
                               QDir(dataDirectory_).filePath("claude-conversations.json"), this)),
       glm_(new ClaudeAgent(claudePython, claudeScript, workingDirectory, "glm",
@@ -173,7 +175,7 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
         appendLine("[Working directory does not exist: " + workingDirectory_ + "]");
         return;
     }
-    codex_->start();
+    codexConnection_->start();
     input_->setFocus();
 }
 

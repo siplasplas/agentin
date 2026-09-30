@@ -15,6 +15,7 @@ class QPushButton;
 class AntigravityAgent;
 class ClaudeAgent;
 class CodexAgent;
+class CodexConnection;
 class GeminiAgent;
 class QTreeWidget;
 class QTreeWidgetItem;
@@ -62,6 +63,7 @@ private:
 
     QString workingDirectory_;
     QString dataDirectory_;
+    CodexConnection *codexConnection_;
     CodexAgent *codex_;
     ClaudeAgent *claude_;
     ClaudeAgent *glm_;

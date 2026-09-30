@@ -128,17 +128,17 @@ for line in sys.stdin:
     elif method == "turn/start":
         send({"id": request["id"], "result": {"turn": {"id": "test-turn"}}})
         if request["params"]["input"][0]["text"].startswith("long"):
-            send({"method": "turn/started", "params": {"turn": {"id": "test-turn"}}})
+            send({"method": "turn/started", "params": {"threadId": "test-thread","turn": {"id": "test-turn"}}})
             continue
-        send({"method": "item/agentMessage/delta", "params": {
+        send({"method": "item/agentMessage/delta", "params": {"threadId": "test-thread",
             "itemId": "test-item", "delta": "Hello from App Server"}})
-        send({"method": "item/completed", "params": {
+        send({"method": "item/completed", "params": {"threadId": "test-thread",
             "item": {"id": "test-item", "type": "agentMessage", "text": "Hello from App Server"}}})
-        send({"method": "turn/completed", "params": {
+        send({"method": "turn/completed", "params": {"threadId": "test-thread",
             "turn": {"id": "test-turn", "status": "completed"}}})
     elif method == "turn/interrupt":
         send({"id": request["id"], "result": {}})
-        send({"method": "turn/completed", "params": {
+        send({"method": "turn/completed", "params": {"threadId": "test-thread",
             "turn": {"id": "test-turn", "status": "interrupted"}}})
 )PY");
     script.close();

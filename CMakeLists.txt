@@ -17,6 +17,8 @@ add_executable(agentdeskt
     src/AgentBackend.h
     src/CodexAgent.cpp
     src/CodexAgent.h
+    src/CodexConnection.cpp
+    src/CodexConnection.h
     src/ClaudeAgent.cpp
     src/ClaudeAgent.h
     src/GeminiAgent.cpp
@@ -45,6 +47,8 @@ if(BUILD_TESTING)
         src/AgentBackend.h
         src/CodexAgent.cpp
         src/CodexAgent.h
+        src/CodexConnection.cpp
+        src/CodexConnection.h
         src/ClaudeAgent.cpp
         src/ClaudeAgent.h
         src/GeminiAgent.cpp

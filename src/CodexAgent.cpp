@@ -1,15 +1,8 @@
 #include "CodexAgent.h"
 
-#include <QDateTime>
-#include <QDir>
-#include <QFile>
-#include <QFileInfo>
-#include <QJsonArray>
-#include <QJsonDocument>
-#include <QProcess>
-#include <QSaveFile>
+#include "CodexConnection.h"
 
-#include <algorithm>
+#include <QJsonArray>
 
 namespace {
 constexpr int kHistoryPageSize = 40;
@@ -35,95 +28,41 @@ QList<ChatEntry> historyEntries(const QJsonObject &item)
     }
     return {};
 }
-
-void limitPreview(QJsonObject &thread)
-{
-    if (!thread.value("preview").isString()) return;
-    QString preview = thread.value("preview").toString().simplified();
-    constexpr int limit = 200;
-    if (preview.size() > limit) preview = preview.left(limit - 1) + QChar(0x2026);
-    thread.insert("preview", preview);
-}
 }
 
-CodexAgent::CodexAgent(const QString &program, const QString &workingDirectory, const QString &indexPath,
-                       QObject *parent)
-    : AgentBackend(parent), program_(program), workingDirectory_(workingDirectory), indexPath_(indexPath),
-      server_(new QProcess(this))
+CodexAgent::CodexAgent(CodexConnection *connection, const QString &workingDirectory, QObject *parent)
+    : AgentBackend(parent), connection_(connection), workingDirectory_(workingDirectory)
 {
-    connect(server_, &QProcess::started, this, [this] {
-        sendRequest("initialize", {{"clientInfo", QJsonObject{
-            {"name", "agentdeskt"}, {"title", "agentdeskt Qt"}, {"version", "0.1.0"}}}});
+    // Until chats get their own tabs, the only Codex chat also reports the connection's messages and list.
+    connect(connection, &CodexConnection::message, this, &AgentBackend::message);
+    connect(connection, &CodexConnection::stateChanged, this, &AgentBackend::stateChanged);
+    connect(connection, &CodexConnection::conversationsChanged, this, &AgentBackend::conversationsChanged);
+    connect(connection, &CodexConnection::connected, this, [this] {
+        if (historyPending_) loadHistory(historyThreadId_, {}, false);
     });
-    connect(server_, &QProcess::readyReadStandardOutput, this, [this] {
-        readBuffer_ += server_->readAllStandardOutput();
-        qsizetype newline;
-        while ((newline = readBuffer_.indexOf('\n')) >= 0) {
-            const QByteArray line = readBuffer_.left(newline).trimmed();
-            readBuffer_.remove(0, newline + 1);
-            if (!line.isEmpty()) handleLine(line);
-        }
-    });
-    connect(server_, &QProcess::readyReadStandardError, this, [this] {
-        const QString text = QString::fromUtf8(server_->readAllStandardError()).trimmed();
-        if (!text.isEmpty()) emit message("[Server] " + text);
-    });
-    connect(server_, &QProcess::errorOccurred, this, [this](QProcess::ProcessError) {
-        emit message("[Server startup error] " + server_->errorString());
-        emit message("Executable: " + program_);
-        emit message("Working directory: " + server_->workingDirectory());
-        emit message("Try --codex /absolute/path/to/codex if the executable was not found.");
-        emit stateChanged();
-    });
-    connect(server_, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this,
-            [this](int code, QProcess::ExitStatus) {
-        if (syncing_) {
-            syncing_ = false;
-            stagedConversations_.clear();
-            emit message("[Codex conversation sync stopped: server disconnected]");
-        }
-        initialized_ = false;
-        busy_ = false;
+    connect(connection, &CodexConnection::disconnected, this, [this] {
         threadOpening_ = false;
-        stopRequested_ = false;
-        stopSent_ = false;
         threadId_.clear();
-        activeTurnId_.clear();
-        emit conversationsChanged();
-        emit message(QString("[Server exited with code %1]").arg(code));
-        emit stateChanged();
+        resetTurn();
     });
 }
 
 CodexAgent::~CodexAgent()
 {
-    disconnect(server_, nullptr, this, nullptr);
-    if (server_->state() != QProcess::NotRunning) {
-        server_->terminate();
-        if (!server_->waitForFinished(1000)) {
-            server_->kill();
-            server_->waitForFinished(1000);
-        }
-    }
+    closeThread();
 }
 
-void CodexAgent::start()
+QString CodexAgent::program() const
 {
-    server_->setWorkingDirectory(workingDirectory_);
-    server_->start(program_, {"app-server", "--stdio"});
-}
-
-bool CodexAgent::isRunning() const
-{
-    return server_->state() != QProcess::NotRunning;
+    return connection_ ? connection_->program() : QString();
 }
 
 QString CodexAgent::statusText() const
 {
-    if (!isRunning()) return "Server: not running";
+    if (!connection_ || !connection_->isRunning()) return "Server: not running";
     if (busy_) return "Codex is responding…";
     if (threadOpening_) return "Opening Codex conversation…";
-    if (initialized_) return "Codex ready";
+    if (connection_->isConnected()) return "Codex ready";
     return "Connecting to Codex App Server…";
 }
 
@@ -131,47 +70,27 @@ AgentHelp CodexAgent::help() const
 {
     return {{"Codex connection: codex app-server --stdio (direct JSONL).",
              "Installed Codex App Server commands and options (reference; CLI subcommands are not chat messages):"},
-            "App Server", program_, {"app-server", "--help"}};
+            "App Server", program(), {"app-server", "--help"}};
 }
 
 void CodexAgent::loadConversations()
 {
-    if (loadConversationIndex())
-        emit message(QString("[Cached Codex conversations: %1]").arg(cachedConversations_.size()));
+    if (connection_) connection_->loadConversations();
 }
 
 void CodexAgent::refreshConversations()
 {
-    if (!initialized_) {
-        syncWhenConnected_ = true;
-        return;
-    }
-    syncConversations();
+    if (connection_) connection_->refreshConversations();
 }
 
 QList<QJsonObject> CodexAgent::conversations() const
 {
-    QList<QJsonObject> result;
-    for (const QJsonObject &thread : cachedConversations_) {
-        const QString id = thread.value("id").toString();
-        QString title = thread.value("name").toString();
-        if (title.isEmpty()) title = thread.value("preview").toString();
-        if (title.isEmpty()) title = id;
-        result.append({{"id", id}, {"cwd", thread.value("cwd").toString()}, {"title", title},
-                       {"tooltip", title + "\n\n" + id}, {"createdAt", thread.value("createdAt").toInteger()},
-                       {"archived", thread.value("archived").toBool()}});
-    }
-    // A chat started here appears in thread/list only after the next sync.
-    if (!threadId_.isEmpty() && !cachedConversations_.contains(threadId_)) {
-        result.append({{"id", threadId_}, {"cwd", workingDirectory_}, {"title", "Current chat"},
-                       {"tooltip", threadId_}, {"createdAt", 0}});
-    }
-    return result;
+    return connection_ ? connection_->conversations() : QList<QJsonObject>{};
 }
 
 bool CodexAgent::newConversation(const QString &workingDirectory)
 {
-    if (!initialized_) {
+    if (!connection_ || !connection_->isConnected()) {
         emit message("[Codex App Server is not connected.]");
         return false;
     }
@@ -179,36 +98,42 @@ bool CodexAgent::newConversation(const QString &workingDirectory)
         emit message("[Wait for the current Codex response to finish.]");
         return false;
     }
+    closeThread();
     workingDirectory_ = workingDirectory;
     queuedPrompts_.clear();
-    threadId_.clear();
-    activeTurnId_.clear();
     startThread();
     return true;
 }
 
 bool CodexAgent::resumeConversation(const QString &id, const QString &workingDirectory)
 {
-    if (id.isEmpty() || !initialized_) return false;
+    if (id.isEmpty() || !connection_ || !connection_->isConnected()) return false;
     if (busy_ || threadOpening_) {
         emit message("[Wait for the current Codex response to finish.]");
         return false;
     }
+    closeThread();
     if (!workingDirectory.isEmpty()) workingDirectory_ = workingDirectory;
     queuedPrompts_.clear();
-    activeTurnId_.clear();
-    threadId_.clear();
     threadOpening_ = true;
-    resumingThreadId_ = id;
     emit message("[Resuming Codex conversation: " + id + "]");
-    sendRequest("thread/resume", {{"threadId", id}});
+    connection_->request("thread/resume", {{"threadId", id}}, this,
+                         [this, id](const QJsonObject &result, const QString &error) {
+        threadOpening_ = false;
+        if (!error.isEmpty()) {
+            emit conversationOpenFailed(id, "the Codex App Server refused to open it: " + error);
+            emit stateChanged();
+            return;
+        }
+        openThread(result.value("thread").toObject().value("id").toString(), true);
+    });
     emit stateChanged();
     return true;
 }
 
 bool CodexAgent::prompt(const QString &text)
 {
-    if (!isRunning()) {
+    if (!connection_ || !connection_->isRunning()) {
         emit message("[Server is not running. Check the codex executable and restart.]");
         return false;
     }
@@ -228,35 +153,50 @@ void CodexAgent::interrupt()
 
 void CodexAgent::loadHistory(const QString &id, const QString &, bool older)
 {
-    historyRequest_ = 0;
+    const quint64 generation = ++historyGeneration_;
     historyPending_ = false;
     if (!older || id != historyThreadId_) {
         historyThreadId_ = id;
         historyCursor_.clear();
         historyEntries_.clear();
     }
-    if (!initialized_) {
+    if (!connection_ || !connection_->isConnected()) {
         historyPending_ = true;
         emit historyLoaded(id, historyEntries_, false, "Waiting for the Codex App Server to load this conversation.");
         return;
     }
     QJsonObject params{{"threadId", id}, {"limit", kHistoryPageSize}, {"sortDirection", "desc"}};
     if (older && !historyCursor_.isEmpty()) params.insert("cursor", historyCursor_);
-    historyRequest_ = sendRequest("thread/items/list", params);
+    connection_->request("thread/items/list", params, this,
+                         [this, generation, id](const QJsonObject &result, const QString &error) {
+        if (generation != historyGeneration_) return;
+        if (!error.isEmpty()) {
+            emit historyLoaded(id, historyEntries_, false, "Could not load this conversation: " + error);
+            return;
+        }
+        // Items arrive newest first; older pages are prepended to what is already loaded.
+        QList<ChatEntry> page;
+        const QJsonArray items = result.value("data").toArray();
+        for (qsizetype i = items.size() - 1; i >= 0; --i)
+            page.append(historyEntries(items.at(i).toObject().value("item").toObject()));
+        historyEntries_ = page + historyEntries_;
+        historyCursor_ = result.value("nextCursor").toString();
+        emit historyLoaded(id, historyEntries_, !historyCursor_.isEmpty(), {});
+    });
 }
 
 void CodexAgent::cancelHistory()
 {
-    historyRequest_ = 0;
+    ++historyGeneration_;
     historyPending_ = false;
 }
 
 void CodexAgent::answerApproval(int id, bool allow)
 {
     const QJsonValue requestId = serverRequests_.take(id);
-    if (requestId.isUndefined()) return;
+    if (requestId.isUndefined() || !connection_) return;
     const QString decision = allow ? "accept" : "decline";
-    sendJson({{"id", requestId}, {"result", QJsonObject{{"decision", decision}}}});
+    connection_->respond(requestId, {{"decision", decision}});
     emit message("[Approval: " + decision + "]");
 }
 
@@ -264,177 +204,57 @@ void CodexAgent::answerQuestions(int id, const QHash<QString, QString> &answers)
 {
     const QJsonValue requestId = serverRequests_.take(id);
     const QList<AgentQuestion> questions = pendingQuestions_.take(id);
-    if (requestId.isUndefined()) return;
+    if (requestId.isUndefined() || !connection_) return;
     QJsonObject result;
     for (const AgentQuestion &question : questions) {
         const auto answer = answers.constFind(question.id);
         result.insert(question.id, QJsonObject{
             {"answers", answer != answers.constEnd() ? QJsonArray{*answer} : QJsonArray{}}});
     }
-    sendJson({{"id", requestId}, {"result", QJsonObject{{"answers", result}}}});
+    connection_->respond(requestId, {{"answers", result}});
 }
 
-bool CodexAgent::loadConversationIndex()
+void CodexAgent::openThread(const QString &threadId, bool resumed)
 {
-    QFile file(indexPath_);
-    if (!file.exists()) return false;
-    if (!file.open(QIODevice::ReadOnly)) {
-        emit message("[Could not read Codex conversation index: " + file.errorString() + "]");
-        return false;
-    }
-    QJsonParseError error;
-    const QJsonDocument document = QJsonDocument::fromJson(file.readAll(), &error);
-    if (!document.isObject() || document.object().value("version").toInt() != 1
-        || !document.object().value("threads").isArray()) {
-        emit message("[Invalid Codex conversation index: " + error.errorString() + "]");
-        return false;
-    }
-    for (const QJsonValue &value : document.object().value("threads").toArray()) {
-        QJsonObject thread = value.toObject();
-        limitPreview(thread);
-        const QString id = thread.value("id").toString();
-        if (!id.isEmpty()) cachedConversations_.insert(id, thread);
-    }
-    return true;
-}
-
-bool CodexAgent::saveConversationIndex()
-{
-    if (!QDir().mkpath(QFileInfo(indexPath_).absolutePath())) {
-        emit message("[Could not create directory for Codex conversation index]");
-        return false;
-    }
-    QList<QJsonObject> threads = cachedConversations_.values();
-    std::sort(threads.begin(), threads.end(), [](const QJsonObject &left, const QJsonObject &right) {
-        const qint64 leftDate = left.value("createdAt").toInteger();
-        const qint64 rightDate = right.value("createdAt").toInteger();
-        return leftDate == rightDate ? left.value("id").toString() < right.value("id").toString()
-                                     : leftDate > rightDate;
-    });
-    QJsonArray data;
-    for (const QJsonObject &thread : threads) data.append(thread);
-    const QJsonObject root{{"version", 1},
-                           {"syncedAt", QDateTime::currentDateTimeUtc().toString(Qt::ISODate)},
-                           {"threads", data}};
-    QSaveFile file(indexPath_);
-    if (!file.open(QIODevice::WriteOnly)
-        || file.write(QJsonDocument(root).toJson(QJsonDocument::Indented)) < 0
-        || !file.commit()) {
-        emit message("[Could not save Codex conversation index: " + file.errorString() + "]");
-        return false;
-    }
-    return true;
-}
-
-// Active threads are read newest first until they reach the newest cached one; archived threads
-// are always read in full.
-void CodexAgent::syncConversations()
-{
-    if (syncing_) return;
-    if (!initialized_) {
-        emit message("[Codex App Server is not connected.]");
-        return;
-    }
-    stagedConversations_ = cachedConversations_;
-    newConversationIds_.clear();
-    activeConversationWatermark_ = 0;
-    for (const QJsonObject &thread : cachedConversations_) {
-        if (!thread.value("archived").toBool()) {
-            activeConversationWatermark_ = qMax(activeConversationWatermark_, thread.value("createdAt").toInteger());
-        }
-    }
-    syncCursor_.clear();
-    syncPages_ = 0;
-    syncingArchived_ = false;
-    syncing_ = true;
-    emit message("[Syncing Codex conversations…]");
-    emit stateChanged();
-    requestConversationPage();
-}
-
-void CodexAgent::requestConversationPage()
-{
-    QJsonArray sources{"cli", "vscode", "exec", "appServer", "subAgent", "subAgentReview",
-                       "subAgentCompact", "subAgentThreadSpawn", "subAgentOther", "unknown"};
-    QJsonObject params{{"limit", 100}, {"sortKey", "created_at"}, {"sortDirection", "desc"},
-                       {"sourceKinds", sources}, {"archived", syncingArchived_}};
-    if (!syncCursor_.isEmpty()) params.insert("cursor", syncCursor_);
-    sendRequest("thread/list", params);
-}
-
-void CodexAgent::handleConversationPage(const QJsonObject &result)
-{
-    if (!syncing_) return;
-    if (!result.value("data").isArray()) {
-        emit message("[Codex conversation sync failed: invalid thread/list response]");
-        syncing_ = false;
-        stagedConversations_.clear();
-        emit stateChanged();
-        return;
-    }
-    ++syncPages_;
-    bool olderThanCached = false;
-    for (const QJsonValue &value : result.value("data").toArray()) {
-        QJsonObject thread = value.toObject();
-        limitPreview(thread);
-        const QString id = thread.value("id").toString();
-        if (id.isEmpty()) continue;
-        if (!syncingArchived_ && activeConversationWatermark_ > 0
-            && thread.value("createdAt").toInteger() < activeConversationWatermark_) {
-            olderThanCached = true;
-        }
-        if (!cachedConversations_.contains(id)) newConversationIds_.insert(id);
-        thread.insert("archived", syncingArchived_);
-        stagedConversations_.insert(id, thread);
-    }
-    const QString nextCursor = result.value("nextCursor").toString();
-    if (!nextCursor.isEmpty() && nextCursor == syncCursor_) {
-        emit message("[Codex conversation sync failed: repeated pagination cursor]");
-        syncing_ = false;
-        stagedConversations_.clear();
-        emit stateChanged();
-        return;
-    }
-    if (!nextCursor.isEmpty() && !(olderThanCached && !syncingArchived_)) {
-        syncCursor_ = nextCursor;
-        requestConversationPage();
-        return;
-    }
-    if (!syncingArchived_) {
-        syncingArchived_ = true;
-        syncCursor_.clear();
-        requestConversationPage();
+    threadId_ = threadId;
+    if (threadId_.isEmpty()) {
+        emit message("[Server did not return a conversation ID.]");
     } else {
-        finishConversationSync();
+        emit message(resumed ? "[Resumed Codex conversation: " + threadId_ + "]" : "[Connected to Codex]");
+        connection_->registerThread(threadId_, this, workingDirectory_);
     }
+    emit conversationOpened(threadId_, resumed);
+    sendNextPrompt();
+    emit stateChanged();
 }
 
-void CodexAgent::finishConversationSync()
+void CodexAgent::closeThread()
 {
-    cachedConversations_ = std::move(stagedConversations_);
-    stagedConversations_.clear();
-    syncing_ = false;
-    const bool saved = saveConversationIndex();
-    emit message(QString("[Codex conversations: %1 total, %2 new; fetched %3 pages%4]")
-                     .arg(cachedConversations_.size()).arg(newConversationIds_.size()).arg(syncPages_)
-                     .arg(saved ? "" : "; index not saved"));
-    if (saved) emit message("[Index: " + indexPath_ + "]");
-    emit conversationsChanged();
-    emit stateChanged();
+    if (connection_) connection_->unregisterThread(threadId_);
+    threadId_.clear();
+    resetTurn();
 }
 
 void CodexAgent::startThread()
 {
-    if (!initialized_ || threadOpening_) return;
+    if (!connection_ || !connection_->isConnected() || threadOpening_) return;
     threadOpening_ = true;
     emit message("[Starting a new conversation]");
-    sendRequest("thread/start", {{"cwd", workingDirectory_}, {"serviceName", "agentdeskt"}});
+    connection_->request("thread/start", {{"cwd", workingDirectory_}, {"serviceName", "agentdeskt"}}, this,
+                         [this](const QJsonObject &result, const QString &error) {
+        threadOpening_ = false;
+        if (!error.isEmpty()) {
+            emit stateChanged();
+            return;
+        }
+        openThread(result.value("thread").toObject().value("id").toString(), false);
+    });
     emit stateChanged();
 }
 
 void CodexAgent::sendNextPrompt()
 {
-    if (!initialized_ || threadId_.isEmpty() || busy_ || queuedPrompts_.isEmpty()) return;
+    if (!connection_ || !connection_->isConnected() || threadId_.isEmpty() || busy_ || queuedPrompts_.isEmpty()) return;
     const QString text = queuedPrompts_.takeFirst();
     busy_ = true;
     activeTurnId_.clear();
@@ -442,7 +262,16 @@ void CodexAgent::sendNextPrompt()
     stopSent_ = false;
     QJsonObject params{{"threadId", threadId_},
                        {"input", QJsonArray{QJsonObject{{"type", "text"}, {"text", text}}}}};
-    sendRequest("turn/start", params);
+    connection_->request("turn/start", params, this, [this](const QJsonObject &result, const QString &error) {
+        if (!error.isEmpty()) {
+            resetTurn();
+            sendNextPrompt();
+        } else if (busy_) {
+            activeTurnId_ = result.value("turn").toObject().value("id").toString();
+            sendStopIfPossible();
+        }
+        emit stateChanged();
+    });
     emit stateChanged();
 }
 
@@ -451,121 +280,21 @@ void CodexAgent::sendStopIfPossible()
 {
     if (!busy_ || !stopRequested_ || stopSent_ || threadId_.isEmpty() || activeTurnId_.isEmpty()) return;
     stopSent_ = true;
-    sendRequest("turn/interrupt", {{"threadId", threadId_}, {"turnId", activeTurnId_}});
-}
-
-qint64 CodexAgent::sendRequest(const QString &method, const QJsonObject &params)
-{
-    const qint64 id = nextRequestId_++;
-    pendingRequests_.insert(id, method);
-    sendJson({{"id", id}, {"method", method}, {"params", params}});
-    return id;
-}
-
-void CodexAgent::sendNotification(const QString &method, const QJsonObject &params)
-{
-    sendJson({{"method", method}, {"params", params}});
-}
-
-void CodexAgent::sendJson(const QJsonObject &message)
-{
-    if (server_->state() == QProcess::NotRunning) return;
-    server_->write(QJsonDocument(message).toJson(QJsonDocument::Compact) + '\n');
-}
-
-void CodexAgent::handleLine(const QByteArray &line)
-{
-    QJsonParseError error;
-    const QJsonDocument document = QJsonDocument::fromJson(line, &error);
-    if (error.error != QJsonParseError::NoError || !document.isObject()) {
-        emit message("[Invalid server response: " + error.errorString() + "]");
-        return;
-    }
-    const QJsonObject object = document.object();
-    if (object.contains("method")) {
-        const QString method = object.value("method").toString();
-        if (object.contains("id")) {
-            handleServerRequest(method, object.value("id"), object.value("params").toObject());
-        } else {
-            handleNotification(method, object.value("params").toObject());
-        }
-    } else if (object.contains("id")) {
-        handleResponse(object);
-    }
-}
-
-void CodexAgent::handleResponse(const QJsonObject &response)
-{
-    const qint64 id = response.value("id").toInteger();
-    const QString method = pendingRequests_.take(id);
-    const QJsonObject error = response.value("error").toObject();
-    if (!error.isEmpty()) {
-        const QString errorText = error.value("message").toString();
-        emit message("[Error in " + method + "] " + errorText);
-        if (method == "thread/items/list" && id == historyRequest_) {
-            historyRequest_ = 0;
-            emit historyLoaded(historyThreadId_, historyEntries_, false, "Could not load this conversation: " + errorText);
-        } else if (method == "thread/list") {
-            syncing_ = false;
-            stagedConversations_.clear();
-        } else if (method == "thread/start" || method == "thread/resume") {
-            threadOpening_ = false;
-            if (method == "thread/resume") {
-                const QString failedId = resumingThreadId_;
-                resumingThreadId_.clear();
-                emit conversationOpenFailed(failedId, "the Codex App Server refused to open it: " + errorText);
-            }
-        } else if (method == "turn/start") {
-            busy_ = false;
-            activeTurnId_.clear();
-            stopRequested_ = false;
-            stopSent_ = false;
-            sendNextPrompt();
-        } else if (method == "turn/interrupt") {
-            stopRequested_ = false;
-            stopSent_ = false;
-        }
+    connection_->request("turn/interrupt", {{"threadId", threadId_}, {"turnId", activeTurnId_}}, this,
+                         [this](const QJsonObject &, const QString &error) {
+        if (error.isEmpty()) return;
+        stopRequested_ = false;
+        stopSent_ = false;
         emit stateChanged();
-        return;
-    }
-    const QJsonObject result = response.value("result").toObject();
-    if (method == "initialize") {
-        initialized_ = true;
-        sendNotification("initialized", {});
-        if (syncWhenConnected_) {
-            syncWhenConnected_ = false;
-            syncConversations();
-        }
-        if (historyPending_) loadHistory(historyThreadId_, {}, false);
-    } else if (method == "thread/items/list") {
-        if (id != historyRequest_) return;
-        historyRequest_ = 0;
-        // Items arrive newest first; older pages are prepended to what is already loaded.
-        QList<ChatEntry> page;
-        const QJsonArray items = result.value("data").toArray();
-        for (qsizetype i = items.size() - 1; i >= 0; --i)
-            page.append(historyEntries(items.at(i).toObject().value("item").toObject()));
-        historyEntries_ = page + historyEntries_;
-        historyCursor_ = result.value("nextCursor").toString();
-        emit historyLoaded(historyThreadId_, historyEntries_, !historyCursor_.isEmpty(), {});
-    } else if (method == "thread/list") {
-        handleConversationPage(result);
-    } else if (method == "thread/start" || method == "thread/resume") {
-        threadOpening_ = false;
-        resumingThreadId_.clear();
-        threadId_ = result.value("thread").toObject().value("id").toString();
-        if (threadId_.isEmpty()) emit message("[Server did not return a conversation ID.]");
-        else emit message(method == "thread/start" ? "[Connected to Codex]" : "[Resumed Codex conversation: " + threadId_ + "]");
-        emit conversationOpened(threadId_, method == "thread/resume");
-        emit conversationsChanged();
-        sendNextPrompt();
-    } else if (method == "turn/start") {
-        if (busy_) {
-            activeTurnId_ = result.value("turn").toObject().value("id").toString();
-            sendStopIfPossible();
-        }
-    }
-    emit stateChanged();
+    });
+}
+
+void CodexAgent::resetTurn()
+{
+    busy_ = false;
+    activeTurnId_.clear();
+    stopRequested_ = false;
+    stopSent_ = false;
 }
 
 void CodexAgent::handleNotification(const QString &method, const QJsonObject &params)
@@ -609,17 +338,12 @@ void CodexAgent::handleNotification(const QString &method, const QJsonObject &pa
         }
     } else if (method == "turn/completed") {
         const QJsonObject turn = params.value("turn").toObject();
-        busy_ = false;
-        activeTurnId_.clear();
-        stopRequested_ = false;
-        stopSent_ = false;
+        resetTurn();
         emit turnCompleted(turn.value("status").toString(), turn.value("error").toObject().value("message").toString());
         emit stateChanged();
         sendNextPrompt();
     } else if (method == "error") {
         emit message("[Error] " + params.value("error").toObject().value("message").toString());
-    } else if (method == "warning" || method == "configWarning") {
-        emit message("[Warning] " + params.value("message").toString(params.value("summary").toString()));
     }
 }
 
@@ -660,6 +384,6 @@ void CodexAgent::handleServerRequest(const QString &method, const QJsonValue &id
         emit questionsRequested(requestId, questions);
     } else {
         emit message("[Unsupported server request: " + method + "]");
-        sendJson({{"id", id}, {"error", QJsonObject{{"code", -32601}, {"message", "Unsupported request"}}}});
+        connection_->respondError(id, -32601, "Unsupported request");
     }
 }
