@@ -49,7 +49,7 @@ void ChatTab::cancelWaiting()
 
 bool ChatTab::dispatch()
 {
-    if (outgoing_.isEmpty() || inTurn_) return true;
+    if (outgoing_.isEmpty() || inTurn_ || agent_->isCompacting()) return true;
     // A read-only turn in a sandbox cannot change files, so it neither takes nor waits for the directory;
     // an agent that only promises not to change files still waits.
     if (locks_ && !holdsDirectory_ && !(agent_->isReadOnly() && agent_->readOnlyIsEnforced())) {
@@ -273,7 +273,11 @@ void ChatTab::setAgent(AgentBackend *agent)
     agent_ = agent;
     const QString name = agent->name();
     connect(agent, &AgentBackend::message, this, &ChatTab::logMessage);
-    connect(agent, &AgentBackend::stateChanged, this, &ChatTab::changed);
+    connect(agent, &AgentBackend::stateChanged, this, [this] {
+        emit changed();
+        if (!inTurn_ && !agent_->isCompacting() && !outgoing_.isEmpty())
+            QTimer::singleShot(0, this, &ChatTab::dispatch);
+    });
     connect(agent, &AgentBackend::messageStarted, this, [this, name] { appendText("\n" + name + ": "); });
     connect(agent, &AgentBackend::messageDelta, this, &ChatTab::appendText);
     connect(agent, &AgentBackend::messageFinished, this, [this] { appendText("\n"); });

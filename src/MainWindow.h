@@ -109,6 +109,9 @@ private:
     QComboBox *effortInput_;
     QCheckBox *readOnlyInput_;
     QLabel *tokens_;
+    QWidget *compactionPanel_;
+    QPushButton *compactButton_;
+    QLineEdit *contextTokens_;
     // What the model controls last showed; rebuilding them would close an open drop-down list.
     QString modelControlsState_;
     MessageInput *input_;

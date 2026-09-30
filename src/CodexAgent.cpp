@@ -75,6 +75,8 @@ CodexAgent::~CodexAgent()
 QString CodexAgent::statusText() const
 {
     if (!connection_ || !connection_->isRunning()) return "Server: not running";
+    if (manualCompaction_) return "Compacting Codex context…";
+    if (refreshingHistory_) return "Refreshing Codex history…";
     if (busy_) return "Codex is responding…";
     if (threadOpening_) return "Opening Codex conversation…";
     if (connection_->isConnected()) return "Codex ready";
@@ -144,6 +146,35 @@ void CodexAgent::interrupt()
     emit stateChanged();
 }
 
+bool CodexAgent::canCompact() const
+{
+    return connection_ && connection_->isConnected() && !threadId_.isEmpty()
+        && !busy_ && !threadOpening_ && !refreshingHistory_ && queuedPrompts_.isEmpty();
+}
+
+bool CodexAgent::compact()
+{
+    if (!canCompact()) return false;
+    busy_ = true;
+    manualCompaction_ = true;
+    activeTurnId_.clear();
+    stopRequested_ = false;
+    stopSent_ = false;
+    turnBaselineKnown_ = false;
+    const QString id = threadId_;
+    emit message("[Compacting Codex context]");
+    emit stateChanged();
+    connection_->request("thread/compact/start", {{"threadId", id}}, this,
+                         [this, id](const QJsonObject &, const QString &error) {
+        if (id != threadId_ || error.isEmpty() || !manualCompaction_) return;
+        resetTurn();
+        emit message("[Could not compact Codex context: " + error + "]");
+        emit stateChanged();
+        sendNextPrompt();
+    });
+    return true;
+}
+
 void CodexAgent::loadHistory(const QString &id, const QString &, bool older)
 {
     const quint64 generation = ++historyGeneration_;
@@ -192,12 +223,14 @@ void CodexAgent::refreshAfterCompaction()
         if (id != threadId_) return;
         if (generation != historyGeneration_) {
             refreshingHistory_ = false;
+            emit stateChanged();
             sendNextPrompt();
             return;
         }
         if (!error.isEmpty()) {
             refreshingHistory_ = false;
             emit message("[Could not refresh the conversation after compaction: " + error + "]");
+            emit stateChanged();
             sendNextPrompt();
             return;
         }
@@ -212,6 +245,7 @@ void CodexAgent::refreshAfterCompaction()
         historyCursor_ = result.value("nextCursor").toString();
         refreshingHistory_ = false;
         emit historyRefreshed(id, historyEntries_, !historyCursor_.isEmpty());
+        emit stateChanged();
         sendNextPrompt();
     });
 }
@@ -410,6 +444,7 @@ void CodexAgent::sendStopIfPossible()
 void CodexAgent::resetTurn()
 {
     busy_ = false;
+    manualCompaction_ = false;
     activeTurnId_.clear();
     stopRequested_ = false;
     stopSent_ = false;
@@ -465,8 +500,15 @@ void CodexAgent::handleNotification(const QString &method, const QJsonObject &pa
         if (!busy_) refreshAfterCompaction();
     } else if (method == "turn/completed") {
         const QJsonObject turn = params.value("turn").toObject();
+        const bool wasCompaction = manualCompaction_;
         resetTurn();
-        emit turnCompleted(turn.value("status").toString(), turn.value("error").toObject().value("message").toString());
+        if (wasCompaction) {
+            const QString status = turn.value("status").toString();
+            if (status != "completed")
+                emit message("[Codex compaction: " + status + ": " + turn.value("error").toObject().value("message").toString() + "]");
+        } else {
+            emit turnCompleted(turn.value("status").toString(), turn.value("error").toObject().value("message").toString());
+        }
         if (compactedHistoryPending_) refreshAfterCompaction();
         emit stateChanged();
         sendNextPrompt();

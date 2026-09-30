@@ -37,6 +37,10 @@ public:
     bool resumeConversation(const QString &id, const QString &workingDirectory) override;
     bool prompt(const QString &text) override;
     void interrupt() override;
+    bool supportsCompaction() const override { return true; }
+    bool canCompact() const override;
+    bool isCompacting() const override { return manualCompaction_; }
+    bool compact() override;
     void loadHistory(const QString &id, const QString &workingDirectory, bool older) override;
     void cancelHistory() override;
     void answerApproval(int id, ApprovalDecision decision) override;
@@ -90,6 +94,7 @@ private:
     bool compactedHistoryPending_ = false;
     bool threadOpening_ = false;
     bool busy_ = false;
+    bool manualCompaction_ = false;
     bool stopRequested_ = false;
     bool stopSent_ = false;
 };

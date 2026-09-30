@@ -171,6 +171,13 @@ input, cached and output tokens. For agents other than Codex, the conversation
 figure covers the turns sent from the tab. Antigravity's statistics are read
 where its result event carries them.
 
+The **Compact** button above a Codex chat manually compacts its context when the
+chat is live and idle. The read-only field beside it shows current context tokens
+reported by App Server, with apostrophes grouping thousands (for example
+`100'000` or `1'000'000`). It updates with the server's usage reports, including
+after compaction; an em dash means no usage report has arrived yet. Compaction
+can be interrupted with **Stop** and does not count as a normal prompt completion.
+
 After Codex compacts its context, a marker appears in the chat. When the running
 turn ends, the chat reloads its latest stored history from App Server before
 starting another turn. Messages queued before or during the refresh stay visible

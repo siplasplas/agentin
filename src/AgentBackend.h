@@ -218,6 +218,10 @@ public:
     // accepted message ends with turnCompleted, also when the turn fails or the agent stops.
     virtual bool prompt(const QString &text) = 0;
     virtual void interrupt() = 0;
+    virtual bool supportsCompaction() const { return false; }
+    virtual bool canCompact() const { return false; }
+    virtual bool isCompacting() const { return false; }
+    virtual bool compact() { return false; }
 
     // Loads the latest history of a conversation, or older entries when older is true.
     virtual void loadHistory(const QString &id, const QString &workingDirectory, bool older) = 0;

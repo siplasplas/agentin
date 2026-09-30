@@ -60,6 +60,14 @@
 #include <algorithm>
 
 namespace {
+QString groupedTokens(qint64 count)
+{
+    if (count < 0) return QString(QChar(0x2014));
+    QString text = QString::number(count);
+    for (int position = text.size() - 3; position > 0; position -= 3) text.insert(position, '\'');
+    return text;
+}
+
 QString shortPreview(const QString &value, int limit = 72)
 {
     const QString singleLine = value.simplified();
@@ -231,6 +239,30 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     headerRow->addWidget(effortInput_);
     headerRow->addWidget(readOnlyInput_);
     panelLayout->addLayout(headerRow);
+    compactionPanel_ = new QWidget(chatPanel_);
+    auto *compactionRow = new QHBoxLayout(compactionPanel_);
+    compactionRow->setContentsMargins(0, 0, 0, 0);
+    compactButton_ = new QPushButton("Compact", compactionPanel_);
+    compactButton_->setObjectName("compactButton");
+    compactButton_->setToolTip("Compact this chat's context when Codex is idle");
+    contextTokens_ = new QLineEdit(compactionPanel_);
+    contextTokens_->setObjectName("contextTokens");
+    contextTokens_->setReadOnly(true);
+    contextTokens_->setAlignment(Qt::AlignRight);
+    contextTokens_->setFixedWidth(contextTokens_->fontMetrics().horizontalAdvance("999'999'999") + 24);
+    contextTokens_->setToolTip("Current context tokens reported by App Server; updated after compaction");
+    compactionRow->addWidget(compactButton_);
+    compactionRow->addWidget(contextTokens_);
+    compactionRow->addWidget(new QLabel("tokens", compactionPanel_));
+    compactionRow->addStretch(1);
+    compactionPanel_->hide();
+    connect(compactButton_, &QPushButton::clicked, this, [this] {
+        if (ChatTab *tab = currentTab()) {
+            if (tab->isLive() && !tab->isWaiting()) tab->agent()->compact();
+        }
+        updateStatus();
+    });
+    panelLayout->addWidget(compactionPanel_);
     panelLayout->addWidget(loadEarlierButton_);
     panelLayout->addWidget(chatView_, 1);
     requestPanel_ = new QFrame(chatPanel_);
@@ -1236,6 +1268,9 @@ void MainWindow::updateStatus()
         status_->setToolTip({});
         chatHeader_->clear();
         tokens_->clear();
+        compactionPanel_->hide();
+        compactButton_->setEnabled(false);
+        contextTokens_->clear();
         loadEarlierButton_->setVisible(false);
         sendButton_->setText("Send");
         sendButton_->setEnabled(false);
@@ -1251,6 +1286,13 @@ void MainWindow::updateStatus()
     chatHeader_->setText(tab->headerText());
     const TokenUsage turn = tab->lastTurnUsage();
     const TokenUsage conversation = tab->conversationUsage();
+    compactionPanel_->setVisible(agent->supportsCompaction());
+    compactButton_->setEnabled(tab->isLive() && !tab->isWaiting() && agent->canCompact());
+    contextTokens_->setText(groupedTokens(conversation.contextUsed));
+    QString contextTip = "Current context tokens reported by App Server";
+    if (conversation.contextWindow > 0)
+        contextTip += "; context window: " + groupedTokens(conversation.contextWindow) + " tokens";
+    contextTokens_->setToolTip(contextTip);
     QStringList usage;
     if (!turn.isEmpty()) usage.append("turn " + ChatTab::shortUsage(turn));
     if (!conversation.isEmpty()) usage.append("chat " + ChatTab::shortUsage(conversation));
@@ -1268,7 +1310,7 @@ void MainWindow::updateStatus()
     loadEarlierButton_->setEnabled(!(tab->isLive() && agent->isResponding()));
     stopButton_->setEnabled(agent->canInterrupt() || tab->isWaiting());
     sendButton_->setText("Send to " + tab->provider()->name());
-    sendButton_->setEnabled(tab->isLive());
+    sendButton_->setEnabled(tab->isLive() && !agent->isCompacting());
     const PendingRequest *request = tab->pendingRequest();
     if (request && !request->approval)
         input_->setPlaceholderText("Answer the question above: an option number or your own words");
