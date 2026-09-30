@@ -4,6 +4,9 @@
 #include "CodexConnection.h"
 #include <QJsonDocument>
 #include "MainWindow.h"
+#include "Notifier.h"
+#include <QProcess>
+#include <QToolButton>
 
 #include <QFile>
 #include <QFileInfo>
@@ -26,6 +29,8 @@ class MainWindowTest : public QObject
     Q_OBJECT
 
 private slots:
+    void speakerStopsAudio();
+    void piperStopsBeforePlayback();
     void commandApproval_data();
     void commandApproval();
     void codexCommandTrust();
@@ -43,6 +48,138 @@ private slots:
     void claudeAttachRespectsExternalLock();
     void geminiAttachRespectsExternalLock();
 };
+
+void MainWindowTest::speakerStopsAudio()
+{
+    const QString python = QStandardPaths::findExecutable("python3");
+    if (python.isEmpty()) QSKIP("Python is needed for the fake audio player");
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    QFile player(directory.filePath("ffplay"));
+    QVERIFY(player.open(QIODevice::WriteOnly));
+    player.write(("#!" + python + "\n").toUtf8());
+    player.write(R"PY(import os, sys
+with open(__file__ + ".started", "w") as log:
+    log.write(sys.argv[-1])
+if not sys.argv[-1].endswith("done.mp3"):
+    sys.stdin.read()
+)PY");
+    player.close();
+    QVERIFY(player.setPermissions(QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner));
+    QFile audio(directory.filePath("long.mp3"));
+    QVERIFY(audio.open(QIODevice::WriteOnly));
+    audio.close();
+    QFile done(directory.filePath("done.mp3"));
+    QVERIFY(done.open(QIODevice::WriteOnly));
+    done.close();
+    const QByteArray previousPath = qgetenv("PATH");
+    const auto restorePath = qScopeGuard([previousPath] { qputenv("PATH", previousPath); });
+    qputenv("PATH", directory.path().toUtf8());
+    MainWindow window("/nonexistent/codex", directory.path(), "/nonexistent/python", "/nonexistent/bridge",
+                      "/nonexistent/gemini", nullptr, directory.filePath("index.json"), "/nonexistent/agy",
+                      directory.filePath("gemini"));
+    auto *notifier = window.findChild<Notifier *>();
+    auto *speaker = window.findChild<QToolButton *>("muteSounds");
+    QVERIFY(notifier && speaker);
+    QSignalSpy failures(notifier, &Notifier::playbackFailed);
+    QVERIFY(notifier->playSound(audio.fileName()));
+    QVERIFY(notifier->isPlaying());
+    QVERIFY(speaker->styleSheet().contains("#d32f2f"));
+    QVERIFY(speaker->toolTip().contains("stop playback"));
+    QTRY_VERIFY(QFileInfo::exists(player.fileName() + ".started"));
+    const QPointer<QProcess> process = notifier->findChild<QProcess *>();
+    QVERIFY(process);
+    speaker->click();
+    QVERIFY(!notifier->isPlaying());
+    QVERIFY(!notifier->settings().muted);
+    QVERIFY(speaker->styleSheet().isEmpty());
+    QTRY_VERIFY(!process || process->state() == QProcess::NotRunning);
+    QCOMPARE(failures.size(), 0);
+
+    // Cancelling a preview while muted must preserve the mute setting.
+    notifier->setMuted(true);
+    QVERIFY(notifier->playSound(audio.fileName()));
+    speaker->click();
+    QVERIFY(!notifier->isPlaying());
+    QVERIFY(notifier->settings().muted);
+    QVERIFY(speaker->isChecked());
+    QVERIFY(notifier->playSound(done.fileName()));
+    QTRY_VERIFY(!notifier->isPlaying());
+    QVERIFY(speaker->styleSheet().isEmpty());
+    QVERIFY(notifier->settings().muted);
+    QCOMPARE(failures.size(), 0);
+}
+
+void MainWindowTest::piperStopsBeforePlayback()
+{
+    const QString python = QStandardPaths::findExecutable("python3");
+    if (python.isEmpty()) QSKIP("Python is needed for fake speech programs");
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    QFile piper(directory.filePath("piper"));
+    QVERIFY(piper.open(QIODevice::WriteOnly));
+    piper.write(("#!" + python + "\n").toUtf8());
+    piper.write(R"PY(import sys, time
+text = sys.stdin.read()
+output = sys.argv[sys.argv.index("--output_file") + 1]
+with open(output, "w") as audio:
+    audio.write("fake speech")
+with open(__file__ + ".output", "w") as log:
+    log.write(output)
+if "finish" not in text:
+    time.sleep(60)
+)PY");
+    piper.close();
+    QVERIFY(piper.setPermissions(QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner));
+    QFile player(directory.filePath("ffplay"));
+    QVERIFY(player.open(QIODevice::WriteOnly));
+    player.write(("#!" + python + "\n").toUtf8());
+    player.write(R"PY(import sys
+with open(__file__ + ".started", "w") as log:
+    log.write(sys.argv[-1])
+sys.stdin.read()
+)PY");
+    player.close();
+    QVERIFY(player.setPermissions(QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner));
+    QFile model(directory.filePath("voice.onnx"));
+    QVERIFY(model.open(QIODevice::WriteOnly));
+    model.close();
+    const QByteArray previousPath = qgetenv("PATH");
+    const auto restorePath = qScopeGuard([previousPath] { qputenv("PATH", previousPath); });
+    qputenv("PATH", directory.path().toUtf8());
+    Notifier notifier;
+    Notifier::Settings settings;
+    settings.voiceEngine = "piper";
+    settings.piperProgram = piper.fileName();
+    settings.piperModel = model.fileName();
+    QSignalSpy failures(&notifier, &Notifier::playbackFailed);
+    QVERIFY(notifier.say(settings, "cancel this speech"));
+    QTRY_VERIFY(QFileInfo::exists(piper.fileName() + ".output"));
+    QFile outputLog(piper.fileName() + ".output");
+    QVERIFY(outputLog.open(QIODevice::ReadOnly));
+    const QString cancelledFile = QString::fromUtf8(outputLog.readAll());
+    outputLog.close();
+    QVERIFY(QFileInfo::exists(cancelledFile));
+    notifier.stopPlayback();
+    QVERIFY(!notifier.isPlaying());
+    QTRY_VERIFY(!QFileInfo::exists(cancelledFile));
+    QVERIFY(!QFileInfo::exists(player.fileName() + ".started"));
+    QCOMPARE(failures.size(), 0);
+
+    // After successful synthesis, Stop must kill the player and remove its temporary WAV.
+    QVERIFY(notifier.say(settings, "finish synthesizing"));
+    QTRY_VERIFY(QFileInfo::exists(player.fileName() + ".started"));
+    QFile playerLog(player.fileName() + ".started");
+    QVERIFY(playerLog.open(QIODevice::ReadOnly));
+    const QString playingFile = QString::fromUtf8(playerLog.readAll());
+    playerLog.close();
+    QVERIFY(notifier.isPlaying());
+    QVERIFY(QFileInfo::exists(playingFile));
+    notifier.stopPlayback();
+    QTRY_VERIFY(!QFileInfo::exists(playingFile));
+    QVERIFY(!notifier.isPlaying());
+    QCOMPARE(failures.size(), 0);
+}
 
 void MainWindowTest::commandApproval_data()
 {

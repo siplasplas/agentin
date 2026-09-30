@@ -95,7 +95,7 @@ void Notifier::announce(Event event, const QString &agent, const QString &chat, 
         case Event::Failed: sentence = polish ? "%1 zakończył się błędem: %2" : "%1 stopped with an error: %2"; break;
         case Event::Waiting: sentence = polish ? "%1 czeka na ciebie: %2" : "%1 is waiting for you: %2"; break;
         }
-        if (say(settings_, sentence.arg(agent, chat), this)) return;
+        if (say(settings_, sentence.arg(agent, chat))) return;
     }
     playSound(soundFile);
 }
@@ -160,37 +160,104 @@ QString Notifier::voiceEngine(const Settings &settings)
     return piper ? "piper" : (espeak ? "espeak-ng" : QString());
 }
 
+Notifier::~Notifier()
+{
+    stopPlayback();
+    // Stop children before removing WAV files that a synthesizer might still be writing.
+    for (QProcess *process : findChildren<QProcess *>()) {
+        if (process->state() != QProcess::NotRunning) {
+            process->kill();
+            process->waitForFinished(1000);
+        }
+    }
+    for (const QString &file : temporaryFiles_) QFile::remove(file);
+}
+
+void Notifier::updatePlaybackState()
+{
+    const bool playing = isPlaying();
+    if (playing == playbackActive_) return;
+    playbackActive_ = playing;
+    emit playbackChanged(playing);
+}
+
+void Notifier::stopPlayback()
+{
+    if (!playbackProcess_) return;
+    QProcess *process = playbackProcess_;
+    playbackProcess_.clear();
+    process->kill();
+    updatePlaybackState();
+}
+
+QProcess *Notifier::startPlaybackProcess(const QString &program, const QStringList &arguments,
+                                        std::function<void(bool)> completed)
+{
+    stopPlayback();
+    auto *process = new QProcess(this);
+    playbackProcess_ = process;
+    process->setStandardOutputFile(QProcess::nullDevice());
+    process->setStandardErrorFile(QProcess::nullDevice());
+    const auto finish = [this, process, completed](bool success) {
+        const bool current = playbackProcess_ == process;
+        if (current) playbackProcess_.clear();
+        process->deleteLater();
+        if (completed) completed(current && success);
+        updatePlaybackState();
+    };
+    connect(process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this,
+            [this, process, finish](int code, QProcess::ExitStatus status) {
+        if (playbackProcess_ == process && (code != 0 || status != QProcess::NormalExit))
+            emit playbackFailed("The audio program stopped with an error");
+        finish(code == 0 && status == QProcess::NormalExit);
+    });
+    connect(process, &QProcess::errorOccurred, this, [this, process, finish](QProcess::ProcessError error) {
+        if (error != QProcess::FailedToStart) return;
+        if (playbackProcess_ == process) emit playbackFailed(process->errorString());
+        finish(false);
+    });
+    process->start(program, arguments);
+    updatePlaybackState();
+    return process;
+}
+
+void Notifier::removeTemporaryFile(const QString &file)
+{
+    QFile::remove(file);
+    temporaryFiles_.removeAll(file);
+}
+
 // Piper writes the speech to a temporary WAV file, which a sound player then plays.
-bool Notifier::say(const Settings &settings, const QString &text, QObject *parent)
+bool Notifier::say(const Settings &settings, const QString &text)
 {
     const QString engine = voiceEngine(settings);
     // espeak-ng speaks 175 words per minute by default; the slowness lowers that the same way.
-    if (engine == "espeak-ng")
-        return QProcess::startDetached(findEspeak(), {"-s", QString::number(qRound(175 / qMax(0.5, settings.speechSlowness))), text});
+    if (engine == "espeak-ng") {
+        startPlaybackProcess(findEspeak(), {"-s", QString::number(qRound(175 / qMax(0.5, settings.speechSlowness))), text});
+        return true;
+    }
     if (engine != "piper") return false;
     static int counter = 0;
     const QString output = QDir(QDir::tempPath()).filePath(QString("agentdeskt-voice-%1-%2.wav")
                                                                  .arg(QCoreApplication::applicationPid()).arg(++counter));
-    auto *piper = new QProcess(parent);
-    QObject::connect(piper, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), piper,
-                     [piper, output](int code, QProcess::ExitStatus status) {
-        piper->deleteLater();
-        if (status == QProcess::NormalExit && code == 0) playSound(output);
-        // The player opens the file right away; it is removed a little later.
-        QTimer::singleShot(60000, [output] { QFile::remove(output); });
-    });
-    QObject::connect(piper, &QProcess::errorOccurred, piper, [piper](QProcess::ProcessError error) {
-        if (error == QProcess::FailedToStart) piper->deleteLater();
-    });
-    piper->start(findPiper(settings), {"--model", findPiperModel(settings), "--length_scale",
-                                       QString::number(settings.speechSlowness), "--sentence_silence", "0.3",
-                                       "--output_file", output});
+    temporaryFiles_.append(output);
+    QProcess *piper = startPlaybackProcess(findPiper(settings),
+        {"--model", findPiperModel(settings), "--length_scale", QString::number(settings.speechSlowness),
+         "--sentence_silence", "0.3", "--output_file", output},
+        [this, output](bool success) {
+            if (!success || !playSoundFile(output, true)) removeTemporaryFile(output);
+        });
     piper->write(text.toUtf8() + '\n');
     piper->closeWriteChannel();
     return true;
 }
 
 bool Notifier::playSound(const QString &file)
+{
+    return playSoundFile(file, false);
+}
+
+bool Notifier::playSoundFile(const QString &file, bool temporary)
 {
     if (file.isEmpty() || !QFileInfo(file).isFile()) return false;
     const QList<QStringList> players{{"ffplay", "-nodisp", "-autoexit", "-loglevel", "quiet"},
@@ -200,7 +267,10 @@ bool Notifier::playSound(const QString &file)
     for (const QStringList &player : players) {
         const QString program = QStandardPaths::findExecutable(player.first());
         if (program.isEmpty()) continue;
-        return QProcess::startDetached(program, player.mid(1) << file);
+        startPlaybackProcess(program, player.mid(1) << file, [this, file, temporary](bool) {
+            if (temporary) removeTemporaryFile(file);
+        });
+        return true;
     }
     return false;
 }

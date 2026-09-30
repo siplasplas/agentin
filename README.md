@@ -220,7 +220,12 @@ A finished or failed turn notifies only when it took at least a set time (5
 minutes by default). An agent that waits for an approval or an answer is always
 announced, after a short delay (30 seconds by default) so that answering at once
 stays quiet, and optionally again every few minutes until it is answered, since
-its work stops until then. The speaker button in the status row mutes all sounds.
+its work stops until then. The speaker button in the status row turns red while a sound or voice is
+playing (including voice preparation); click it to stop the current audio without
+changing the mute setting. When idle, it mutes notification sounds. The
+notification settings dialog also has **Stop playback** for cancelling **Play**
+or **Try** previews while the dialog is open. Starting another sound or voice
+replaces the current playback, and closing the application stops it.
 
 
 Announcements can be spoken instead, for example "Codex finished: fix the build"

@@ -3,9 +3,12 @@
 #include <QHash>
 #include <QJsonObject>
 #include <QObject>
+#include <QPointer>
+#include <functional>
 #include <QString>
 #include <QStringList>
 
+class QProcess;
 class QSystemTrayIcon;
 class QTimer;
 
@@ -46,6 +49,7 @@ public:
     };
 
     explicit Notifier(QObject *parent = nullptr);
+    ~Notifier() override;
 
     Settings settings() const { return settings_; }
     void setSettings(const Settings &settings) { settings_ = settings; }
@@ -57,7 +61,9 @@ public:
     void waitingEnded(const QString &key);
 
     // Plays a sound file even when sounds are muted, for trying it out in the settings.
-    static bool playSound(const QString &file);
+    bool playSound(const QString &file);
+    bool isPlaying() const { return !playbackProcess_.isNull(); }
+    void stopPlayback();
     // The voice program and model the settings lead to, or empty strings when none is installed.
     static QString findPiper(const Settings &settings);
     static QString findPiperModel(const Settings &settings);
@@ -69,15 +75,27 @@ public:
     // "piper" or "espeak-ng" when the settings can speak, otherwise an empty string.
     static QString voiceEngine(const Settings &settings);
     // Says text with the settings' voice; returns false when no voice program is available.
-    static bool say(const Settings &settings, const QString &text, QObject *parent);
+    bool say(const Settings &settings, const QString &text);
+
+signals:
+    void playbackChanged(bool playing);
+    void playbackFailed(const QString &reason);
 
 private:
+    QProcess *startPlaybackProcess(const QString &program, const QStringList &arguments,
+                                   std::function<void(bool)> completed = {});
+    bool playSoundFile(const QString &file, bool temporary);
+    void updatePlaybackState();
+    void removeTemporaryFile(const QString &file);
     void announceWaiting(const QString &key);
     enum class Event { Finished, Failed, Waiting };
     // Speaks the event in the voice's language when a voice is set up, otherwise plays the sound file.
     void announce(Event event, const QString &agent, const QString &chat, const QString &soundFile);
     void popup(const QString &title, const QString &text);
 
+    QPointer<QProcess> playbackProcess_;
+    bool playbackActive_ = false;
+    QStringList temporaryFiles_;
     Settings settings_;
     QSystemTrayIcon *tray_ = nullptr;
     struct Waiting

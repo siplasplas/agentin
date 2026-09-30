@@ -380,10 +380,18 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
         if (ChatTab *tab = currentTab()) tab->agent()->setReadOnly(checked);
     });
     connect(input_, &MessageInput::submitted, this, &MainWindow::submitCommand);
-    connect(muteSounds_, &QToolButton::toggled, this, [this](bool muted) {
+    connect(muteSounds_, &QToolButton::clicked, this, [this](bool muted) {
+        if (notifier_->isPlaying()) {
+            notifier_->stopPlayback();
+            return;
+        }
         notifier_->setMuted(muted);
         showMuteState();
         saveSettings();
+    });
+    connect(notifier_, &Notifier::playbackChanged, this, [this] { showMuteState(); });
+    connect(notifier_, &Notifier::playbackFailed, this, [this](const QString &reason) {
+        appendLine("[Could not play audio: " + reason + "]");
     });
     showMuteState();
     connect(input_, &MessageInput::enterActionChanged, this, &MainWindow::showEnterAction);
@@ -809,9 +817,15 @@ void MainWindow::showOptionsDialog()
 
 void MainWindow::showMuteState()
 {
-    const bool muted = muteSounds_->isChecked();
+    const bool playing = notifier_->isPlaying();
+    const bool muted = notifier_->settings().muted;
+    const QSignalBlocker blocker(muteSounds_);
+    muteSounds_->setCheckable(!playing);
+    muteSounds_->setChecked(muted);
+    muteSounds_->setStyleSheet(playing ? "QToolButton { background-color: #d32f2f; border-radius: 3px; }" : QString());
     muteSounds_->setIcon(style()->standardIcon(muted ? QStyle::SP_MediaVolumeMuted : QStyle::SP_MediaVolume));
-    muteSounds_->setToolTip(muted ? "Sounds are off; click to turn them on" : "Sounds are on; click to turn them off");
+    muteSounds_->setToolTip(playing ? "Audio is playing; click to stop playback"
+                                  : muted ? "Sounds are off; click to turn them on" : "Sounds are on; click to turn them off");
 }
 
 // Sounds and desktop notifications for long turns and for agents that wait for an answer.
@@ -848,7 +862,7 @@ void MainWindow::showNotificationsDialog()
             if (!chosen.isEmpty()) path->setText(chosen);
         });
         connect(play, &QPushButton::clicked, &dialog, [this, path] {
-            if (!Notifier::playSound(path->text()))
+            if (!notifier_->playSound(path->text()))
                 appendLine("[Could not play the sound; install ffplay, mpv, pw-play or paplay, and check the file.]");
         });
         return path;
@@ -919,14 +933,19 @@ void MainWindow::showNotificationsDialog()
         const Notifier::Settings chosen = voiceSettings(settings);
         const bool polish = Notifier::voiceEngine(chosen) == "piper"
             && QFileInfo(Notifier::findPiperModel(chosen)).fileName().startsWith("pl");
-        if (!Notifier::say(chosen, polish ? "Codex skończył: przykładowa rozmowa" : "Codex finished: an example chat", this))
+        if (!notifier_->say(chosen, polish ? "Codex skończył: przykładowa rozmowa" : "Codex finished: an example chat"))
             appendLine("[No voice program was found for this choice.]");
     });
     auto *note = new QLabel("A waiting agent is announced regardless of how long the turn has run, because its work "
-                            "stops until you answer. The speaker button in the status row mutes all sounds.", &dialog);
+                            "stops until you answer. The speaker button turns red during audio playback; click it to stop. "
+                            "When idle, it mutes notification sounds.", &dialog);
     note->setWordWrap(true);
     layout->addWidget(note);
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+    QPushButton *stopPlayback = buttons->addButton("Stop playback", QDialogButtonBox::ActionRole);
+    stopPlayback->setEnabled(notifier_->isPlaying());
+    connect(notifier_, &Notifier::playbackChanged, stopPlayback, &QPushButton::setEnabled);
+    connect(stopPlayback, &QPushButton::clicked, notifier_, &Notifier::stopPlayback);
     layout->addWidget(buttons);
     connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
     connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
