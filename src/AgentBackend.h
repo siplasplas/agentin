@@ -178,6 +178,9 @@ public:
     virtual bool supportsReadOnly() const { return false; }
     virtual bool isReadOnly() const { return false; }
     virtual void setReadOnly(bool readOnly) { Q_UNUSED(readOnly); }
+    // True when the operating system enforces read-only turns (a sandbox), rather than the agent
+    // following a rule; only such turns may skip the directory lock.
+    virtual bool readOnlyIsEnforced() const { return false; }
 
     // Queues a message for the current conversation and sends it when the agent is free. Every
     // accepted message ends with turnCompleted, also when the turn fails or the agent stops.

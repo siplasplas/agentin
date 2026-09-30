@@ -30,6 +30,7 @@ public:
     void setModel(const QString &model, const QString &effort) override;
     bool supportsReadOnly() const override { return true; }
     bool isReadOnly() const override { return readOnly_; }
+    bool readOnlyIsEnforced() const override { return true; }
     void setReadOnly(bool readOnly) override;
     bool newConversation(const QString &workingDirectory) override;
     bool resumeConversation(const QString &id, const QString &workingDirectory) override;

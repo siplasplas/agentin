@@ -142,8 +142,11 @@ A Codex chat can be switched to **Read-only** in its header. From the next
 message on, turns use Codex's read-only sandbox, so the agent can read files but
 not change them, also through shell commands. Switching it off restores the
 thread's own sandbox policy. The box also shows when a thread is read-only
-already, for example because Codex does not trust its directory. Other agents
-do not offer a read-only mode that they enforce, so the box is disabled there.
+already, for example because Codex does not trust its directory. In Claude and
+GLM chats the box switches the session to Claude Code's plan mode, and Gemini
+and Antigravity turns get `--approval-mode plan` and `--mode plan`: the agent
+reads and plans but is told not to change files. Only Codex enforces this with a
+sandbox, so only read-only Codex turns skip the directory lock.
 
 **Settings → Options…** sets the model and effort that new chats start with, for
 each agent that offers a choice. The effort is `medium` unless changed there.

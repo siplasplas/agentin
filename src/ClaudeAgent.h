@@ -82,6 +82,9 @@ public:
     QString model() const override { return model_; }
     QString effort() const override { return effort_; }
     void setModel(const QString &model, const QString &effort) override;
+    bool supportsReadOnly() const override { return true; }
+    bool isReadOnly() const override { return readOnly_; }
+    void setReadOnly(bool readOnly) override;
     bool newConversation(const QString &workingDirectory) override;
     bool resumeConversation(const QString &id, const QString &workingDirectory) override;
     bool prompt(const QString &text) override;
@@ -115,6 +118,8 @@ private:
     // What the running bridge uses; a difference is sent before the next prompt.
     QString appliedModel_;
     QString appliedEffort_;
+    bool readOnly_ = false;
+    bool appliedReadOnly_ = false;
     QStringList queuedPrompts_;
     QHash<int, int> pendingQuestionCounts_;
     HistoryPages history_;

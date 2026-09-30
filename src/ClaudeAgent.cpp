@@ -269,6 +269,8 @@ void ClaudeAgent::start(const QString &workingDirectory)
     QStringList arguments{"-u", provider_->scriptPath(), "--cwd", workingDirectory_, "--provider", kind_};
     if (!model_.isEmpty()) arguments << "--model" << model_;
     if (!effort_.isEmpty()) arguments << "--effort" << effort_;
+    if (readOnly_) arguments << "--read-only";
+    appliedReadOnly_ = readOnly_;
     appliedModel_ = model_;
     appliedEffort_ = effort_;
     process_->start(provider_->pythonProgram(), arguments);
@@ -415,6 +417,12 @@ void ClaudeAgent::answerQuestions(int id, const QHash<QString, QStringList> &ans
     send({{"type", "question_response"}, {"id", id}, {"accepted", answers.size() == count}, {"answers", result}});
 }
 
+void ClaudeAgent::setReadOnly(bool readOnly)
+{
+    readOnly_ = readOnly;
+    emit stateChanged();
+}
+
 void ClaudeAgent::setModel(const QString &model, const QString &effort)
 {
     model_ = model;
@@ -426,10 +434,11 @@ void ClaudeAgent::setModel(const QString &model, const QString &effort)
 // effort; it reports ready again when done.
 bool ClaudeAgent::applySettings()
 {
-    if (model_ == appliedModel_ && effort_ == appliedEffort_) return false;
+    if (model_ == appliedModel_ && effort_ == appliedEffort_ && readOnly_ == appliedReadOnly_) return false;
     // GLM sets its model in the connection's environment, so a new GLM model also reconnects.
     const bool reconnect = effort_ != appliedEffort_ || (kind_ == "glm" && model_ != appliedModel_);
-    send({{"type", "settings"}, {"model", model_}, {"effort", effort_}});
+    send({{"type", "settings"}, {"model", model_}, {"effort", effort_}, {"readOnly", readOnly_}});
+    appliedReadOnly_ = readOnly_;
     appliedModel_ = model_;
     appliedEffort_ = effort_;
     if (reconnect) {

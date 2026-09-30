@@ -1125,10 +1125,13 @@ void MainWindow::updateModelControls()
     const bool canReadOnly = tab && tab->isLive() && tab->agent()->supportsReadOnly();
     readOnlyInput_->setEnabled(canReadOnly);
     readOnlyInput_->setChecked(tab && tab->agent()->isReadOnly());
-    readOnlyInput_->setToolTip(!tab || tab->agent()->supportsReadOnly()
-        ? "The agent may read files but not change them, from the next message on; "
-          "Codex enforces this with its read-only sandbox, which also covers shell commands"
-        : tab->provider()->name() + " does not offer a read-only mode that it enforces");
+    readOnlyInput_->setToolTip(!tab || !tab->agent()->supportsReadOnly()
+        ? (tab ? tab->provider()->name() + " does not offer a read-only mode" : QString())
+        : tab->agent()->readOnlyIsEnforced()
+        ? "From the next message on, the agent may read files but not change them. Codex enforces this with its "
+          "read-only sandbox, which also covers shell commands, so these turns do not wait for the directory."
+        : "From the next message on, the agent works in its plan mode: it reads and plans but is told not to change "
+          "files. Nothing outside the agent enforces this, so these turns still wait for the directory.");
     if (state.join('\n') == modelControlsState_) return;
     modelControlsState_ = state.join('\n');
     const QSignalBlocker modelBlocker(modelInput_);

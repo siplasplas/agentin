@@ -51,11 +51,12 @@ def describe_permission_updates(updates):
 
 
 class Bridge:
-    def __init__(self, cwd, provider="claude", model=None, effort=None):
+    def __init__(self, cwd, provider="claude", model=None, effort=None, read_only=False):
         self.cwd = cwd
         self.provider = provider
         self.model = model
         self.effort = effort
+        self.read_only = read_only
         self.client = None
         self.turn_task = None
         self.stop_requested = False
@@ -75,6 +76,8 @@ class Bridge:
             "include_partial_messages": True,
             "can_use_tool": self.can_use_tool,
         }
+        if self.read_only:
+            settings["permission_mode"] = "plan"
         if self.provider == "claude":
             if self.model:
                 settings["model"] = self.model
@@ -283,6 +286,11 @@ class Bridge:
                 return
             model = command.get("model") or None
             effort = command.get("effort") or None
+            read_only = bool(command.get("readOnly", self.read_only))
+            if read_only != self.read_only:
+                # Plan mode lets Claude read and plan but not change files; it switches within the session.
+                self.read_only = read_only
+                await self.client.set_permission_mode("plan" if read_only else "default")
             # GLM maps every Claude model name to its model in the connection's environment.
             if effort != self.effort or (self.provider == "glm" and model != self.model):
                 self.model = model
@@ -316,8 +324,8 @@ async def read_commands(queue):
             send({"type": "error", "message": f"Invalid JSON command: {exc}"})
 
 
-async def main(cwd, provider="claude", model=None, effort=None):
-    bridge = Bridge(cwd, provider, model, effort)
+async def main(cwd, provider="claude", model=None, effort=None, read_only=False):
+    bridge = Bridge(cwd, provider, model, effort, read_only)
     queue = asyncio.Queue()
     reader = asyncio.create_task(read_commands(queue))
     try:
@@ -421,6 +429,7 @@ if __name__ == "__main__":
     parser.add_argument("--provider", choices=("claude", "glm"), default="claude")
     parser.add_argument("--model")
     parser.add_argument("--effort", choices=("low", "medium", "high", "xhigh", "max"))
+    parser.add_argument("--read-only", action="store_true")
     parser.add_argument("--list-sessions", action="store_true")
     parser.add_argument("--directories", default="[]")
     parser.add_argument("--read-session")
@@ -443,4 +452,4 @@ if __name__ == "__main__":
             send({"type": "error", "message": f"Could not list Claude Agent SDK sessions: {exc}"})
             raise SystemExit(1)
         raise SystemExit(0)
-    raise SystemExit(asyncio.run(main(args.cwd, args.provider, args.model, args.effort)))
+    raise SystemExit(asyncio.run(main(args.cwd, args.provider, args.model, args.effort, args.read_only)))

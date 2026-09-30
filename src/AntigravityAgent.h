@@ -51,6 +51,10 @@ public:
     bool canInterrupt() const override { return busy_ && !stopRequested_; }
     QString model() const override { return model_; }
     void setModel(const QString &model, const QString &effort) override;
+    // The CLI's plan mode: the agent reads and plans without changing files.
+    bool supportsReadOnly() const override { return true; }
+    bool isReadOnly() const override { return readOnly_; }
+    void setReadOnly(bool readOnly) override { readOnly_ = readOnly; emit stateChanged(); }
     bool newConversation(const QString &workingDirectory) override;
     bool resumeConversation(const QString &id, const QString &workingDirectory) override;
     bool prompt(const QString &text) override;
@@ -74,6 +78,7 @@ private:
     QString conversationId_;
     QString firstPrompt_;
     QString model_;
+    bool readOnly_ = false;
     QString errorDetails_;
     QString diagnostics_;
     QByteArray buffer_;

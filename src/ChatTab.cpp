@@ -47,8 +47,9 @@ void ChatTab::cancelWaiting()
 bool ChatTab::dispatch()
 {
     if (outgoing_.isEmpty() || inTurn_) return true;
-    // A read-only turn cannot change files, so it neither takes nor waits for the directory.
-    if (locks_ && !holdsDirectory_ && !agent_->isReadOnly()) {
+    // A read-only turn in a sandbox cannot change files, so it neither takes nor waits for the directory;
+    // an agent that only promises not to change files still waits.
+    if (locks_ && !holdsDirectory_ && !(agent_->isReadOnly() && agent_->readOnlyIsEnforced())) {
         const QString label = provider_->name() + " chat \"" + title_.left(40) + "\"";
         const QString holder = locks_->acquire(QString("%1").arg(quintptr(this)), path_, label);
         if (!holder.isEmpty()) {

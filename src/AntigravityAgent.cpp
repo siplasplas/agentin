@@ -207,6 +207,7 @@ void AntigravityAgent::sendNextPrompt()
     QStringList arguments{"--output-format", "stream-json"};
     if (!conversationId_.isEmpty()) arguments << "--conversation" << conversationId_;
     if (!model_.isEmpty()) arguments << "--model" << model_;
+    if (readOnly_) arguments << "--mode" << "plan";
     arguments << "--prompt" << queuedPrompts_.takeFirst();
     process_->setWorkingDirectory(workingDirectory_);
     process_->start(program_, arguments);

@@ -15,7 +15,8 @@ the agent proposes (Codex command prefixes, Claude Code's suggested permission r
 ## Directory lock for running turns
 
 The lock is in place for all tabs and agentdeskt windows (registry `turn-locks.json`), counts busy
-Claude Code sessions from their registry, and lets read-only Codex turns through. Still open:
+Claude Code sessions from their registry, and lets read-only Codex turns through; read-only turns of
+the other agents (their plan modes) still wait, because only Codex enforces them. Still open:
 
 - **Agents started outside agentdeskt:** they do not use the registry, so their turns have to be
   detected from what each tool leaves behind. What exists today:
@@ -39,9 +40,5 @@ Claude Code sessions from their registry, and lets read-only Codex turns through
     directory for the whole session or be ignored.
   The application registry and Claude Code's registry are used; the Codex and process-based detection
   remain to be added as heuristics.
-- **Read-only turns for other agents:** Codex read-only chats skip the lock because Codex's operating
-  system sandbox stops every write. Claude and GLM (`permission_mode` `plan`) and Gemini
-  (`--approval-mode plan`) have read-only modes that are rules of the agent rather than a sandbox;
-  decide whether they may skip the lock too. Antigravity: check what `agy` offers.
 - **Open question:** whether directories that an agent may write to outside its working directory need
   to be locked too.

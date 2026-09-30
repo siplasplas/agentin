@@ -367,6 +367,7 @@ void GeminiAgent::sendNextPrompt()
         arguments << "--resume" << (sessionId_.startsWith("index:") ? sessionId_.mid(6) : sessionId_);
     }
     if (!model_.isEmpty()) arguments << "--model" << model_;
+    if (readOnly_) arguments << "--approval-mode" << "plan";
     arguments << "--prompt" << queuedPrompts_.takeFirst();
     process_->setWorkingDirectory(workingDirectory_);
     process_->start(program_, arguments);
