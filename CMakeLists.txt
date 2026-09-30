@@ -6,7 +6,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 
 find_package(Qt6 REQUIRED COMPONENTS Widgets)
-# QxDirDialog comes from the qt-extra library (source: /home/andrzej/wazne/gitmy/qt-extra), installed to the system.
+# QxFileDialog comes from the qt-extra library (source: /home/andrzej/wazne/gitmy/qt-extra), installed to the system.
 find_package(qt-extra REQUIRED)
 configure_file(claude/bridge.py ${CMAKE_CURRENT_BINARY_DIR}/claude_bridge.py COPYONLY)
 

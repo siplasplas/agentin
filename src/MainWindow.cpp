@@ -31,7 +31,7 @@
 #include <QVBoxLayout>
 #include <QWidget>
 
-#include <qxdirdialog.h>
+#include <qxfiledialog.h>
 
 #include <algorithm>
 
@@ -1334,9 +1334,8 @@ void MainWindow::showNewConversationDialog()
     };
     connect(pathInput, &QLineEdit::textChanged, &dialog, validatePath);
     connect(browse, &QPushButton::clicked, &dialog, [this, pathInput] {
-        const QString path = QxDirDialog::getExistingDirectory(this, "Choose working directory", pathInput->text(),
-                                                               &recentDirectories_);
-        saveRecentDirectories();
+        const QString path = QxFileDialog::getExistingDirectory(this, "Choose working directory", pathInput->text(),
+                                                                recentDirectories_);
         if (!path.isEmpty()) pathInput->setText(path);
     });
     connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
