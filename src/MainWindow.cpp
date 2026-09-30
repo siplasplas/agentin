@@ -34,6 +34,7 @@
 #include <QProcess>
 #include <QPushButton>
 #include <QSaveFile>
+#include <QShortcut>
 #include <QSignalBlocker>
 #include <QSpinBox>
 #include <QSplitter>
@@ -293,6 +294,14 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     connect(sendButton_, &QPushButton::clicked, this, &MainWindow::submitCommand);
     connect(stopButton_, &QPushButton::clicked, this, &MainWindow::requestStop);
     connect(newChatButton_, &QPushButton::clicked, this, &MainWindow::showNewConversationDialog);
+    auto *newChatShortcut = new QShortcut(QKeySequence("Ctrl+T"), this);
+    connect(newChatShortcut, &QShortcut::activated, this, &MainWindow::showNewConversationDialog);
+    // Closing asks first when the agent is still responding, as the tab's close button does.
+    auto *closeTabShortcut = new QShortcut(QKeySequence("Ctrl+W"), this);
+    connect(closeTabShortcut, &QShortcut::activated, this, [this] {
+        if (QWidget *page = tabs_->currentWidget()) tabs_->requestCloseTab(page);
+    });
+    newChatButton_->setToolTip("New chat (Ctrl+T)");
     for (AgentProvider *listed : providers_) {
         connect(listed, &AgentProvider::message, this, &MainWindow::appendLine);
         connect(listed, &AgentProvider::stateChanged, this, &MainWindow::updateStatus);

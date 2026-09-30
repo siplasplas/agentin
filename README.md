@@ -103,8 +103,8 @@ sessions across its projects. GLM entries created here need the local GLM index 
 remain available. Antigravity entries created here likewise need the local
 Antigravity index to remain available.
 
-Use the **New chat…** button, **Conversations → New conversation in
-directory…**, or type `new` to start a chat. In the dialog, choose the agent,
+Use the **New chat…** button, Ctrl+T, **Conversations → New conversation in
+directory…**, or type `new` to start a chat. Ctrl+W closes the current tab. In the dialog, choose the agent,
 then enter a directory path or choose one with **Browse…**, which also lists
 recently used directories. The **Create chat**
 button is available only when that directory exists. Each chat opens in its own
