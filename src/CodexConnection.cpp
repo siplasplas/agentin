@@ -177,7 +177,7 @@ void CodexConnection::updateRateLimits(const QJsonObject &snapshot)
         limit.id = limitId + '/' + key;
         limit.name = snapshot.value("limitName").toString();
         limit.windowMinutes = window.value("windowDurationMins").toInteger();
-        limit.usedPercent = window.value("usedPercent").toDouble();
+        limit.usedPercent = window.value("usedPercent").isDouble() ? window.value("usedPercent").toDouble() : -1;
         limit.resetsAt = window.value("resetsAt").toInteger();
         windows.append(limit);
     }

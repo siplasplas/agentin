@@ -31,6 +31,7 @@ public:
     void refreshConversations() override;
     QList<QJsonObject> conversations() const override { return index_.treeEntries(); }
     QList<AgentModel> models() const override;
+    bool supportsUsageLimits() const override { return true; }
     QList<UsageLimit> usageLimits() const override { return usage_.values(); }
     AgentBackend *createChat(const QString &workingDirectory, QObject *parent) override;
 

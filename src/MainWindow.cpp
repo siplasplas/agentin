@@ -9,6 +9,7 @@
 #include "MessageInput.h"
 #include "Notifier.h"
 #include "TurnLocks.h"
+#include "UsageLimitsPanel.h"
 
 #include <QCheckBox>
 #include <QButtonGroup>
@@ -73,18 +74,6 @@ QString shortPreview(const QString &value, int limit = 72)
 {
     const QString singleLine = value.simplified();
     return singleLine.size() > limit ? singleLine.left(limit - 1) + QChar(0x2026) : singleLine;
-}
-
-QString windowName(const UsageLimit &limit)
-{
-    const qint64 minutes = limit.windowMinutes;
-    QString length;
-    if (minutes == 7 * 24 * 60) length = "week";
-    else if (minutes > 0 && minutes % (24 * 60) == 0) length = QString("%1 days").arg(minutes / (24 * 60));
-    else if (minutes > 0 && minutes % 60 == 0) length = QString("%1 h").arg(minutes / 60);
-    else if (minutes > 0) length = QString("%1 min").arg(minutes);
-    else length = "limit";
-    return limit.name.isEmpty() ? length : limit.name + " " + length;
 }
 
 // The model list with a "Default model" entry first, which keeps the agent's own default model.
@@ -172,6 +161,12 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     auto *approvalsAction = settingsMenu->addAction("Approvals…");
     connect(approvalsAction, &QAction::triggered, this, &MainWindow::showApprovalsDialog);
 
+    auto *viewMenu = menuBar()->addMenu("View");
+    usageVisibleAction_ = viewMenu->addAction("Provider limits");
+    usageVisibleAction_->setObjectName("showUsageLimits");
+    usageVisibleAction_->setCheckable(true);
+    usageVisibleAction_->setChecked(true);
+
     auto *central = new QWidget(this);
     auto *layout = new QVBoxLayout(central);
     newChatButton_ = new QPushButton("New chat…", central);
@@ -180,10 +175,7 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     status_ = new QLabel(central);
     status_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
     status_->setMinimumWidth(0);
-    usage_ = new QLabel(central);
-    usage_->setObjectName("usageLabel");
-    usage_->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
-    usage_->setMinimumWidth(0);
+    usage_ = new UsageLimitsPanel(central);
     tabs_ = new MruTabWidget(central);
     tabs_->setObjectName("chatTabs");
     tabs_->setTabsClosable(true);
@@ -300,7 +292,6 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     inputRow->addWidget(stopButton_);
     auto *statusRow = new QHBoxLayout;
     statusRow->addWidget(status_, 1);
-    statusRow->addWidget(usage_);
     muteSounds_ = new QToolButton(central);
     muteSounds_->setObjectName("muteSounds");
     muteSounds_->setCheckable(true);
@@ -308,6 +299,12 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     statusRow->addWidget(muteSounds_);
     statusRow->addWidget(newChatButton_);
     layout->addLayout(statusRow);
+    layout->addWidget(usage_);
+    connect(usageVisibleAction_, &QAction::toggled, this, [this](bool visible) {
+        usage_->setVisible(visible);
+        if (visible) updateUsage();
+        saveSettings();
+    });
     layout->addWidget(tabs_, 1);
     layout->addLayout(inputRow);
     auto *chatSplitter = new QSplitter(Qt::Horizontal, this);
@@ -653,6 +650,15 @@ void MainWindow::loadSettings()
     input_->setShortMessageLength(settings.value("enterSendsUpTo").toInt(60));
     undoAfterSend_ = settings.value("undoAfterSend").toBool(true);
     notifier_->setSettings(Notifier::Settings::fromJson(settings.value("notifications").toObject()));
+    lastAudioDirectory_ = settings.value("lastAudioDirectory").toString();
+    audioDurationVisible_ = settings.value("audioDurationVisible").toBool(false);
+    {
+        const QSignalBlocker blocker(usageVisibleAction_);
+        const bool visible = settings.value("showUsageLimits").toBool(true);
+        usageVisibleAction_->setChecked(visible);
+        usage_->setVisible(visible);
+    }
+    updateUsage();
     {
         // Loading must not save the settings before all of them are read.
         const QSignalBlocker blocker(muteSounds_);
@@ -696,6 +702,9 @@ void MainWindow::saveSettings()
                                                          {"undoAfterSend", undoAfterSend_},
                                                          {"chatFont", chatView_->font().toString()},
                                                          {"notifications", notifier_->settings().toJson()},
+                                                         {"lastAudioDirectory", lastAudioDirectory_},
+                                                         {"audioDurationVisible", audioDurationVisible_},
+                                                         {"showUsageLimits", usageVisibleAction_->isChecked()},
                                                          {"glmModels", QJsonArray::fromStringList(glm_->extraModels())},
                                                          {"agents", agents}})
                           .toJson(QJsonDocument::Indented)) < 0
@@ -846,20 +855,43 @@ void MainWindow::showNotificationsDialog()
     minimum->setValue(settings.minimumMinutes);
     minimum->setToolTip("Finished and failed turns notify only when they took at least this long; 0 notifies every turn");
     form->addRow("Notify turns longer than:", minimum);
-    const auto soundRow = [this, &dialog, form](const QString &label, const QString &file) {
+    auto *duration = new QCheckBox("Show audio duration in the file chooser", &dialog);
+    duration->setObjectName("audioDurationVisible");
+    duration->setChecked(audioDurationVisible_);
+    duration->setToolTip("Read audio metadata and allow sorting by duration; disabled by default to avoid extra file reads");
+    form->addRow(QString(), duration);
+    connect(duration, &QCheckBox::toggled, &dialog, [this](bool visible) {
+        audioDurationVisible_ = visible;
+        saveSettings();
+    });
+    const auto soundRow = [this, &dialog, form](const QString &label, const QString &file, const QString &key) {
         auto *row = new QHBoxLayout;
         auto *path = new QLineEdit(file, &dialog);
         path->setPlaceholderText("No sound");
+        path->setObjectName(key + "Path");
         auto *browse = new QPushButton("Browse…", &dialog);
+        browse->setObjectName(key + "Browse");
         auto *play = new QPushButton("Play", &dialog);
         row->addWidget(path, 1);
         row->addWidget(browse);
         row->addWidget(play);
         form->addRow(label, row);
-        connect(browse, &QPushButton::clicked, &dialog, [this, path] {
-            const QString chosen = QxFileDialog::getOpenFileName(this, "Choose a sound", path->text(),
-                                                                 "Sounds (*.wav *.mp3 *.ogg *.oga *.flac)");
-            if (!chosen.isEmpty()) path->setText(chosen);
+        connect(browse, &QPushButton::clicked, &dialog, [this, path, &dialog] {
+            QString directory = lastAudioDirectory_;
+            if (!QDir(directory).exists() || directory.isEmpty()) {
+                const QFileInfo current(path->text().trimmed());
+                directory = current.exists() ? (current.isDir() ? current.absoluteFilePath() : current.absolutePath())
+                                             : QDir::homePath();
+            }
+            QxFileDialog picker(&dialog, QxFileDialog::Open);
+            picker.setWindowTitle("Choose a sound");
+            picker.setDirectory(directory);
+            picker.setNameFilter("Sounds (*.wav *.mp3 *.ogg *.oga *.flac)");
+            picker.setAudioDurationVisible(audioDurationVisible_);
+            const bool accepted = picker.exec() == QDialog::Accepted;
+            lastAudioDirectory_ = picker.directory();
+            saveSettings();
+            if (accepted) path->setText(picker.selectedFile());
         });
         connect(play, &QPushButton::clicked, &dialog, [this, path] {
             if (!notifier_->playSound(path->text()))
@@ -867,9 +899,9 @@ void MainWindow::showNotificationsDialog()
         });
         return path;
     };
-    QLineEdit *finished = soundRow("Turn finished:", settings.finishedSound);
-    QLineEdit *failed = soundRow("Turn failed:", settings.failedSound);
-    QLineEdit *waiting = soundRow("Agent waits for you:", settings.waitingSound);
+    QLineEdit *finished = soundRow("Turn finished:", settings.finishedSound, "finishedSound");
+    QLineEdit *failed = soundRow("Turn failed:", settings.failedSound, "failedSound");
+    QLineEdit *waiting = soundRow("Agent waits for you:", settings.waitingSound, "waitingSound");
     auto *delay = new QSpinBox(&dialog);
     delay->setRange(0, 3600);
     delay->setSuffix(" s");
@@ -1588,31 +1620,15 @@ void MainWindow::showEnterAction(bool sends)
     enterIndicator_->setAccessibleName(sends ? "Enter sends" : "Enter starts a new line");
 }
 
-// Shows how much of each usage limit window is left for the current tab's agent.
+// Account limits belong to providers and remain visible when the selected chat changes.
 void MainWindow::updateUsage()
 {
-    const ChatTab *tab = currentTab();
-    QList<UsageLimit> limits = tab ? tab->provider()->usageLimits() : QList<UsageLimit>{};
-    std::sort(limits.begin(), limits.end(), [](const UsageLimit &left, const UsageLimit &right) {
-        return left.windowMinutes == right.windowMinutes ? left.name < right.name
-                                                         : left.windowMinutes < right.windowMinutes;
-    });
-    QStringList parts;
-    QStringList details;
-    for (const UsageLimit &limit : limits) {
-        const QString name = windowName(limit);
-        const QString left = limit.usedPercent < 0 ? limit.status
-                                                   : QString("%1% left").arg(qRound(100 - limit.usedPercent));
-        parts.append(name + ": " + left);
-        QString detail = name + ": ";
-        detail += limit.usedPercent < 0 ? "usage not reported" : QString("%1% used").arg(qRound(limit.usedPercent));
-        if (limit.resetsAt > 0)
-            detail += ", resets " + QDateTime::fromSecsSinceEpoch(limit.resetsAt).toString("ddd d MMM HH:mm");
-        if (!limit.status.isEmpty()) detail += " (" + limit.status + ")";
-        details.append(detail);
+    QList<ProviderLimits> limits;
+    for (AgentProvider *listed : providers_) {
+        const QList<UsageLimit> windows = listed->usageLimits();
+        if (listed->supportsUsageLimits() || !windows.isEmpty()) limits.append({listed->name(), windows});
     }
-    usage_->setText(parts.isEmpty() ? QString() : tab->provider()->name() + " limits  " + parts.join("  •  "));
-    usage_->setToolTip(details.join('\n'));
+    usage_->setLimits(limits);
 }
 
 // Shows the current chat's model and effort. Without a choice yet, the provider's default model and

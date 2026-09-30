@@ -8,8 +8,8 @@ Agent SDK. Gemini and Antigravity run through their respective CLIs in headless 
 
 ## Build and run
 
-Requires Qt 6 Widgets, CMake, a C++17 compiler, the `qt-extra` library version 2
-(installed so that `find_package(qt-extra 2)` finds it; it provides the chat tabs
+Requires Qt 6 Widgets, CMake, a C++17 compiler, the `qt-extra` library version 2.1 or newer
+(installed so that `find_package(qt-extra 2.1)` finds it; it provides the chat tabs
 and the directory chooser), and an installed `codex` CLI for Codex. Claude requires Python 3, `claude-agent-sdk`, and a configured API
 key. GLM uses the same Python SDK with a Z.AI API key. Gemini requires an
 installed and authenticated Gemini CLI. Antigravity requires an installed and
@@ -223,6 +223,13 @@ stays quiet, and optionally again every few minutes until it is answered, since
 its work stops until then. The speaker button in the status row turns red while a sound or voice is
 playing (including voice preparation); click it to stop the current audio without
 changing the mute setting. When idle, it mutes notification sounds. The
+audio chooser remembers its last browsed directory across all three notification
+sound fields and application restarts, including when the chooser is cancelled.
+**Show audio duration in the file chooser** in notification settings enables the
+sortable duration column (`mm:ss.t`). This option is saved and disabled by default
+to avoid extra metadata reads. Image metadata is not enabled in this audio
+chooser. Pasted absolute or relative paths are handled by QxFileDialog, relative
+to its displayed directory. The
 notification settings dialog also has **Stop playback** for cancelling **Play**
 or **Try** previews while the dialog is open. Starting another sound or voice
 replaces the current playback, and closing the application stops it.
@@ -240,15 +247,30 @@ sentences; other voices speak English. The voice and its pace are chosen and tri
 in **Settings → Notifications…**; a slowness above 1 (1.3 by default) speaks
 slower and usually clearer. Without a voice program the sound files play.
 
-The status row shows how much of the account's usage limits is left for the
-agent in the current tab, for example `Codex limits  week: 36% left`; hover over
-it to see the used percentage and when each window resets. Which windows exist
-depends on the plan. Codex reads them from the App Server when it connects
-(`account/rateLimits/read`) and updates them as the server reports changes.
-Claude reports its windows (five hours, a week, and weekly windows per model
-family) only while it answers and only when a window's state changes, so they
-appear after a response that included such an event. Gemini, GLM and
-Antigravity do not report their limits.
+**View → Provider limits** shows an account panel independent of the selected
+conversation. It is visible by default; visibility is saved in settings. Each
+provider's weekly limits appear before its five-hour limits, including separate
+model-family windows when reported. Rows show the remaining percentage and the
+reset time in local time. A missing percentage or reset is explicitly marked as
+not reported, including placeholder weekly/five-hour rows when no data exists.
+
+Green means the consumed percentage is strictly below the fraction of the window
+that has elapsed. Yellow means it is equal or greater: for example, after one day
+of a seven-day window, consuming at least 1/7 is yellow. Yellow rows show **Pause
+until**: the first second when unchanged usage would fall below the elapsed
+fraction. This assumes no further account use; with several constrained windows,
+wait until the latest suggested time. Red means 100% is used or the provider
+reports rejection. The panel recalculates pacing each second while visible.
+After a reported reset passes, it shows **Awaiting updated limits**, without
+assuming that a fresh quota is available.
+
+Which windows exist depends on the plan. Codex reads them from the App Server
+when it connects (`account/rateLimits/read`) and updates them as the server
+reports changes. Claude reports five-hour, weekly, and model-family windows only
+while it answers and when a window's state changes. The panel therefore uses the
+last reported snapshot and does not promise live quota polling for Claude.
+GLM has the same event handling through its bridge but may report no quota data.
+Gemini and Antigravity currently do not report account limits.
 
 Select a chat in the conversation tree to show a read-only preview of its
 latest messages in the preview tab, whose title is shown in italics. Selecting

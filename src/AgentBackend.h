@@ -151,6 +151,7 @@ public:
     virtual QList<AgentModel> models() const { return {}; }
     // Account usage limits as far as the agent reports them.
     virtual QList<UsageLimit> usageLimits() const { return {}; }
+    virtual bool supportsUsageLimits() const { return false; }
     // Model and effort that new chats start with, from the application options; empty means the
     // agent's own default.
     QString defaultModel() const { return defaultModel_; }

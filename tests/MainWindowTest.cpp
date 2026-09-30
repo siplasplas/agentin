@@ -5,9 +5,15 @@
 #include <QJsonDocument>
 #include "MainWindow.h"
 #include "Notifier.h"
+#include "UsageLimitsPanel.h"
+#include "ClaudeAgent.h"
 #include <QProcess>
 #include <QToolButton>
 
+#include <qxfiledialog.h>
+#include <QAction>
+#include <QCheckBox>
+#include <QTreeView>
 #include <QFile>
 #include <QFileInfo>
 #include <QComboBox>
@@ -29,6 +35,9 @@ class MainWindowTest : public QObject
     Q_OBJECT
 
 private slots:
+    void usageLimitPacing();
+    void providerLimitsPanelAndVisibility();
+    void audioChooserPathsAndLastDirectory();
     void speakerStopsAudio();
     void piperStopsBeforePlayback();
     void commandApproval_data();
@@ -48,6 +57,210 @@ private slots:
     void claudeAttachRespectsExternalLock();
     void geminiAttachRespectsExternalLock();
 };
+
+void MainWindowTest::usageLimitPacing()
+{
+    const qint64 start = 1700000000;
+    const qint64 week = 7 * 24 * 60 * 60;
+    UsageLimit limit;
+    limit.windowMinutes = 7 * 24 * 60;
+    limit.resetsAt = start + week;
+    const qint64 now = start + 24 * 60 * 60;
+    limit.usedPercent = 14;
+    QCOMPARE(int(assessUsageLimit(limit, now).pace), int(UsagePace::Green));
+    limit.usedPercent = 100.0 / 7;
+    QCOMPARE(int(assessUsageLimit(limit, now).pace), int(UsagePace::Yellow));
+    limit.usedPercent = 20;
+    const UsageAssessment yellow = assessUsageLimit(limit, now);
+    QCOMPARE(int(yellow.pace), int(UsagePace::Yellow));
+    QCOMPARE(yellow.remainingPercent, 80.0);
+    QCOMPARE(yellow.greenAt, start + week / 5 + 1);
+    QCOMPARE(int(assessUsageLimit(limit, yellow.greenAt - 1).pace), int(UsagePace::Yellow));
+    QCOMPARE(int(assessUsageLimit(limit, yellow.greenAt).pace), int(UsagePace::Green));
+    limit.usedPercent = 100;
+    QCOMPARE(int(assessUsageLimit(limit, now).pace), int(UsagePace::Red));
+    QCOMPARE(assessUsageLimit(limit, now).remainingPercent, 0.0);
+    QCOMPARE(int(assessUsageLimit(limit, limit.resetsAt).pace), int(UsagePace::Expired));
+    QCOMPARE(assessUsageLimit(limit, limit.resetsAt).remainingPercent, -1.0);
+    limit.usedPercent = -1;
+    limit.status = "rejected";
+    QCOMPARE(int(assessUsageLimit(limit, now).pace), int(UsagePace::Red));
+    limit.status.clear();
+    QCOMPARE(int(assessUsageLimit(limit, now).pace), int(UsagePace::Unknown));
+    limit.usedPercent = 20;
+    limit.resetsAt = 0;
+    QCOMPARE(int(assessUsageLimit(limit, now).pace), int(UsagePace::Unknown));
+    limit.windowMinutes = 300;
+    limit.resetsAt = start + 5 * 60 * 60;
+    limit.usedPercent = 50;
+    QCOMPARE(int(assessUsageLimit(limit, start + 60 * 60).pace), int(UsagePace::Yellow));
+    QCOMPARE(int(assessUsageLimit(limit, start + 3 * 60 * 60).pace), int(UsagePace::Green));
+    QCOMPARE(int(assessUsageLimit(limit, start - 1).pace), int(UsagePace::Unknown));
+}
+
+void MainWindowTest::providerLimitsPanelAndVisibility()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    {
+        MainWindow window("/nonexistent/codex", directory.path(), "/nonexistent/python", "/nonexistent/bridge",
+                          "/nonexistent/gemini", nullptr, directory.filePath("index.json"), "/nonexistent/agy",
+                          directory.filePath("gemini"));
+        window.show();
+        auto *panel = window.findChild<UsageLimitsPanel *>();
+        auto *tree = window.findChild<QTreeWidget *>("usageLimitsTree");
+        auto *visible = window.findChild<QAction *>("showUsageLimits");
+        QVERIFY(panel && tree && visible);
+        QVERIFY(visible->isChecked());
+        QTRY_VERIFY(panel->isVisible());
+        ClaudeProvider *claude = nullptr;
+        for (ClaudeProvider *candidate : window.findChildren<ClaudeProvider *>())
+            if (candidate->name() == "Claude") claude = candidate;
+        QVERIFY(claude);
+        // No conversation exists: the provider event alone updates the panel.
+        const qint64 now = QDateTime::currentSecsSinceEpoch();
+        const qint64 reset = now + 6 * 24 * 60 * 60;
+        claude->updateUsage({{"limit", "seven_day"}, {"utilization", 0.2}, {"resetsAt", reset}, {"status", "allowed"}});
+        QTreeWidgetItem *weekly = nullptr;
+        for (int i = 0; i < tree->topLevelItemCount(); ++i) {
+            auto *item = tree->topLevelItem(i);
+            if (item->text(0) == "Claude" && item->text(1) == "Week") {
+                weekly = item;
+                QVERIFY(i + 1 < tree->topLevelItemCount());
+                QCOMPARE(tree->topLevelItem(i + 1)->text(1), QString("5 h"));
+            }
+        }
+        QVERIFY(weekly);
+        QCOMPARE(weekly->text(2), QString("80.0%"));
+        QCOMPARE(weekly->data(4, Qt::UserRole).toInt(), int(UsagePace::Yellow));
+        QVERIFY(weekly->text(4).startsWith("Pause until "));
+        claude->updateUsage({{"limit", "seven_day"}, {"utilization", 1.0}, {"resetsAt", reset}, {"status", "rejected"}});
+        QCOMPARE(weekly->data(4, Qt::UserRole).toInt(), int(UsagePace::Red));
+        QCOMPARE(weekly->foreground(2).color(), QColor("#d32f2f"));
+        // A new window without a percentage must not inherit the exhausted snapshot.
+        claude->updateUsage({{"limit", "seven_day"}, {"resetsAt", reset + 7 * 24 * 60 * 60}, {"status", "allowed"}});
+        QCOMPARE(weekly->text(2), QString("Not reported"));
+        QCOMPARE(weekly->data(4, Qt::UserRole).toInt(), int(UsagePace::Unknown));
+        visible->trigger();
+        QVERIFY(!visible->isChecked());
+        QVERIFY(panel->isHidden());
+    }
+    MainWindow restarted("/nonexistent/codex", directory.path(), "/nonexistent/python", "/nonexistent/bridge",
+                         "/nonexistent/gemini", nullptr, directory.filePath("index.json"), "/nonexistent/agy",
+                         directory.filePath("gemini"));
+    auto *visible = restarted.findChild<QAction *>("showUsageLimits");
+    auto *panel = restarted.findChild<UsageLimitsPanel *>();
+    QVERIFY(visible && panel);
+    QVERIFY(!visible->isChecked());
+    QVERIFY(panel->isHidden());
+    visible->trigger();
+    QVERIFY(visible->isChecked());
+    QVERIFY(!panel->isHidden());
+}
+
+void MainWindowTest::audioChooserPathsAndLastDirectory()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString oldDirectory = directory.filePath("old");
+    const QString firstDirectory = directory.filePath("first");
+    const QString secondDirectory = directory.filePath("second");
+    const QString cancelledDirectory = directory.filePath("cancelled");
+    for (const QString &path : {oldDirectory, firstDirectory, secondDirectory, cancelledDirectory}) QVERIFY(QDir().mkpath(path));
+    const QString oldFile = QDir(oldDirectory).filePath("old.mp3");
+    const QString firstFile = QDir(firstDirectory).filePath("first.wav");
+    const QString secondFile = QDir(secondDirectory).filePath("second.ogg");
+    const QString cancelledFile = QDir(cancelledDirectory).filePath("last.wav");
+    for (const QString &path : {oldFile, firstFile, secondFile, cancelledFile}) {
+        QFile file(path);
+        QVERIFY(file.open(QIODevice::WriteOnly));
+    }
+    QFile settings(directory.filePath("settings.json"));
+    QVERIFY(settings.open(QIODevice::WriteOnly));
+    settings.write(QJsonDocument(QJsonObject{{"notifications", QJsonObject{
+        {"finishedSound", oldFile}, {"failedSound", oldFile}}}}).toJson());
+    settings.close();
+    bool rememberedDuration = false;
+    const auto choose = [&](MainWindow &window, const QString &key, const QString &expectedDirectory,
+                            const QString &typedPath, const QString &expectedFile, bool cancel = false,
+                            bool enableDuration = false) {
+        QAction *action = nullptr;
+        for (QAction *candidate : window.findChildren<QAction *>())
+            if (candidate->text() == "Notifications…") action = candidate;
+        QVERIFY(action);
+        bool completed = false;
+        QTimer::singleShot(0, &window, [&] {
+            auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+            QVERIFY(dialog);
+            const auto closeDialog = qScopeGuard([dialog] { dialog->reject(); });
+            auto *duration = dialog->findChild<QCheckBox *>("audioDurationVisible");
+            QVERIFY(duration);
+            QCOMPARE(duration->isChecked(), rememberedDuration);
+            duration->setChecked(enableDuration);
+            rememberedDuration = enableDuration;
+            auto *browse = dialog->findChild<QPushButton *>(key + "Browse");
+            QVERIFY(browse);
+            bool accepted = false;
+            QTimer::singleShot(0, &window, [&] {
+                auto *picker = qobject_cast<QxFileDialog *>(QApplication::activeModalWidget());
+                QVERIFY(picker);
+                const auto closePicker = qScopeGuard([picker] { if (picker->isVisible()) picker->reject(); });
+                auto *view = picker->findChild<QTreeView *>();
+                QVERIFY(view);
+                QCOMPARE(picker->directory(), expectedDirectory);
+                QCOMPARE(view->isColumnHidden(4), !enableDuration);
+                QComboBox *name = nullptr;
+                for (QComboBox *combo : picker->findChildren<QComboBox *>())
+                    if (combo->isEditable()) name = combo;
+                QVERIFY(name);
+                name->lineEdit()->selectAll();
+                QTest::keyClicks(name->lineEdit(), typedPath);
+                QPushButton *open = nullptr;
+                for (QPushButton *button : picker->findChildren<QPushButton *>())
+                    if (button->text() == "Open") open = button;
+                QVERIFY(open);
+                open->click();
+                if (cancel) {
+                    // Enter a directory through the normal pasted-path flow, then cancel the chooser.
+                    QCOMPARE(picker->directory(), cancelledDirectory);
+                    QVERIFY(picker->isVisible());
+                    picker->reject();
+                    QCOMPARE(picker->result(), int(QDialog::Rejected));
+                } else {
+                    QCOMPARE(picker->result(), int(QDialog::Accepted));
+                    QCOMPARE(QDir::cleanPath(picker->selectedFile()), expectedFile);
+                }
+                accepted = true;
+            });
+            browse->click();
+            QVERIFY(accepted);
+            auto *path = dialog->findChild<QLineEdit *>(key + "Path");
+            QVERIFY(path);
+            QCOMPARE(QDir::cleanPath(path->text()), expectedFile);
+            completed = true;
+        });
+        action->trigger();
+        QVERIFY(completed);
+    };
+    {
+        MainWindow window("/nonexistent/codex", directory.path(), "/nonexistent/python", "/nonexistent/bridge",
+                          "/nonexistent/gemini", nullptr, directory.filePath("index.json"), "/nonexistent/agy",
+                          directory.filePath("gemini"));
+        choose(window, "finishedSound", oldDirectory, firstFile, firstFile);
+        choose(window, "failedSound", firstDirectory, "../second/second.ogg", secondFile, false, true);
+        choose(window, "waitingSound", secondDirectory, "../cancelled", QString(), true, true);
+    }
+    QVERIFY(settings.open(QIODevice::ReadOnly));
+    const QJsonObject saved = QJsonDocument::fromJson(settings.readAll()).object();
+    settings.close();
+    QCOMPARE(saved.value("lastAudioDirectory").toString(), cancelledDirectory);
+    QVERIFY(saved.value("audioDurationVisible").toBool());
+    // The last browsed directory survives cancelling both dialogs and restarting the application.
+    MainWindow restarted("/nonexistent/codex", directory.path(), "/nonexistent/python", "/nonexistent/bridge",
+                         "/nonexistent/gemini", nullptr, directory.filePath("index.json"), "/nonexistent/agy",
+                         directory.filePath("gemini"));
+    choose(restarted, "waitingSound", cancelledDirectory, "last.wav", cancelledFile, false, true);
+}
 
 void MainWindowTest::speakerStopsAudio()
 {

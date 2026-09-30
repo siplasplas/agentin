@@ -7,8 +7,8 @@ set(CMAKE_AUTOMOC ON)
 
 find_package(Qt6 REQUIRED COMPONENTS Widgets)
 # QxFileDialog and MruTabWidget come from the qt-extra library (source: /home/andrzej/wazne/gitmy/qt-extra),
-# installed to the system. Version 2 identifies tabs by page and adds the preview tab.
-find_package(qt-extra 2 REQUIRED)
+# installed to the system. Version 2.1 adds optional file metadata and the chooser directory getter.
+find_package(qt-extra 2.1 REQUIRED)
 configure_file(claude/bridge.py ${CMAKE_CURRENT_BINARY_DIR}/claude_bridge.py COPYONLY)
 
 add_executable(agentdeskt
@@ -44,6 +44,8 @@ add_executable(agentdeskt
     src/MainWindow.h
     src/MessageInput.cpp
     src/MessageInput.h
+    src/UsageLimitsPanel.cpp
+    src/UsageLimitsPanel.h
     src/Notifier.cpp
     src/Notifier.h
 )
@@ -88,6 +90,8 @@ if(BUILD_TESTING)
         src/MainWindow.h
         src/MessageInput.cpp
         src/MessageInput.h
+        src/UsageLimitsPanel.cpp
+        src/UsageLimitsPanel.h
         src/Notifier.cpp
         src/Notifier.h
     )

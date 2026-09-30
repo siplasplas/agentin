@@ -10,6 +10,8 @@ class AgentProvider;
 class AntigravityProvider;
 class ChatTab;
 class ChatView;
+class UsageLimitsPanel;
+class QAction;
 class ClaudeProvider;
 class CodexConnection;
 class GeminiProvider;
@@ -87,6 +89,8 @@ private:
 
     QString workingDirectory_;
     QString dataDirectory_;
+    QString lastAudioDirectory_;
+    bool audioDurationVisible_ = false;
     CodexConnection *codex_;
     ClaudeProvider *claude_;
     ClaudeProvider *glm_;
@@ -126,7 +130,8 @@ private:
     QPushButton *stopButton_;
     QPushButton *newChatButton_;
     QLabel *status_;
-    QLabel *usage_;
+    UsageLimitsPanel *usage_;
+    QAction *usageVisibleAction_;
     QTreeWidget *conversationTree_;
     QSet<QString> expandedProviders_;
     QStringList recentDirectories_;

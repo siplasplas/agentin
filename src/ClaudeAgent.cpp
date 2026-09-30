@@ -143,6 +143,8 @@ void ClaudeProvider::updateUsage(const QJsonObject &event)
     limit.id = type;
     limit.windowMinutes = type == "five_hour" ? 5 * 60 : 7 * 24 * 60;
     limit.name = type == "seven_day_opus" ? "Opus" : (type == "seven_day_sonnet" ? "Sonnet" : QString());
+    if (event.value("resetsAt").isDouble() && event.value("resetsAt").toInteger() != limit.resetsAt)
+        limit.usedPercent = -1; // An old percentage must not be carried into a new window.
     if (event.value("utilization").isDouble()) limit.usedPercent = event.value("utilization").toDouble() * 100;
     if (event.value("resetsAt").isDouble()) limit.resetsAt = event.value("resetsAt").toInteger();
     limit.status = event.value("status").toString();
