@@ -38,6 +38,9 @@ public:
     void excludeSessionsOf(const ClaudeProvider *other) { excluded_ = other; }
 
     QString kind() const { return kind_; }
+    // Z.AI publishes no model list, so GLM offers the model names entered in the options.
+    QStringList extraModels() const { return extraModels_; }
+    void setExtraModels(const QStringList &models) { extraModels_ = models; emit modelsChanged(); }
     QString pythonProgram() const { return pythonProgram_; }
     QString scriptPath() const { return scriptPath_; }
     void rememberConversation(const QString &id, const QString &workingDirectory, const QString &firstPrompt);
@@ -58,6 +61,7 @@ private:
     ConversationIndex index_;
     const ClaudeProvider *excluded_ = nullptr;
     QList<QProcess *> helperProcesses_;
+    QStringList extraModels_;
     QMap<QString, UsageLimit> usage_;
 };
 

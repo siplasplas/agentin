@@ -2,12 +2,10 @@
 
 Planned work, roughly in order. Items move to `README.md` once they are implemented.
 
-## Model choice for GLM and Antigravity
+## Model choice for Antigravity
 
-Codex, Claude and Gemini chats choose a model (and an effort where the agent has one). Still open:
-
-- GLM: choose the model in the chat instead of only through `GLM_MODEL`.
-- Antigravity: check what `agy` offers.
+Codex, Claude, GLM and Gemini chats choose a model (and an effort where the agent has one).
+Antigravity still uses its default model: check what `agy` offers once it is installed.
 
 ## Approvals and questions in the chat
 

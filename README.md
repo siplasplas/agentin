@@ -130,7 +130,10 @@ aliases (`fable`, `opus`, `sonnet`, `haiku`) and efforts from `low` to `max`; a
 new model applies within the session, while a new effort reconnects the bridge
 and resumes the session before the next message. Gemini offers Gemini CLI's
 aliases (`auto`, `pro`, `flash`, `flash-lite`), passed as `--model` on the next
-turn; it has no effort setting. GLM and Antigravity use their default model.
+turn; it has no effort setting. Z.AI publishes no model list, so GLM offers the
+default model (`GLM_MODEL`, or `glm-5.3`) and the model names typed into the GLM
+row of **Settings → Options…**; a new GLM model reconnects the bridge and
+resumes the session. Antigravity uses its default model.
 
 A Codex chat can be switched to **Read-only** in its header. From the next
 message on, turns use Codex's read-only sandbox, so the agent can read files but

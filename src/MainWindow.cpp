@@ -431,6 +431,11 @@ void MainWindow::loadSettings()
     const QString enterKey = settings.value("enterKey").toString();
     input_->setShortMessageLength(settings.value("enterSendsUpTo").toInt(60));
     undoAfterSend_ = settings.value("undoAfterSend").toBool(true);
+    QStringList glmModels;
+    for (const QJsonValue &value : settings.value("glmModels").toArray()) {
+        if (!value.toString().isEmpty()) glmModels.append(value.toString());
+    }
+    glm_->setExtraModels(glmModels);
     input_->setEnterPolicy(enterKey == "send" ? MessageInput::EnterPolicy::Send
                            : (enterKey == "newline" ? MessageInput::EnterPolicy::NewLine
                                                     : MessageInput::EnterPolicy::Smart));
@@ -449,7 +454,9 @@ void MainWindow::saveSettings()
     if (!file.open(QIODevice::WriteOnly)
         || file.write(QJsonDocument(QJsonObject{{"version", 1}, {"enterKey", enterKey},
                                                          {"enterSendsUpTo", input_->shortMessageLength()},
-                                                         {"undoAfterSend", undoAfterSend_}, {"agents", agents}})
+                                                         {"undoAfterSend", undoAfterSend_},
+                                                         {"glmModels", QJsonArray::fromStringList(glm_->extraModels())},
+                                                         {"agents", agents}})
                           .toJson(QJsonDocument::Indented)) < 0
         || !file.commit()) {
         appendLine("[Could not save settings: " + file.errorString() + "]");
@@ -509,6 +516,11 @@ void MainWindow::showOptionsDialog()
         auto *effort = new QComboBox(&dialog);
         effort->setObjectName("defaultEffort" + listed->name());
         for (const AgentModel &choice : choices) model->addItem(choice.displayName, choice.id);
+        // GLM models are entered by name.
+        if (listed == glm_) {
+            model->setEditable(true);
+            model->setToolTip("Choose a model or type the name of a Z.AI model; typed names are added to the GLM chats' list");
+        }
         if (model->findData(listed->defaultModel()) < 0) model->addItem(listed->defaultModel(), listed->defaultModel());
         model->setCurrentIndex(model->findData(listed->defaultModel()));
         const auto fillEfforts = [choices, model, effort](const QString &preferred) {
@@ -547,7 +559,16 @@ void MainWindow::showOptionsDialog()
     input_->setEnterPolicy(MessageInput::EnterPolicy(enterInput->currentData().toInt()));
     input_->setShortMessageLength(shortLength->value());
     undoAfterSend_ = undoAfterSend->isChecked();
-    for (const Row &row : rows) row.provider->setDefaults(row.model->currentData().toString(), row.effort->currentData().toString());
+    for (const Row &row : rows) {
+        QString model = row.model->currentData().toString();
+        if (row.model->isEditable()) {
+            const int index = row.model->findText(row.model->currentText());
+            model = index >= 0 ? row.model->itemData(index).toString() : row.model->currentText().trimmed();
+        }
+        if (row.provider == glm_ && !model.isEmpty() && !glm_->extraModels().contains(model))
+            glm_->setExtraModels(glm_->extraModels() << model);
+        row.provider->setDefaults(model, row.effort->currentData().toString());
+    }
     saveSettings();
     modelControlsState_.clear();
     updateModelControls();

@@ -113,7 +113,11 @@ void ClaudeProvider::refreshConversations()
 // The Agent SDK cannot list models, so Claude offers Claude Code's aliases for the latest models.
 QList<AgentModel> ClaudeProvider::models() const
 {
-    if (kind_ == "glm") return {};
+    if (kind_ == "glm") {
+        QList<AgentModel> result{{{}, "Default model", "GLM_MODEL, or glm-5.3 when it is not set", {}, {}, {}, true}};
+        for (const QString &model : extraModels_) result.append({model, model, "Z.AI model", {}, {}, {}, false});
+        return result;
+    }
     const QStringList efforts{"low", "medium", "high", "xhigh", "max"};
     const QStringList effortDescriptions{
         "Minimal thinking, fastest responses", "Moderate thinking", "Deep reasoning",
@@ -186,7 +190,7 @@ ClaudeAgent::ClaudeAgent(ClaudeProvider *provider, const QString &workingDirecto
     : AgentBackend(parent), provider_(provider), name_(provider->name()), kind_(provider->kind()),
       workingDirectory_(workingDirectory), process_(new QProcess(this)),
       model_(provider->models().isEmpty() ? QString() : provider->defaultModel()),
-      effort_(provider->models().isEmpty() ? QString() : provider->defaultEffort())
+      effort_(provider->models().isEmpty() || provider->kind() == "glm" ? QString() : provider->defaultEffort())
 {
     connect(process_, &QProcess::readyReadStandardOutput, this, [this] {
         buffer_ += process_->readAllStandardOutput();
@@ -423,7 +427,8 @@ void ClaudeAgent::setModel(const QString &model, const QString &effort)
 bool ClaudeAgent::applySettings()
 {
     if (model_ == appliedModel_ && effort_ == appliedEffort_) return false;
-    const bool reconnect = effort_ != appliedEffort_;
+    // GLM sets its model in the connection's environment, so a new GLM model also reconnects.
+    const bool reconnect = effort_ != appliedEffort_ || (kind_ == "glm" && model_ != appliedModel_);
     send({{"type", "settings"}, {"model", model_}, {"effort", effort_}});
     appliedModel_ = model_;
     appliedEffort_ = effort_;

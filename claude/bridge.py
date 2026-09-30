@@ -84,7 +84,7 @@ class Bridge:
             api_key = os.environ.get("ZAI_API_KEY")
             if not api_key:
                 raise RuntimeError("Set ZAI_API_KEY to use GLM through the Z.AI Coding Plan")
-            model = os.environ.get("GLM_MODEL", "glm-5.3")
+            model = self.model or os.environ.get("GLM_MODEL", "glm-5.3")
             settings.update({
                 "model": model,
                 "setting_sources": ["project", "local"],
@@ -283,7 +283,8 @@ class Bridge:
                 return
             model = command.get("model") or None
             effort = command.get("effort") or None
-            if effort != self.effort:
+            # GLM maps every Claude model name to its model in the connection's environment.
+            if effort != self.effort or (self.provider == "glm" and model != self.model):
                 self.model = model
                 self.effort = effort
                 await self.client.disconnect()
