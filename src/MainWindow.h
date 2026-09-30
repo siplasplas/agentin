@@ -3,7 +3,6 @@
 #include "AgentBackend.h"
 
 #include <QHash>
-#include <QJsonObject>
 #include <QList>
 #include <QMainWindow>
 #include <QSet>
@@ -12,7 +11,6 @@
 class QLabel;
 class QLineEdit;
 class QPlainTextEdit;
-class QProcess;
 class QPushButton;
 class AntigravityAgent;
 class ClaudeAgent;
@@ -40,19 +38,14 @@ private:
     QHash<QString, QString> askQuestions(const QList<AgentQuestion> &questions);
     AgentBackend *agent(int index) const { return agents_.value(index); }
     AgentBackend *currentAgent() const { return agent(currentProvider_); }
-    bool loadLocalConversations();
-    bool saveLocalConversations();
-    void rememberLocalConversation(const QString &provider, const QString &id);
     void loadRecentDirectories();
     void saveRecentDirectories();
     void rememberRecentDirectory(const QString &path);
     void newProviderConversation(int providerIndex, const QString &path);
     void showNewConversationDialog();
-    void fetchClaudeSessions();
-    void fetchGeminiSessions();
     void refreshConversationTree();
-    static QString providerName(int index);
-    static int providerIndex(const QString &name);
+    QString providerName(int index) const;
+    int providerIndex(const QString &name) const;
     void selectProvider(int index);
     void requestStop();
     void appendText(const QString &text);
@@ -61,7 +54,6 @@ private:
     void showChatPreview(QTreeWidgetItem *item);
     void attachChat(QTreeWidgetItem *item);
     void openChat(const QString &provider, const QString &id, const QString &path, const QString &title);
-    QString externalLock(const QString &provider, const QString &id) const;
     void showLiveChat(const QString &provider, const QString &path);
     void loadHistory(bool reset);
     void showHistory(const QList<ChatEntry> &entries, bool hasMore, const QString &notice = {});
@@ -69,18 +61,14 @@ private:
     void updateStatus();
 
     QString workingDirectory_;
-    QString claudePython_;
-    QString claudeScript_;
-    QString localIndexPath_;
+    QString dataDirectory_;
     CodexAgent *codex_;
     ClaudeAgent *claude_;
     ClaudeAgent *glm_;
     GeminiAgent *gemini_;
     AntigravityAgent *antigravity_;
-    // Indexed like providerName(): Codex, Claude, GLM, Gemini, Antigravity.
+    // Provider order in the tree and the New chat dialog; providerName() and providerIndex() follow it.
     QList<AgentBackend *> agents_;
-    // First message of a new chat per provider, used as its title in the local index.
-    QHash<QString, QString> firstPrompts_;
     QPlainTextEdit *chatView_;
     QPlainTextEdit *log_;
     QLabel *chatHeader_;
@@ -91,8 +79,6 @@ private:
     QPushButton *newChatButton_;
     QLabel *status_;
     QTreeWidget *conversationTree_;
-    QHash<QString, QJsonObject> localConversations_;
-    QList<QProcess *> historyProcesses_;
     QSet<QString> expandedProviders_;
     int currentProvider_ = 0;
     QString viewProvider_;
@@ -104,5 +90,4 @@ private:
     QString lockNotice_;
     QString pendingAttachId_;
     bool viewLive_ = false;
-    bool geminiExecutableChecked_ = false;
 };

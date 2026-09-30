@@ -1,18 +1,24 @@
 #include "ClaudeAgent.h"
 
+#include "ProcessLocks.h"
+
+#include <QDir>
 #include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QProcess>
+#include <QStandardPaths>
 
 namespace {
 constexpr int kHistoryPageSize = 20;
 }
 
 ClaudeAgent::ClaudeAgent(const QString &pythonProgram, const QString &scriptPath,
-                         const QString &workingDirectory, const QString &provider, QObject *parent)
+                         const QString &workingDirectory, const QString &provider, const QString &indexPath,
+                         QObject *parent)
     : AgentBackend(parent), pythonProgram_(pythonProgram), scriptPath_(scriptPath),
-      workingDirectory_(workingDirectory), provider_(provider), process_(new QProcess(this))
+      workingDirectory_(workingDirectory), provider_(provider), process_(new QProcess(this)),
+      index_(name(), indexPath)
 {
     connect(process_, &QProcess::readyReadStandardOutput, this, [this] {
         buffer_ += process_->readAllStandardOutput();
@@ -48,7 +54,7 @@ ClaudeAgent::ClaudeAgent(const QString &pythonProgram, const QString &scriptPath
 
 ClaudeAgent::~ClaudeAgent()
 {
-    for (QProcess *process : historyProcesses_) {
+    for (QProcess *process : helperProcesses_) {
         disconnect(process, nullptr, this, nullptr);
         if (process->state() != QProcess::NotRunning) {
             process->kill();
@@ -82,6 +88,105 @@ QString ClaudeAgent::statusText() const
     return name() + " bridge is not running";
 }
 
+AgentHelp ClaudeAgent::help() const
+{
+    AgentHelp help;
+    if (provider_ == "glm") {
+        help.lines = {"GLM via Z.AI and Claude Agent SDK:",
+                      "  Send messages with Enter or Send to GLM.",
+                      "  Tool approvals and questions appear in dialogs.",
+                      "  Requires claude-agent-sdk and ZAI_API_KEY; GLM_MODEL is optional.",
+                      "  GLM setup: https://docs.z.ai/devpack/tool/claude",
+                      "  Claude Code slash commands: https://code.claude.com/docs/en/commands",
+                      "Installed Claude CLI options (reference; GLM uses the SDK):"};
+    } else {
+        help.lines = {"Claude Agent SDK:",
+                      "  Send a message with Enter or the Send to Claude button.",
+                      "  Responses are streamed into this window.",
+                      "  Tool approvals and questions appear in dialogs.",
+                      "  Messages entered during a response are queued.",
+                      "  The selected Python environment needs claude-agent-sdk and API credentials.",
+                      "  Claude Code slash commands: https://code.claude.com/docs/en/commands",
+                      "Installed Claude CLI commands and options (reference; this window uses the SDK):"};
+    }
+    help.name = "Claude CLI";
+    help.program = QStandardPaths::findExecutable("claude");
+    help.arguments = {"--help"};
+    return help;
+}
+
+QString ClaudeAgent::externalLock(const QString &id) const
+{
+    return claudeSessionLock(qEnvironmentVariable("CLAUDE_CONFIG_DIR", QDir::home().filePath(".claude")), id);
+}
+
+void ClaudeAgent::loadConversations()
+{
+    reportIndexError(index_.load());
+}
+
+// GLM sessions are only those recorded here; Claude also lists SDK sessions from all projects.
+void ClaudeAgent::refreshConversations()
+{
+    if (provider_ == "glm") {
+        reportIndexError(index_.load());
+        emit conversationsChanged();
+        return;
+    }
+    if (pythonProgram_.isEmpty() || scriptPath_.isEmpty()) return;
+    runHelper({"--list-sessions", "--directories", "[]"}, workingDirectory_, [this](QProcess *process, bool started) {
+        if (!started) {
+            emit message("[Claude session discovery: " + process->errorString() + "]");
+            return;
+        }
+        if (process->exitStatus() != QProcess::NormalExit || process->exitCode() != 0) {
+            QString details = QJsonDocument::fromJson(process->readAllStandardOutput()).object().value("message").toString();
+            if (details.isEmpty()) details = QString::fromUtf8(process->readAllStandardError()).trimmed();
+            if (!details.isEmpty()) emit message("[Claude session discovery: " + details + "]");
+            return;
+        }
+        const QJsonArray sessions = QJsonDocument::fromJson(process->readAllStandardOutput().trimmed())
+                                        .object().value("sessions").toArray();
+        bool changed = false;
+        for (const QJsonValue &value : sessions) {
+            const QJsonObject session = value.toObject();
+            const QString id = session.value("id").toString();
+            if (id.isEmpty() || !QFileInfo(session.value("cwd").toString()).isDir()
+                || (excluded_ && excluded_->index_.contains(id))) continue;
+            changed = index_.insert(session) || changed;
+        }
+        if (changed) {
+            reportIndexError(index_.save());
+            emit conversationsChanged();
+        }
+        emit message(QString("[Claude sessions discovered: %1]").arg(sessions.size()));
+    });
+}
+
+void ClaudeAgent::reportIndexError(const QString &error)
+{
+    if (!error.isEmpty()) emit message("[" + error + "]");
+}
+
+// Runs claude/bridge.py for a one-shot query and calls done when it ends or fails to start.
+void ClaudeAgent::runHelper(const QStringList &arguments, const QString &workingDirectory,
+                            const std::function<void(QProcess *process, bool started)> &done)
+{
+    auto *process = new QProcess(this);
+    helperProcesses_.append(process);
+    const auto finish = [this, process, done](bool started) {
+        helperProcesses_.removeAll(process);
+        process->deleteLater();
+        done(process, started);
+    };
+    connect(process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this, [finish] { finish(true); });
+    connect(process, &QProcess::errorOccurred, this, [finish](QProcess::ProcessError error) {
+        if (error == QProcess::FailedToStart) finish(false);
+    });
+    if (QFileInfo(workingDirectory).isDir()) process->setWorkingDirectory(workingDirectory);
+    process->start(pythonProgram_, QStringList{"-u", scriptPath_, "--cwd", workingDirectory} + arguments);
+}
+
 bool ClaudeAgent::isRunning() const
 {
     return process_->state() != QProcess::NotRunning;
@@ -103,6 +208,7 @@ bool ClaudeAgent::newConversation(const QString &workingDirectory)
     }
     workingDirectory_ = workingDirectory;
     sessionId_.clear();
+    firstPrompt_.clear();
     queuedPrompts_.clear();
     pendingResumeId_.clear();
     ready_ = false;
@@ -124,6 +230,7 @@ bool ClaudeAgent::resumeConversation(const QString &id, const QString &workingDi
     }
     workingDirectory_ = workingDirectory;
     sessionId_ = id;
+    firstPrompt_.clear();
     queuedPrompts_.clear();
     ready_ = false;
     if (isRunning()) {
@@ -140,6 +247,7 @@ bool ClaudeAgent::resumeConversation(const QString &id, const QString &workingDi
 
 bool ClaudeAgent::prompt(const QString &text)
 {
+    if (sessionId_.isEmpty() && firstPrompt_.isEmpty()) firstPrompt_ = text;
     queuedPrompts_.append(text);
     if (!ready_) start({});
     sendNextPrompt();
@@ -163,15 +271,16 @@ void ClaudeAgent::loadHistory(const QString &id, const QString &workingDirectory
         emit historyLoaded(id, {}, false, "The Claude Agent SDK bridge is not configured.");
         return;
     }
-    auto *process = new QProcess(this);
-    historyProcesses_.append(process);
-    connect(process, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this,
-            [this, process, generation, id](int exitCode, QProcess::ExitStatus status) {
-        historyProcesses_.removeAll(process);
-        process->deleteLater();
+    runHelper({"--read-session", id, "--limit", QString::number(historyLimit_)}, workingDirectory,
+              [this, generation, id](QProcess *process, bool started) {
         if (generation != historyGeneration_) return;
+        if (!started) {
+            emit historyLoaded(id, {}, false, "Could not start Python: " + process->errorString());
+            return;
+        }
         const QJsonObject result = QJsonDocument::fromJson(process->readAllStandardOutput().trimmed()).object();
-        if (status != QProcess::NormalExit || exitCode != 0 || result.value("type") != "history") {
+        if (process->exitStatus() != QProcess::NormalExit || process->exitCode() != 0
+            || result.value("type") != "history") {
             QString details = result.value("message").toString();
             if (details.isEmpty()) details = QString::fromUtf8(process->readAllStandardError()).trimmed();
             emit message("[" + name() + " history: " + details + "]");
@@ -185,14 +294,6 @@ void ClaudeAgent::loadHistory(const QString &id, const QString &workingDirectory
         }
         emit historyLoaded(id, entries, result.value("total").toInt() > entries.size(), {});
     });
-    connect(process, &QProcess::errorOccurred, this, [this, process, generation, id](QProcess::ProcessError error) {
-        if (error != QProcess::FailedToStart) return;
-        historyProcesses_.removeAll(process);
-        process->deleteLater();
-        if (generation == historyGeneration_) emit historyLoaded(id, {}, false, "Could not start Python: " + process->errorString());
-    });
-    process->start(pythonProgram_, {"-u", scriptPath_, "--cwd", workingDirectory, "--read-session", id,
-                                    "--limit", QString::number(historyLimit_)});
 }
 
 void ClaudeAgent::cancelHistory()
@@ -291,6 +392,10 @@ void ClaudeAgent::handleLine(const QByteArray &line)
     } else if (type == "session") {
         sessionId_ = event.value("id").toString();
         emit conversationOpened(sessionId_, false);
+        if (index_.remember(sessionId_, workingDirectory_, firstPrompt_)) {
+            reportIndexError(index_.save());
+            emit conversationsChanged();
+        }
     } else if (type == "error") {
         emit message("[" + name() + "] " + event.value("message").toString());
     }

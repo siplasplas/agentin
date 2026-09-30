@@ -89,7 +89,7 @@ CodexAgent::CodexAgent(const QString &program, const QString &workingDirectory, 
         stopSent_ = false;
         threadId_.clear();
         activeTurnId_.clear();
-        emit disconnected();
+        emit conversationsChanged();
         emit message(QString("[Server exited with code %1]").arg(code));
         emit stateChanged();
     });
@@ -125,6 +125,48 @@ QString CodexAgent::statusText() const
     if (threadOpening_) return "Opening Codex conversation…";
     if (initialized_) return "Codex ready";
     return "Connecting to Codex App Server…";
+}
+
+AgentHelp CodexAgent::help() const
+{
+    return {{"Codex connection: codex app-server --stdio (direct JSONL).",
+             "Installed Codex App Server commands and options (reference; CLI subcommands are not chat messages):"},
+            "App Server", program_, {"app-server", "--help"}};
+}
+
+void CodexAgent::loadConversations()
+{
+    if (loadConversationIndex())
+        emit message(QString("[Cached Codex conversations: %1]").arg(cachedConversations_.size()));
+}
+
+void CodexAgent::refreshConversations()
+{
+    if (!initialized_) {
+        syncWhenConnected_ = true;
+        return;
+    }
+    syncConversations();
+}
+
+QList<QJsonObject> CodexAgent::conversations() const
+{
+    QList<QJsonObject> result;
+    for (const QJsonObject &thread : cachedConversations_) {
+        const QString id = thread.value("id").toString();
+        QString title = thread.value("name").toString();
+        if (title.isEmpty()) title = thread.value("preview").toString();
+        if (title.isEmpty()) title = id;
+        result.append({{"id", id}, {"cwd", thread.value("cwd").toString()}, {"title", title},
+                       {"tooltip", title + "\n\n" + id}, {"createdAt", thread.value("createdAt").toInteger()},
+                       {"archived", thread.value("archived").toBool()}});
+    }
+    // A chat started here appears in thread/list only after the next sync.
+    if (!threadId_.isEmpty() && !cachedConversations_.contains(threadId_)) {
+        result.append({{"id", threadId_}, {"cwd", workingDirectory_}, {"title", "Current chat"},
+                       {"tooltip", threadId_}, {"createdAt", 0}});
+    }
+    return result;
 }
 
 bool CodexAgent::newConversation(const QString &workingDirectory)
@@ -490,7 +532,10 @@ void CodexAgent::handleResponse(const QJsonObject &response)
     if (method == "initialize") {
         initialized_ = true;
         sendNotification("initialized", {});
-        emit connected();
+        if (syncWhenConnected_) {
+            syncWhenConnected_ = false;
+            syncConversations();
+        }
         if (historyPending_) loadHistory(historyThreadId_, {}, false);
     } else if (method == "thread/items/list") {
         if (id != historyRequest_) return;
@@ -512,6 +557,7 @@ void CodexAgent::handleResponse(const QJsonObject &response)
         if (threadId_.isEmpty()) emit message("[Server did not return a conversation ID.]");
         else emit message(method == "thread/start" ? "[Connected to Codex]" : "[Resumed Codex conversation: " + threadId_ + "]");
         emit conversationOpened(threadId_, method == "thread/resume");
+        emit conversationsChanged();
         sendNextPrompt();
     } else if (method == "turn/start") {
         if (busy_) {

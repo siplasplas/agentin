@@ -23,6 +23,10 @@ add_executable(agentdeskt
     src/GeminiAgent.h
     src/AntigravityAgent.cpp
     src/AntigravityAgent.h
+    src/ConversationIndex.cpp
+    src/ConversationIndex.h
+    src/ProcessLocks.cpp
+    src/ProcessLocks.h
     src/MainWindow.cpp
     src/MainWindow.h
 )
@@ -47,6 +51,10 @@ if(BUILD_TESTING)
         src/GeminiAgent.h
         src/AntigravityAgent.cpp
         src/AntigravityAgent.h
+        src/ConversationIndex.cpp
+        src/ConversationIndex.h
+        src/ProcessLocks.cpp
+        src/ProcessLocks.h
         src/MainWindow.cpp
         src/MainWindow.h
     )

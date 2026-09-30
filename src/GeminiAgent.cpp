@@ -1,5 +1,7 @@
 #include "GeminiAgent.h"
 
+#include "ProcessLocks.h"
+
 #include <QDateTime>
 #include <QDir>
 #include <QFile>
@@ -7,6 +9,7 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QProcess>
+#include <QStandardPaths>
 #include <QTimer>
 
 namespace {
@@ -106,9 +109,9 @@ QList<ChatEntry> readHistory(const QString &filePath)
 }
 
 GeminiAgent::GeminiAgent(const QString &program, const QString &workingDirectory, const QString &dataDirectory,
-                         QObject *parent)
+                         const QString &indexPath, QObject *parent)
     : AgentBackend(parent), program_(program), workingDirectory_(workingDirectory), dataDirectory_(dataDirectory),
-      process_(new QProcess(this))
+      process_(new QProcess(this)), index_("Gemini", indexPath)
 {
     connect(process_, &QProcess::readyReadStandardOutput, this, [this] {
         buffer_ += process_->readAllStandardOutput();
@@ -152,6 +155,58 @@ QString GeminiAgent::statusText() const
     return busy_ ? "Gemini is responding…" : "Gemini ready";
 }
 
+AgentHelp GeminiAgent::help() const
+{
+    return {{"Gemini CLI headless mode:",
+             "  Send messages with Enter or Send to Gemini.",
+             "  Each response streams JSON events; later messages resume the same session.",
+             "  Authenticate Gemini CLI before using this window.",
+             "  If folder trust is enabled, trust the working folder in Gemini CLI first.",
+             "  Headless mode: https://geminicli.com/docs/cli/headless/",
+             "Installed Gemini CLI commands and options:"},
+            "Gemini CLI", program_, {"--help"}};
+}
+
+QString GeminiAgent::externalLock(const QString &id) const
+{
+    return commandLineLock(id);
+}
+
+void GeminiAgent::loadConversations()
+{
+    reportIndexError(index_.load());
+}
+
+void GeminiAgent::refreshConversations()
+{
+    if (!executableChecked_) {
+        executableChecked_ = true;
+        if (QStandardPaths::findExecutable(program_).isEmpty())
+            emit message("[Gemini CLI is not installed or is not in PATH. Install it or use --gemini /absolute/path/to/gemini.]");
+    }
+    QSet<QString> discoveredIds;
+    bool changed = false;
+    for (QJsonObject entry : discoverSessions()) {
+        const QString id = entry.value("id").toString();
+        discoveredIds.insert(id);
+        // Keep what the index knows when the session file lacks a first prompt or start time.
+        const QJsonObject old = index_.value(id);
+        if (entry.value("title").toString() == id && !old.value("title").toString().isEmpty())
+            entry.insert("title", old.value("title"));
+        if (entry.value("createdAt").toInteger() <= 0 && old.value("createdAt").toInteger() > 0)
+            entry.insert("createdAt", old.value("createdAt"));
+        changed = index_.insert(entry) || changed;
+    }
+    if (changed) reportIndexError(index_.save());
+    emit conversationsChanged();
+    emit message(QString("[Gemini sessions discovered: %1]").arg(discoveredIds.size()));
+}
+
+void GeminiAgent::reportIndexError(const QString &error)
+{
+    if (!error.isEmpty()) emit message("[" + error + "]");
+}
+
 bool GeminiAgent::newConversation(const QString &workingDirectory)
 {
     if (busy_) {
@@ -160,6 +215,7 @@ bool GeminiAgent::newConversation(const QString &workingDirectory)
     }
     workingDirectory_ = workingDirectory;
     sessionId_.clear();
+    firstPrompt_.clear();
     queuedPrompts_.clear();
     return true;
 }
@@ -173,6 +229,7 @@ bool GeminiAgent::resumeConversation(const QString &id, const QString &workingDi
     }
     workingDirectory_ = workingDirectory;
     sessionId_ = id;
+    firstPrompt_.clear();
     queuedPrompts_.clear();
     emit message("[Resuming Gemini conversation: " + id + "]");
     emit stateChanged();
@@ -181,6 +238,7 @@ bool GeminiAgent::resumeConversation(const QString &id, const QString &workingDi
 
 bool GeminiAgent::prompt(const QString &text)
 {
+    if (sessionId_.isEmpty() && firstPrompt_.isEmpty()) firstPrompt_ = text;
     queuedPrompts_.append(text);
     sendNextPrompt();
     return true;
@@ -201,7 +259,7 @@ void GeminiAgent::interrupt()
 void GeminiAgent::loadHistory(const QString &id, const QString &, bool older)
 {
     historyLimit_ = older ? historyLimit_ + kHistoryPageSize : kHistoryPageSize;
-    QString filePath = sessionFiles_.value(id);
+    QString filePath = sessionFiles_.value(id, index_.value(id).value("file").toString());
     if (!QFileInfo(filePath).isFile()) {
         discoverSessions();
         filePath = sessionFiles_.value(id);
@@ -283,6 +341,10 @@ void GeminiAgent::handleLine(const QByteArray &line)
         if (!id.isEmpty()) {
             sessionId_ = id;
             emit conversationOpened(id, false);
+            if (index_.remember(id, workingDirectory_, firstPrompt_)) {
+                reportIndexError(index_.save());
+                emit conversationsChanged();
+            }
         }
     } else if (type == "message" && event.value("role").toString() == "assistant") {
         const QString content = event.value("content").toString();

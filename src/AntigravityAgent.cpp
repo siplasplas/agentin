@@ -1,5 +1,7 @@
 #include "AntigravityAgent.h"
 
+#include "ProcessLocks.h"
+
 #include <QFileInfo>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -7,8 +9,10 @@
 #include <QStandardPaths>
 #include <QTimer>
 
-AntigravityAgent::AntigravityAgent(const QString &program, const QString &workingDirectory, QObject *parent)
-    : AgentBackend(parent), program_(program), workingDirectory_(workingDirectory), process_(new QProcess(this))
+AntigravityAgent::AntigravityAgent(const QString &program, const QString &workingDirectory, const QString &indexPath,
+                                   QObject *parent)
+    : AgentBackend(parent), program_(program), workingDirectory_(workingDirectory), index_("Antigravity", indexPath),
+      process_(new QProcess(this))
 {
     connect(process_, &QProcess::readyReadStandardOutput, this, &AntigravityAgent::drainOutput);
     connect(process_, &QProcess::readyReadStandardError, this, [this] {
@@ -49,6 +53,47 @@ QString AntigravityAgent::statusText() const
     return "Antigravity ready";
 }
 
+AgentHelp AntigravityAgent::help() const
+{
+    return {{"Antigravity CLI headless mode:",
+             "  Send messages with Enter or Send. Later messages resume the same conversation ID.",
+             "  Create a chat to choose its working directory, or double-click a saved chat to resume it.",
+             "  Authenticate once in the interactive agy CLI before using this window.",
+             "  CLI documentation: https://antigravity.google/docs/cli/headless/",
+             "Installed Antigravity CLI commands and options:"},
+            "Antigravity CLI", program_, {"--help"}};
+}
+
+QString AntigravityAgent::externalLock(const QString &id) const
+{
+    return commandLineLock(id);
+}
+
+void AntigravityAgent::loadConversations()
+{
+    reportIndexError(index_.load());
+}
+
+void AntigravityAgent::refreshConversations()
+{
+    reportIndexError(index_.load());
+    emit conversationsChanged();
+}
+
+void AntigravityAgent::rememberConversation()
+{
+    emit conversationOpened(conversationId_, false);
+    if (index_.remember(conversationId_, workingDirectory_, firstPrompt_)) {
+        reportIndexError(index_.save());
+        emit conversationsChanged();
+    }
+}
+
+void AntigravityAgent::reportIndexError(const QString &error)
+{
+    if (!error.isEmpty()) emit message("[" + error + "]");
+}
+
 bool AntigravityAgent::newConversation(const QString &workingDirectory)
 {
     if (busy_) {
@@ -57,6 +102,7 @@ bool AntigravityAgent::newConversation(const QString &workingDirectory)
     }
     workingDirectory_ = workingDirectory;
     conversationId_.clear();
+    firstPrompt_.clear();
     queuedPrompts_.clear();
     return true;
 }
@@ -70,6 +116,7 @@ bool AntigravityAgent::resumeConversation(const QString &id, const QString &work
     }
     workingDirectory_ = workingDirectory;
     conversationId_ = id;
+    firstPrompt_.clear();
     queuedPrompts_.clear();
     emit message("[Resuming Antigravity conversation: " + id + "]");
     emit stateChanged();
@@ -78,6 +125,7 @@ bool AntigravityAgent::resumeConversation(const QString &id, const QString &work
 
 bool AntigravityAgent::prompt(const QString &text)
 {
+    if (conversationId_.isEmpty() && firstPrompt_.isEmpty()) firstPrompt_ = text;
     queuedPrompts_.append(text);
     sendNextPrompt();
     return true;
@@ -139,7 +187,7 @@ void AntigravityAgent::handleLine(const QByteArray &line)
         const QString id = event.value("conversation_id").toString();
         if (!id.isEmpty()) {
             conversationId_ = id;
-            emit conversationOpened(id, false);
+            rememberConversation();
         }
     } else if (type == "step_update") {
         const QJsonObject step = event.value("step_update").toObject();
@@ -157,7 +205,7 @@ void AntigravityAgent::handleLine(const QByteArray &line)
         const QString id = result.value("conversation_id").toString();
         if (!id.isEmpty() && id != conversationId_) {
             conversationId_ = id;
-            emit conversationOpened(id, false);
+            rememberConversation();
         }
         if (!textSeen_ && !result.value("response").toString().isEmpty()) text(result.value("response").toString());
         if (result.value("status").toString() != "SUCCESS") {

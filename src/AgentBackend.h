@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QHash>
+#include <QJsonObject>
 #include <QList>
 #include <QObject>
 #include <QString>
@@ -21,6 +22,15 @@ struct AgentQuestion
     bool multiSelect = false;
 };
 
+// Help shown for the selected agent: introductory lines, then the output of program with arguments.
+struct AgentHelp
+{
+    QStringList lines;
+    QString name;
+    QString program;
+    QStringList arguments;
+};
+
 // Common interface of an agent conversation backend. The backend owns its protocol, prompt queue
 // and turn state; MainWindow drives it through these calls and renders its signals.
 class AgentBackend : public QObject
@@ -37,6 +47,20 @@ public:
     virtual QString statusText() const = 0;
     virtual bool isResponding() const = 0;
     virtual bool canInterrupt() const = 0;
+    virtual AgentHelp help() const = 0;
+    // Describes another tool that holds the conversation open, or returns an empty string.
+    virtual QString externalLock(const QString &id) const
+    {
+        Q_UNUSED(id);
+        return {};
+    }
+
+    // Conversations shown in the tree. Each entry has id, cwd, title, tooltip and createdAt, and
+    // optionally archived. loadConversations() reads saved data at startup; refreshConversations()
+    // discovers current ones and reports through conversationsChanged().
+    virtual void loadConversations() = 0;
+    virtual void refreshConversations() = 0;
+    virtual QList<QJsonObject> conversations() const = 0;
 
     // Each call reports through message() and returns false when the request cannot be started.
     virtual bool newConversation(const QString &workingDirectory) = 0;
@@ -55,6 +79,7 @@ public:
 
 signals:
     void message(const QString &text);
+    void conversationsChanged();
     void stateChanged();
     void messageStarted();
     void messageDelta(const QString &text);

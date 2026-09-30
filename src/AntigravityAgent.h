@@ -1,6 +1,7 @@
 #pragma once
 
 #include "AgentBackend.h"
+#include "ConversationIndex.h"
 
 class QProcess;
 
@@ -9,7 +10,8 @@ class AntigravityAgent : public AgentBackend
 {
     Q_OBJECT
 public:
-    AntigravityAgent(const QString &program, const QString &workingDirectory, QObject *parent = nullptr);
+    AntigravityAgent(const QString &program, const QString &workingDirectory, const QString &indexPath,
+                     QObject *parent = nullptr);
     ~AntigravityAgent() override;
 
     QString name() const override { return "Antigravity"; }
@@ -19,6 +21,12 @@ public:
     QString statusText() const override;
     bool isResponding() const override { return busy_; }
     bool canInterrupt() const override { return busy_ && !stopRequested_; }
+    AgentHelp help() const override;
+    QString externalLock(const QString &id) const override;
+    // The CLI cannot list its conversations, so only chats recorded here are shown.
+    void loadConversations() override;
+    void refreshConversations() override;
+    QList<QJsonObject> conversations() const override { return index_.treeEntries(); }
     bool newConversation(const QString &workingDirectory) override;
     bool resumeConversation(const QString &id, const QString &workingDirectory) override;
     bool prompt(const QString &text) override;
@@ -31,6 +39,8 @@ public:
 private:
     bool isRunning() const;
     void sendNextPrompt();
+    void rememberConversation();
+    void reportIndexError(const QString &error);
     void handleLine(const QByteArray &line);
     void drainOutput();
     void finish(int code);
@@ -38,6 +48,8 @@ private:
     QString program_;
     QString workingDirectory_;
     QString conversationId_;
+    QString firstPrompt_;
+    ConversationIndex index_;
     QString errorDetails_;
     QString diagnostics_;
     QByteArray buffer_;

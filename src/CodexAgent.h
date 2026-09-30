@@ -25,6 +25,10 @@ public:
     QString statusText() const override;
     bool isResponding() const override { return busy_; }
     bool canInterrupt() const override { return busy_ && !stopRequested_; }
+    AgentHelp help() const override;
+    void loadConversations() override;
+    void refreshConversations() override;
+    QList<QJsonObject> conversations() const override;
     bool newConversation(const QString &workingDirectory) override;
     bool resumeConversation(const QString &id, const QString &workingDirectory) override;
     bool prompt(const QString &text) override;
@@ -36,18 +40,11 @@ public:
 
     void start();
     bool isRunning() const;
-    bool isConnected() const { return initialized_; }
+
+private:
     // The local index caches thread/list results so the conversation tree is available before a sync.
     bool loadConversationIndex();
     void syncConversations();
-    QList<QJsonObject> conversations() const { return cachedConversations_.values(); }
-
-signals:
-    void connected();
-    void disconnected();
-    void conversationsChanged();
-
-private:
     void startThread();
     void sendNextPrompt();
     void sendStopIfPossible();
@@ -94,6 +91,7 @@ private:
     bool threadOpening_ = false;
     bool syncing_ = false;
     bool syncingArchived_ = false;
+    bool syncWhenConnected_ = false;
     bool busy_ = false;
     bool stopRequested_ = false;
     bool stopSent_ = false;

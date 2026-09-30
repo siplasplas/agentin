@@ -38,7 +38,7 @@ private slots:
 };
 
 // Starts a chat through the New chat dialog, choosing the agent and working directory there.
-static void startChat(MainWindow &window, int provider, const QString &path)
+static void startChat(MainWindow &window, const QString &provider, const QString &path)
 {
     auto *newChatButton = window.findChild<QPushButton *>("newChatButton");
     QVERIFY(newChatButton);
@@ -51,7 +51,7 @@ static void startChat(MainWindow &window, int provider, const QString &path)
         auto *buttons = dialog->findChild<QDialogButtonBox *>();
         QVERIFY(providerInput && pathInput && buttons);
         QCOMPARE(providerInput->count(), 5);
-        providerInput->setCurrentIndex(provider);
+        providerInput->setCurrentText(provider);
         pathInput->setText(path);
         buttons->button(QDialogButtonBox::Ok)->click();
         accepted = true;
@@ -237,7 +237,7 @@ for line in sys.stdin:
     QVERIFY(output);
     QVERIFY(stopButton);
     QVERIFY(sendButton);
-    startChat(window, 1, directory.path());
+    startChat(window, "Claude", directory.path());
     QTRY_VERIFY(output->toPlainText().contains("[Connected to Claude Agent SDK]"));
     QCOMPARE(sendButton->text(), QString("Send to Claude"));
 
@@ -314,7 +314,7 @@ for line in sys.stdin:
     QVERIFY(chat);
     QVERIFY(input);
     QVERIFY(output);
-    startChat(window, 2, directory.path());
+    startChat(window, "GLM", directory.path());
     QTRY_VERIFY(output->toPlainText().contains("[Connected to GLM via Claude Agent SDK]"));
     QTest::keyClicks(input, "hello");
     QTest::keyClick(input, Qt::Key_Return);
@@ -361,7 +361,7 @@ print(json.dumps({"event": "result", "result": {
     QVERIFY(chat);
     auto *tree = window.findChild<QTreeWidget *>("conversationTree");
     QVERIFY(input && output && tree);
-    startChat(window, 4, directory.path());
+    startChat(window, "Antigravity", directory.path());
     input->setText("help");
     QTest::keyClick(input, Qt::Key_Return);
     QTRY_VERIFY(output->toPlainText().contains("Usage: agy"));
@@ -420,7 +420,7 @@ else:
     QVERIFY(input);
     QVERIFY(output);
     QVERIFY(stopButton);
-    startChat(window, 3, directory.path());
+    startChat(window, "Gemini", directory.path());
     QTest::keyClicks(input, "help");
     QTest::keyClick(input, Qt::Key_Return);
     QTRY_VERIFY(output->toPlainText().contains("Usage: gemini"));
