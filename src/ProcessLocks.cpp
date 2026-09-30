@@ -96,3 +96,40 @@ QList<BusyAgentSession> busyClaudeSessions(const QString &configDirectory)
     }
     return sessions;
 }
+
+QList<BusyAgentSession> runningCliSessions()
+{
+    QList<BusyAgentSession> sessions;
+    const QDir processes("/proc");
+    const QString home = QDir::homePath();
+    for (const QString &name : processes.entryList(QDir::Dirs | QDir::NoDotAndDotDot)) {
+        bool numeric = false;
+        const qint64 pid = name.toLongLong(&numeric);
+        if (!numeric || isOwnDescendant(pid)) continue;
+        QFile file(processes.filePath(name + "/cmdline"));
+        if (!file.open(QIODevice::ReadOnly)) continue;
+        const QStringList arguments = QString::fromUtf8(file.readAll()).split(QChar('\0'), Qt::SkipEmptyParts);
+        if (arguments.isEmpty()) continue;
+        const QString executable = QFileInfo(QFileInfo(processes.filePath(name + "/exe")).symLinkTarget()).fileName();
+        const QString command = QFileInfo(arguments.first()).fileName();
+        // Match whole program names only, so tools such as gemini-commander are not mistaken for the CLI.
+        QString tool;
+        if (executable == "agy" || command == "agy") {
+            tool = "Antigravity CLI";
+        } else if (command == "gemini" || command.startsWith("node") || executable.startsWith("node")) {
+            for (const QString &argument : arguments) {
+                const QString argumentName = QFileInfo(argument).fileName();
+                if (argumentName == "gemini" || argumentName == "gemini.js" || argument.contains("/@google/gemini-cli/")) {
+                    tool = "Gemini CLI";
+                    break;
+                }
+            }
+        }
+        if (tool.isEmpty()) continue;
+        const QString directory = QFileInfo(processes.filePath(name + "/cwd")).symLinkTarget();
+        // A CLI started in / or the home directory would cover every project, so it is not counted.
+        if (directory.isEmpty() || directory == "/" || directory == home) continue;
+        sessions.append({pid, directory, QString("%1 (PID %2: %3)").arg(tool).arg(pid).arg(arguments.mid(0, 4).join(' '))});
+    }
+    return sessions;
+}

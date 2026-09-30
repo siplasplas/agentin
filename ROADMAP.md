@@ -34,11 +34,7 @@ the other agents (their plan modes) still wait, because only Codex enforces them
     agentdeskt could connect to the same server and read thread states directly: `thread/loaded/list`,
     `ThreadStatus` `active` (with `waitingOnApproval` or `waitingOnUserInput`) or `idle`, and
     `thread/status/changed`. Whether the other clients use the daemon is not verified yet.
-  - Gemini CLI and Antigravity have no registry. On Linux the working directory of their processes is
-    `/proc/<pid>/cwd`. A headless process lives for one turn, but an interactive CLI lives for the whole
-    session, so its turns cannot be told apart from idle time; such a process could either lock its
-    directory for the whole session or be ignored.
-  The application registry and Claude Code's registry are used; the Codex and process-based detection
-  remain to be added as heuristics.
+  The application registry, Claude Code's registry and running Gemini and Antigravity CLI processes
+  are used; the Codex detection remains to be added.
 - **Open question:** whether directories that an agent may write to outside its working directory need
   to be locked too.

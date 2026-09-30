@@ -22,3 +22,6 @@ struct BusyAgentSession
 };
 // Claude Code sessions outside this application that are working on a turn right now.
 QList<BusyAgentSession> busyClaudeSessions(const QString &configDirectory);
+// Gemini CLI and Antigravity CLI processes outside this application, found through /proc. They publish
+// no turn state, so an interactive CLI counts as working for as long as it runs.
+QList<BusyAgentSession> runningCliSessions();

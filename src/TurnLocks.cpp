@@ -81,6 +81,13 @@ QString TurnLocks::acquire(const QString &owner, const QString &directory, const
         }
     }
     if (holder.isEmpty()) {
+        for (const BusyAgentSession &session : runningCliSessions()) {
+            if (!overlaps(path, canonical(session.directory))) continue;
+            holder = session.description + " in " + session.directory + "; close it so this chat can continue";
+            break;
+        }
+    }
+    if (holder.isEmpty()) {
         kept.append(QJsonObject{{"owner", owner}, {"directory", path}, {"label", label}, {"pid", self},
                                 {"start", processStartTime(self)}});
         held_.insert(owner);
