@@ -20,6 +20,7 @@
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QDir>
+#include <QDoubleSpinBox>
 #include <QFile>
 #include <QFileInfo>
 #include <QFormLayout>
@@ -771,6 +772,14 @@ void MainWindow::showNotificationsDialog()
     voiceRow->addWidget(voiceChoice, 1);
     voiceRow->addWidget(tryVoice);
     form->addRow("Voice:", voiceRow);
+    auto *slowness = new QDoubleSpinBox(&dialog);
+    slowness->setObjectName("speechSlowness");
+    slowness->setRange(0.5, 3.0);
+    slowness->setSingleStep(0.1);
+    slowness->setDecimals(1);
+    slowness->setValue(settings.speechSlowness);
+    slowness->setToolTip("1.0 is the voice's normal pace; higher values speak slower, which is usually clearer");
+    form->addRow("Speech slowness:", slowness);
     const QString piperProgram = Notifier::findPiper({});
     auto *voiceStatus = new QLabel(&dialog);
     voiceStatus->setWordWrap(true);
@@ -782,7 +791,8 @@ void MainWindow::showNotificationsDialog()
                                   Notifier::findEspeak().isEmpty() ? QString() : "espeak-ng"}.filter(QRegularExpression(".")).join(", ")
           + ". A Polish Piper voice (pl_PL-…) speaks Polish sentences, other voices English.");
     form->addRow(QString(), voiceStatus);
-    const auto voiceSettings = [voiceChoice](Notifier::Settings base) {
+    const auto voiceSettings = [voiceChoice, slowness](Notifier::Settings base) {
+        base.speechSlowness = slowness->value();
         const QString data = voiceChoice->currentData().toString();
         base.voiceEngine = data.isEmpty() ? QString() : (data == "espeak-ng" ? QStringLiteral("espeak-ng") : QStringLiteral("piper"));
         base.piperModel = data == "espeak-ng" ? QString() : data;

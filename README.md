@@ -187,8 +187,9 @@ with a voice (a `.onnx` model with its `.onnx.json`, for example in `~/piper` or
 so the repository contains no audio files. A Polish Piper voice (its file name
 starts with `pl`, such as `pl_PL-gosia-medium` from
 [piper-voices](https://huggingface.co/rhasspy/piper-voices)) speaks Polish
-sentences; other voices speak English. The voice is chosen and tried in
-**Settings → Notifications…**; without a voice program the sound files play.
+sentences; other voices speak English. The voice and its pace are chosen and tried
+in **Settings → Notifications…**; a slowness above 1 (1.3 by default) speaks
+slower and usually clearer. Without a voice program the sound files play.
 
 The status row shows how much of the account's usage limits is left for the
 agent in the current tab, for example `Codex limits  week: 36% left`; hover over

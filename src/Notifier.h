@@ -38,6 +38,8 @@ public:
         // Empty paths are found automatically.
         QString piperProgram;
         QString piperModel;
+        // Piper's length scale: above 1 speaks slower, which is usually clearer.
+        double speechSlowness = 1.3;
 
         static Settings fromJson(const QJsonObject &object);
         QJsonObject toJson() const;

@@ -25,6 +25,7 @@ Notifier::Settings Notifier::Settings::fromJson(const QJsonObject &object)
     settings.voiceEngine = object.value("voiceEngine").toString();
     settings.piperProgram = object.value("piperProgram").toString();
     settings.piperModel = object.value("piperModel").toString();
+    settings.speechSlowness = object.value("speechSlowness").toDouble(1.3);
     return settings;
 }
 
@@ -33,7 +34,8 @@ QJsonObject Notifier::Settings::toJson() const
     return {{"popups", popups}, {"muted", muted}, {"minimumMinutes", minimumMinutes},
             {"finishedSound", finishedSound}, {"failedSound", failedSound}, {"waitingSound", waitingSound},
             {"waitingDelaySeconds", waitingDelaySeconds}, {"waitingRepeatMinutes", waitingRepeatMinutes},
-            {"voice", voice}, {"voiceEngine", voiceEngine}, {"piperProgram", piperProgram}, {"piperModel", piperModel}};
+            {"voice", voice}, {"voiceEngine", voiceEngine}, {"piperProgram", piperProgram}, {"piperModel", piperModel},
+            {"speechSlowness", speechSlowness}};
 }
 
 Notifier::Notifier(QObject *parent)
@@ -149,7 +151,9 @@ QString Notifier::voiceEngine(const Settings &settings)
 bool Notifier::say(const Settings &settings, const QString &text, QObject *parent)
 {
     const QString engine = voiceEngine(settings);
-    if (engine == "espeak-ng") return QProcess::startDetached(findEspeak(), {text});
+    // espeak-ng speaks 175 words per minute by default; the slowness lowers that the same way.
+    if (engine == "espeak-ng")
+        return QProcess::startDetached(findEspeak(), {"-s", QString::number(qRound(175 / qMax(0.5, settings.speechSlowness))), text});
     if (engine != "piper") return false;
     static int counter = 0;
     const QString output = QDir(QDir::tempPath()).filePath(QString("agentdeskt-voice-%1-%2.wav")
@@ -165,7 +169,9 @@ bool Notifier::say(const Settings &settings, const QString &text, QObject *paren
     QObject::connect(piper, &QProcess::errorOccurred, piper, [piper](QProcess::ProcessError error) {
         if (error == QProcess::FailedToStart) piper->deleteLater();
     });
-    piper->start(findPiper(settings), {"--model", findPiperModel(settings), "--output_file", output});
+    piper->start(findPiper(settings), {"--model", findPiperModel(settings), "--length_scale",
+                                       QString::number(settings.speechSlowness), "--sentence_silence", "0.3",
+                                       "--output_file", output});
     piper->write(text.toUtf8() + '\n');
     piper->closeWriteChannel();
     return true;
