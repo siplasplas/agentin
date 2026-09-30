@@ -75,6 +75,10 @@ the list. The app saves a local JSON index in its application data directory;
 the first sync scans the full history and can take longer. Later syncs read
 new active chats from newest to oldest until they reach the saved boundary.
 Archived chats are scanned separately. Double click a chat to resume it.
+After restoring tabs, the tree expands the current chat's agent and directory,
+selects and reveals its conversation, and receives keyboard focus so the chat is
+easy to resume. Switching tabs also reveals the matching conversation without
+moving keyboard focus. Restored chats appear even before discovery finishes.
 Directories appear under an agent only when they contain a discovered chat.
 Chat previews are shortened in the tree; hover over one to read the longer stored preview.
 Codex previews in the local JSON index are limited to 200 characters.

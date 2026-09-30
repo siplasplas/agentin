@@ -506,6 +506,8 @@ void MainWindow::restoreSession(bool keepStartChat)
     }
     if (!keepStartChat && startChat && tabs_->count() > 1) tabs_->requestCloseTab(startChat);
     if (current) tabs_->setCurrentWidget(current);
+    revealCurrentConversation(true);
+    QTimer::singleShot(0, this, [this] { revealCurrentConversation(true, true); });
     appendLine(QString("[Reopened %1 tabs from the last session]").arg(saved.size()));
 }
 
@@ -1115,6 +1117,17 @@ void MainWindow::refreshConversationTree()
         if (!expandedProviders_.contains(name)) continue;
         root->setExpanded(true);
         QList<QJsonObject> chats = listed->conversations();
+        // Restored chats must be reachable even before the provider finishes its discovery.
+        QSet<QString> ids;
+        for (const QJsonObject &chat : chats) ids.insert(chat.value("id").toString());
+        for (int i = 0; i < tabs_->count(); ++i) {
+            const ChatTab *tab = chatTab(tabs_->widget(i));
+            if (!tab || tab->provider() != listed || tab->conversationId().isEmpty()
+                || ids.contains(tab->conversationId())) continue;
+            chats.append({{"id", tab->conversationId()}, {"cwd", tab->workingDirectory()},
+                          {"title", tab->title()}, {"tooltip", tab->headerText()}});
+            ids.insert(tab->conversationId());
+        }
         std::stable_sort(chats.begin(), chats.end(), [](const QJsonObject &left, const QJsonObject &right) {
             return left.value("createdAt").toInteger() > right.value("createdAt").toInteger();
         });
@@ -1135,6 +1148,41 @@ void MainWindow::refreshConversationTree()
             item->setData(0, Qt::UserRole + 1, chat.value("id").toString());
             item->setData(0, Qt::UserRole + 2, path);
             item->setToolTip(0, chat.value("tooltip").toString());
+        }
+    }
+    revealCurrentConversation(false);
+}
+
+void MainWindow::revealCurrentConversation(bool expandBranch, bool focusTree)
+{
+    const ChatTab *tab = currentTab();
+    if (!tab) return;
+    const QString name = tab->provider()->name();
+    if (tab->conversationId().isEmpty() && !expandedProviders_.contains(name)) return;
+    if (expandBranch && !expandedProviders_.contains(name)) {
+        expandedProviders_.insert(name);
+        refreshConversationTree();
+    }
+    // Selecting the matching row must not create a preview tab or reload its history.
+    const QSignalBlocker blocker(conversationTree_);
+    for (int i = 0; i < conversationTree_->topLevelItemCount(); ++i) {
+        QTreeWidgetItem *root = conversationTree_->topLevelItem(i);
+        if (root->text(0) != name || !root->isExpanded()) continue;
+        for (int j = 0; j < root->childCount(); ++j) {
+            QTreeWidgetItem *directory = root->child(j);
+            QTreeWidgetItem *match = nullptr;
+            if (tab->conversationId().isEmpty() && directory->toolTip(0) == tab->workingDirectory())
+                match = directory;
+            for (int k = 0; k < directory->childCount() && !match; ++k) {
+                QTreeWidgetItem *item = directory->child(k);
+                if (item->data(0, Qt::UserRole + 1).toString() == tab->conversationId()) match = item;
+            }
+            if (!match) continue;
+            if (expandBranch) directory->setExpanded(true);
+            conversationTree_->setCurrentItem(match);
+            conversationTree_->scrollToItem(match, QAbstractItemView::EnsureVisible);
+            if (focusTree) conversationTree_->setFocus(Qt::OtherFocusReason);
+            return;
         }
     }
 }
@@ -1239,6 +1287,7 @@ void MainWindow::showCurrentTab()
             chatView_->ensureCursorVisible();
         }
     }
+    revealCurrentConversation(true);
     updateStatus();
 }
 
@@ -1252,7 +1301,10 @@ void MainWindow::updateTab(QWidget *page)
     tabs_->setTabPopupText(index, tab->headerText());
     tabs_->setTabKey(page, tab->key());
     tabs_->setTabBusy(page, tab->agent()->isResponding() || tab->isWaiting());
-    if (page == tabs_->currentWidget()) updateStatus();
+    if (page == tabs_->currentWidget()) {
+        revealCurrentConversation(false);
+        updateStatus();
+    }
 }
 
 void MainWindow::appendText(const QString &text)

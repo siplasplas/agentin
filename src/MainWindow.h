@@ -66,6 +66,7 @@ private:
     void showNewConversationDialog();
     void newConversation(AgentProvider *provider, const QString &path);
     void refreshConversationTree();
+    void revealCurrentConversation(bool expandBranch, bool focusTree = false);
     void openConversation(QTreeWidgetItem *item, bool continueChat);
     QWidget *addChatTab(AgentProvider *provider, const QString &workingDirectory);
     ChatTab *chatTab(QWidget *page) const;
