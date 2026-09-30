@@ -29,6 +29,7 @@ public:
     // GLM sessions are only those recorded here; Claude also lists SDK sessions from all projects.
     void refreshConversations() override;
     QList<QJsonObject> conversations() const override { return index_.treeEntries(); }
+    QList<AgentModel> models() const override;
     AgentBackend *createChat(const QString &workingDirectory, QObject *parent) override;
 
     // Claude and GLM share the SDK transcript store; sessions recorded by the other agent are not listed here.
@@ -69,6 +70,9 @@ public:
     QString statusText() const override;
     bool isResponding() const override { return busy_; }
     bool canInterrupt() const override { return busy_ && !stopRequested_; }
+    QString model() const override { return model_; }
+    QString effort() const override { return effort_; }
+    void setModel(const QString &model, const QString &effort) override;
     bool newConversation(const QString &workingDirectory) override;
     bool resumeConversation(const QString &id, const QString &workingDirectory) override;
     bool prompt(const QString &text) override;
@@ -82,6 +86,7 @@ private:
     bool isRunning() const;
     void start(const QString &workingDirectory);
     void sendNextPrompt();
+    bool applySettings();
     void send(const QJsonObject &message);
     void handleLine(const QByteArray &line);
 
@@ -94,6 +99,11 @@ private:
     QString sessionId_;
     QString pendingResumeId_;
     QString firstPrompt_;
+    QString model_;
+    QString effort_;
+    // What the running bridge uses; a difference is sent before the next prompt.
+    QString appliedModel_;
+    QString appliedEffort_;
     QStringList queuedPrompts_;
     QHash<int, int> pendingQuestionCounts_;
     HistoryPages history_;

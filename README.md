@@ -123,8 +123,20 @@ In a Codex tab, choose the model and reasoning effort next to the message field.
 The lists come from the App Server (`model/list`); each model offers only the
 efforts it supports, and hovering shows their descriptions. A new choice applies
 from the next message on and stays with that conversation. When a saved
-conversation is continued, the fields show the model and effort it used. The
-other agents use their default model for now; see `ROADMAP.md`.
+conversation is continued, the fields show the model and effort it used.
+
+Claude and Gemini tabs have the same fields. Claude offers Claude Code's model
+aliases (`fable`, `opus`, `sonnet`, `haiku`) and efforts from `low` to `max`; a
+new model applies within the session, while a new effort reconnects the bridge
+and resumes the session before the next message. Gemini offers Gemini CLI's
+aliases (`auto`, `pro`, `flash`, `flash-lite`), passed as `--model` on the next
+turn; it has no effort setting. GLM and Antigravity use their default model.
+
+**Settings → Options…** sets the model and effort that new chats start with, for
+each agent that offers a choice. The effort is `medium` unless changed there.
+The options are saved in `settings.json` in the application data directory.
+A continued Codex conversation keeps the model and effort it used; Claude and
+Gemini sessions do not record them, so continued chats start with the defaults.
 
 Select a chat in the conversation tree to show a read-only preview of its
 latest messages in the preview tab, whose title is shown in italics. Selecting

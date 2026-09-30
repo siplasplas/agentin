@@ -38,6 +38,9 @@ private:
     void showHelp();
     void requestStop();
     AgentProvider *provider(const QString &name) const;
+    void loadSettings();
+    void saveSettings();
+    void showOptionsDialog();
     void loadRecentDirectories();
     void saveRecentDirectories();
     void rememberRecentDirectory(const QString &path);

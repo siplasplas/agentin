@@ -24,6 +24,7 @@ public:
     // Lists sessions saved by Gemini CLI under its data directory across all projects.
     void refreshConversations() override;
     QList<QJsonObject> conversations() const override { return index_.treeEntries(); }
+    QList<AgentModel> models() const override;
     AgentBackend *createChat(const QString &workingDirectory, QObject *parent) override;
 
     QString program() const { return program_; }
@@ -54,6 +55,8 @@ public:
     QString statusText() const override;
     bool isResponding() const override { return busy_; }
     bool canInterrupt() const override { return busy_ && !stopRequested_; }
+    QString model() const override { return model_; }
+    void setModel(const QString &model, const QString &effort) override;
     bool newConversation(const QString &workingDirectory) override;
     bool resumeConversation(const QString &id, const QString &workingDirectory) override;
     bool prompt(const QString &text) override;
@@ -76,6 +79,7 @@ private:
     QByteArray buffer_;
     QString sessionId_;
     QString firstPrompt_;
+    QString model_;
     QString errorDetails_;
     QStringList queuedPrompts_;
     HistoryPages history_;

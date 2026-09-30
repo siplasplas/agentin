@@ -166,6 +166,16 @@ void GeminiProvider::reportIndexError(const QString &error)
     if (!error.isEmpty()) emit message("[" + error + "]");
 }
 
+// Gemini CLI resolves these aliases to its current models; it has no effort option.
+QList<AgentModel> GeminiProvider::models() const
+{
+    return {{{}, "Default model", "The model configured in Gemini CLI", {}, {}, {}, true},
+            {"auto", "Auto", "Gemini CLI chooses the model for each request", {}, {}, {}, false},
+            {"pro", "Pro", "Current Pro model", {}, {}, {}, false},
+            {"flash", "Flash", "Current Flash model", {}, {}, {}, false},
+            {"flash-lite", "Flash-Lite", "Current Flash-Lite model", {}, {}, {}, false}};
+}
+
 AgentBackend *GeminiProvider::createChat(const QString &workingDirectory, QObject *parent)
 {
     return new GeminiAgent(this, workingDirectory, parent);
@@ -224,7 +234,7 @@ QList<QJsonObject> GeminiProvider::discoverSessions()
 
 GeminiAgent::GeminiAgent(GeminiProvider *provider, const QString &workingDirectory, QObject *parent)
     : AgentBackend(parent), provider_(provider), program_(provider->program()), workingDirectory_(workingDirectory),
-      process_(new QProcess(this))
+      process_(new QProcess(this)), model_(provider->defaultModel())
 {
     connect(process_, &QProcess::readyReadStandardOutput, this, [this] {
         buffer_ += process_->readAllStandardOutput();
@@ -297,6 +307,12 @@ bool GeminiAgent::resumeConversation(const QString &id, const QString &workingDi
     return true;
 }
 
+void GeminiAgent::setModel(const QString &model, const QString &)
+{
+    model_ = model;
+    emit stateChanged();
+}
+
 bool GeminiAgent::prompt(const QString &text)
 {
     if (sessionId_.isEmpty() && firstPrompt_.isEmpty()) firstPrompt_ = text;
@@ -350,6 +366,7 @@ void GeminiAgent::sendNextPrompt()
     if (!sessionId_.isEmpty()) {
         arguments << "--resume" << (sessionId_.startsWith("index:") ? sessionId_.mid(6) : sessionId_);
     }
+    if (!model_.isEmpty()) arguments << "--model" << model_;
     arguments << "--prompt" << queuedPrompts_.takeFirst();
     process_->setWorkingDirectory(workingDirectory_);
     process_->start(program_, arguments);

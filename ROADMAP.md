@@ -2,17 +2,11 @@
 
 Planned work, roughly in order. Items move to `README.md` once they are implemented.
 
-## Model and effort for Claude, GLM and Gemini
+## Model choice for GLM and Antigravity
 
-Codex chats already choose a model and reasoning effort from the App Server's `model/list`. Extend the
-same controls to the other agents:
+Codex, Claude and Gemini chats choose a model (and an effort where the agent has one). Still open:
 
-- Claude: the Agent SDK has no model list, so offer a fixed list (for example `opus`, `sonnet`,
-  `haiku`). The model can change during a session (`set_model`); the effort (`low` to `max`) is a
-  connection option, so changing it reconnects the bridge and resumes the session.
 - GLM: choose the model in the chat instead of only through `GLM_MODEL`.
-- Gemini: a fixed or typed model name passed as `--model` on the next turn; the CLI has no effort
-  option.
 - Antigravity: check what `agy` offers.
 
 ## Directory lock for running turns

@@ -28,9 +28,11 @@ except ImportError as exc:
 
 
 class Bridge:
-    def __init__(self, cwd, provider="claude"):
+    def __init__(self, cwd, provider="claude", model=None, effort=None):
         self.cwd = cwd
         self.provider = provider
+        self.model = model
+        self.effort = effort
         self.client = None
         self.turn_task = None
         self.stop_requested = False
@@ -50,6 +52,11 @@ class Bridge:
             "include_partial_messages": True,
             "can_use_tool": self.can_use_tool,
         }
+        if self.provider == "claude":
+            if self.model:
+                settings["model"] = self.model
+            if self.effort:
+                settings["effort"] = self.effort
         if self.provider == "glm":
             api_key = os.environ.get("ZAI_API_KEY")
             if not api_key:
@@ -223,6 +230,23 @@ class Bridge:
             self.connected = False
             await self.connect(resume=True)
             send({"type": "directory_added", "path": path})
+        elif kind == "settings":
+            # The model can change within a session; the effort is a connection option, so changing
+            # it reconnects and resumes the session.
+            if self.turn_task is not None:
+                send({"type": "error", "message": f"Wait for {self.provider.upper()} to finish before changing the model"})
+                return
+            model = command.get("model") or None
+            effort = command.get("effort") or None
+            if effort != self.effort:
+                self.model = model
+                self.effort = effort
+                await self.client.disconnect()
+                self.connected = False
+                await self.connect(resume=self.session_id is not None)
+            elif model != self.model:
+                self.model = model
+                await self.client.set_model(model)
         elif kind in ("approval_response", "question_response"):
             future = self.pending.get(command.get("id"))
             if future is not None and not future.done():
@@ -246,8 +270,8 @@ async def read_commands(queue):
             send({"type": "error", "message": f"Invalid JSON command: {exc}"})
 
 
-async def main(cwd, provider="claude"):
-    bridge = Bridge(cwd, provider)
+async def main(cwd, provider="claude", model=None, effort=None):
+    bridge = Bridge(cwd, provider, model, effort)
     queue = asyncio.Queue()
     reader = asyncio.create_task(read_commands(queue))
     try:
@@ -349,6 +373,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Claude Agent SDK bridge for agentdeskt")
     parser.add_argument("--cwd", required=True)
     parser.add_argument("--provider", choices=("claude", "glm"), default="claude")
+    parser.add_argument("--model")
+    parser.add_argument("--effort", choices=("low", "medium", "high", "xhigh", "max"))
     parser.add_argument("--list-sessions", action="store_true")
     parser.add_argument("--directories", default="[]")
     parser.add_argument("--read-session")
@@ -371,4 +397,4 @@ if __name__ == "__main__":
             send({"type": "error", "message": f"Could not list Claude Agent SDK sessions: {exc}"})
             raise SystemExit(1)
         raise SystemExit(0)
-    raise SystemExit(asyncio.run(main(args.cwd, args.provider)))
+    raise SystemExit(asyncio.run(main(args.cwd, args.provider, args.model, args.effort)))

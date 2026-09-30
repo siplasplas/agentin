@@ -184,6 +184,17 @@ void CodexAgent::answerQuestions(int id, const QHash<QString, QString> &answers)
     connection_->respond(requestId, {{"answers", result}});
 }
 
+// Before a thread exists, a new chat shows the defaults it will start with.
+QString CodexAgent::model() const
+{
+    return model_.isEmpty() && threadId_.isEmpty() && !modelChosen_ && connection_ ? connection_->defaultModel() : model_;
+}
+
+QString CodexAgent::effort() const
+{
+    return effort_.isEmpty() && threadId_.isEmpty() && !modelChosen_ && connection_ ? connection_->defaultEffort() : effort_;
+}
+
 void CodexAgent::setModel(const QString &model, const QString &effort)
 {
     model_ = model;
@@ -199,6 +210,12 @@ void CodexAgent::openThread(const QJsonObject &result, bool resumed)
     if (!modelChosen_) {
         model_ = result.value("model").toString();
         effort_ = result.value("reasoningEffort").toString();
+        // A thread started here uses the application defaults; turn/start sends them.
+        if (!resumed && connection_) {
+            if (!connection_->defaultModel().isEmpty()) model_ = connection_->defaultModel();
+            if (!connection_->defaultEffort().isEmpty()) effort_ = connection_->defaultEffort();
+            modelChosen_ = !connection_->defaultModel().isEmpty() || !connection_->defaultEffort().isEmpty();
+        }
     }
     if (threadId_.isEmpty()) {
         emit message("[Server did not return a conversation ID.]");
@@ -228,7 +245,8 @@ void CodexAgent::startThread()
     threadOpening_ = true;
     emit message("[Starting a new conversation]");
     QJsonObject params{{"cwd", workingDirectory_}, {"serviceName", "agentdeskt"}};
-    if (modelChosen_ && !model_.isEmpty()) params.insert("model", model_);
+    const QString startModel = modelChosen_ ? model_ : connection_->defaultModel();
+    if (!startModel.isEmpty()) params.insert("model", startModel);
     connection_->request("thread/start", params, this,
                          [this](const QJsonObject &result, const QString &error) {
         threadOpening_ = false;

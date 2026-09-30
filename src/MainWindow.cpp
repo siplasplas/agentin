@@ -11,6 +11,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QFormLayout>
 #include <QHBoxLayout>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -45,6 +46,24 @@ QString shortPreview(const QString &value, int limit = 72)
     return singleLine.size() > limit ? singleLine.left(limit - 1) + QChar(0x2026) : singleLine;
 }
 
+// The model list with a "Default model" entry first, which keeps the agent's own default model.
+QList<AgentModel> modelChoices(const QList<AgentModel> &models)
+{
+    QList<AgentModel> choices = models;
+    const bool hasDefaultEntry = std::any_of(models.begin(), models.end(),
+                                             [](const AgentModel &model) { return model.id.isEmpty(); });
+    if (hasDefaultEntry) return choices;
+    AgentModel entry{{}, "Default model", "The agent's default model", {}, {}, {}, true};
+    for (const AgentModel &model : models) {
+        if (!model.isDefault) continue;
+        entry.efforts = model.efforts;
+        entry.effortDescriptions = model.effortDescriptions;
+        entry.defaultEffort = model.defaultEffort;
+    }
+    choices.prepend(entry);
+    return choices;
+}
+
 QString codexIndexFile(const QString &path)
 {
     return path.isEmpty()
@@ -77,6 +96,9 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     auto *conversationMenu = menuBar()->addMenu("Conversations");
     auto *newConversationAction = conversationMenu->addAction("New conversation in directory…");
     connect(newConversationAction, &QAction::triggered, this, &MainWindow::showNewConversationDialog);
+    auto *settingsMenu = menuBar()->addMenu("Settings");
+    auto *optionsAction = settingsMenu->addAction("Options…");
+    connect(optionsAction, &QAction::triggered, this, &MainWindow::showOptionsDialog);
 
     auto *central = new QWidget(this);
     auto *layout = new QVBoxLayout(central);
@@ -218,6 +240,7 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     appendLine("Directory: " + workingDirectory_);
     appendLine("Type help to see the available commands.\n");
     for (AgentProvider *listed : providers_) listed->loadConversations();
+    loadSettings();
     loadRecentDirectories();
     refreshConversationTree();
     chatTab(addChatTab(codex_, workingDirectory_))->startDraft();
@@ -322,6 +345,99 @@ AgentProvider *MainWindow::provider(const QString &name) const
         if (listed->name() == name) return listed;
     }
     return nullptr;
+}
+
+// settings.json keeps each agent's default model and effort for new chats. The effort defaults to
+// medium; agents without an effort setting ignore it.
+void MainWindow::loadSettings()
+{
+    QFile file(QDir(dataDirectory_).filePath("settings.json"));
+    const QJsonObject agents = file.open(QIODevice::ReadOnly)
+        ? QJsonDocument::fromJson(file.readAll()).object().value("agents").toObject() : QJsonObject();
+    for (AgentProvider *listed : providers_) {
+        const QJsonObject options = agents.value(listed->name()).toObject();
+        listed->setDefaults(options.value("model").toString(), options.value("effort").toString("medium"));
+    }
+}
+
+void MainWindow::saveSettings()
+{
+    QJsonObject agents;
+    for (const AgentProvider *listed : providers_)
+        agents.insert(listed->name(), QJsonObject{{"model", listed->defaultModel()}, {"effort", listed->defaultEffort()}});
+    if (!QDir().mkpath(dataDirectory_)) return;
+    QSaveFile file(QDir(dataDirectory_).filePath("settings.json"));
+    if (!file.open(QIODevice::WriteOnly)
+        || file.write(QJsonDocument(QJsonObject{{"version", 1}, {"agents", agents}}).toJson(QJsonDocument::Indented)) < 0
+        || !file.commit()) {
+        appendLine("[Could not save settings: " + file.errorString() + "]");
+    }
+}
+
+// Default model and effort per agent for new chats. Agents without a model list are not shown;
+// Codex lists its models once the App Server is connected.
+void MainWindow::showOptionsDialog()
+{
+    QDialog dialog(this);
+    dialog.setWindowTitle("Options");
+    auto *layout = new QVBoxLayout(&dialog);
+    layout->addWidget(new QLabel("Model and reasoning effort that new chats start with:", &dialog));
+    auto *form = new QFormLayout;
+    layout->addLayout(form);
+    struct Row
+    {
+        AgentProvider *provider;
+        QComboBox *model;
+        QComboBox *effort;
+    };
+    QList<Row> rows;
+    for (AgentProvider *listed : providers_) {
+        const QList<AgentModel> choices = modelChoices(listed->models());
+        if (listed->models().isEmpty() && listed != codex_) continue;
+        auto *model = new QComboBox(&dialog);
+        model->setObjectName("defaultModel" + listed->name());
+        auto *effort = new QComboBox(&dialog);
+        effort->setObjectName("defaultEffort" + listed->name());
+        for (const AgentModel &choice : choices) model->addItem(choice.displayName, choice.id);
+        if (model->findData(listed->defaultModel()) < 0) model->addItem(listed->defaultModel(), listed->defaultModel());
+        model->setCurrentIndex(model->findData(listed->defaultModel()));
+        const auto fillEfforts = [choices, model, effort](const QString &preferred) {
+            effort->clear();
+            QStringList efforts{"low", "medium", "high"};
+            for (const AgentModel &choice : choices) {
+                if (choice.id == model->currentData().toString()) efforts = choice.efforts;
+            }
+            if (efforts.isEmpty()) {
+                effort->addItem("No effort setting", preferred);
+                effort->setEnabled(false);
+                return;
+            }
+            effort->setEnabled(true);
+            for (const QString &level : efforts) effort->addItem(level, level);
+            const int index = effort->findData(preferred);
+            effort->setCurrentIndex(index >= 0 ? index : qMax(0, effort->findData("medium")));
+        };
+        fillEfforts(listed->defaultEffort());
+        connect(model, QOverload<int>::of(&QComboBox::activated), &dialog, [fillEfforts, effort] {
+            fillEfforts(effort->currentData().toString());
+        });
+        auto *row = new QHBoxLayout;
+        row->addWidget(model, 1);
+        row->addWidget(effort);
+        form->addRow(listed->name() + ":", row);
+        rows.append({listed, model, effort});
+    }
+    if (codex_->models().isEmpty())
+        layout->addWidget(new QLabel("Codex models appear here once the App Server is connected.", &dialog));
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+    layout->addWidget(buttons);
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    if (dialog.exec() != QDialog::Accepted) return;
+    for (const Row &row : rows) row.provider->setDefaults(row.model->currentData().toString(), row.effort->currentData().toString());
+    saveSettings();
+    modelControlsState_.clear();
+    updateModelControls();
 }
 
 // Recently used working directories are shown in the directory chooser of the New chat dialog.
@@ -629,6 +745,11 @@ void MainWindow::updateModelControls()
         return;
     }
     modelInput_->setCurrentIndex(modelInput_->findData(current->id));
+    if (current->efforts.isEmpty()) {
+        effortInput_->addItem("No effort setting");
+        effortInput_->setEnabled(false);
+        return;
+    }
     for (int i = 0; i < current->efforts.size(); ++i) {
         effortInput_->addItem(current->efforts.at(i), current->efforts.at(i));
         effortInput_->setItemData(i, current->effortDescriptions.value(i), Qt::ToolTipRole);

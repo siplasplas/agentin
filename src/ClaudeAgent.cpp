@@ -110,6 +110,26 @@ void ClaudeProvider::refreshConversations()
     });
 }
 
+// The Agent SDK cannot list models, so Claude offers Claude Code's aliases for the latest models.
+QList<AgentModel> ClaudeProvider::models() const
+{
+    if (kind_ == "glm") return {};
+    const QStringList efforts{"low", "medium", "high", "xhigh", "max"};
+    const QStringList effortDescriptions{
+        "Minimal thinking, fastest responses", "Moderate thinking", "Deep reasoning",
+        "Extended reasoning depth; models without it use high", "Maximum effort"};
+    QList<AgentModel> result;
+    const auto add = [&](const QString &id, const QString &displayName, const QString &description) {
+        result.append({id, displayName, description, efforts, effortDescriptions, "high", id.isEmpty()});
+    };
+    add({}, "Default model", "The model Claude Code uses by default for this account");
+    add("fable", "Fable", "Latest Fable model");
+    add("opus", "Opus", "Latest Opus model");
+    add("sonnet", "Sonnet", "Latest Sonnet model");
+    add("haiku", "Haiku", "Latest Haiku model");
+    return result;
+}
+
 AgentBackend *ClaudeProvider::createChat(const QString &workingDirectory, QObject *parent)
 {
     return new ClaudeAgent(this, workingDirectory, parent);
@@ -148,7 +168,9 @@ void ClaudeProvider::runHelper(const QStringList &arguments, const QString &work
 
 ClaudeAgent::ClaudeAgent(ClaudeProvider *provider, const QString &workingDirectory, QObject *parent)
     : AgentBackend(parent), provider_(provider), name_(provider->name()), kind_(provider->kind()),
-      workingDirectory_(workingDirectory), process_(new QProcess(this))
+      workingDirectory_(workingDirectory), process_(new QProcess(this)),
+      model_(provider->models().isEmpty() ? QString() : provider->defaultModel()),
+      effort_(provider->models().isEmpty() ? QString() : provider->defaultEffort())
 {
     connect(process_, &QProcess::readyReadStandardOutput, this, [this] {
         buffer_ += process_->readAllStandardOutput();
@@ -217,8 +239,12 @@ void ClaudeAgent::start(const QString &workingDirectory)
     if (!workingDirectory.isEmpty()) workingDirectory_ = workingDirectory;
     process_->setWorkingDirectory(workingDirectory_);
     if (!provider_) return;
-    process_->start(provider_->pythonProgram(),
-                    {"-u", provider_->scriptPath(), "--cwd", workingDirectory_, "--provider", kind_});
+    QStringList arguments{"-u", provider_->scriptPath(), "--cwd", workingDirectory_, "--provider", kind_};
+    if (!model_.isEmpty()) arguments << "--model" << model_;
+    if (!effort_.isEmpty()) arguments << "--effort" << effort_;
+    appliedModel_ = model_;
+    appliedEffort_ = effort_;
+    process_->start(provider_->pythonProgram(), arguments);
 }
 
 bool ClaudeAgent::newConversation(const QString &workingDirectory)
@@ -341,9 +367,33 @@ void ClaudeAgent::answerQuestions(int id, const QHash<QString, QString> &answers
     send({{"type", "question_response"}, {"id", id}, {"accepted", answers.size() == count}, {"answers", result}});
 }
 
+void ClaudeAgent::setModel(const QString &model, const QString &effort)
+{
+    model_ = model;
+    effort_ = effort;
+    emit stateChanged();
+}
+
+// Sends a changed model or effort to the bridge. Returns true while the bridge reconnects for a new
+// effort; it reports ready again when done.
+bool ClaudeAgent::applySettings()
+{
+    if (model_ == appliedModel_ && effort_ == appliedEffort_) return false;
+    const bool reconnect = effort_ != appliedEffort_;
+    send({{"type", "settings"}, {"model", model_}, {"effort", effort_}});
+    appliedModel_ = model_;
+    appliedEffort_ = effort_;
+    if (reconnect) {
+        ready_ = false;
+        emit stateChanged();
+    }
+    return reconnect;
+}
+
 void ClaudeAgent::sendNextPrompt()
 {
     if (!ready_ || busy_ || queuedPrompts_.isEmpty()) return;
+    if (applySettings()) return;
     busy_ = true;
     stopRequested_ = false;
     textStarted_ = false;

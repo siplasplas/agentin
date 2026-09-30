@@ -24,8 +24,8 @@ public:
     QString statusText() const override;
     bool isResponding() const override { return busy_; }
     bool canInterrupt() const override { return busy_ && !stopRequested_; }
-    QString model() const override { return model_; }
-    QString effort() const override { return effort_; }
+    QString model() const override;
+    QString effort() const override;
     void setModel(const QString &model, const QString &effort) override;
     bool newConversation(const QString &workingDirectory) override;
     bool resumeConversation(const QString &id, const QString &workingDirectory) override;

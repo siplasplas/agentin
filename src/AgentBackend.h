@@ -89,6 +89,15 @@ public:
     virtual QList<QJsonObject> conversations() const = 0;
     // Models chats can switch to; empty when the agent offers no choice.
     virtual QList<AgentModel> models() const { return {}; }
+    // Model and effort that new chats start with, from the application options; empty means the
+    // agent's own default.
+    QString defaultModel() const { return defaultModel_; }
+    QString defaultEffort() const { return defaultEffort_; }
+    void setDefaults(const QString &model, const QString &effort)
+    {
+        defaultModel_ = model;
+        defaultEffort_ = effort;
+    }
 
     virtual AgentBackend *createChat(const QString &workingDirectory, QObject *parent) = 0;
 
@@ -97,6 +106,10 @@ signals:
     void stateChanged();
     void conversationsChanged();
     void modelsChanged();
+
+private:
+    QString defaultModel_;
+    QString defaultEffort_;
 };
 
 // One chat session with an agent. It owns its protocol state, prompt queue and turn state; a
