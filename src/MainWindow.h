@@ -22,6 +22,7 @@ class QPushButton;
 class QTextDocument;
 class QTreeWidget;
 class QTreeWidgetItem;
+class TurnLocks;
 
 class MainWindow : public QMainWindow
 {
@@ -73,6 +74,7 @@ private:
     AntigravityProvider *antigravity_;
     // Provider order in the tree and the New chat dialog.
     QList<AgentProvider *> providers_;
+    TurnLocks *turnLocks_;
     MruTabWidget *tabs_;
     // One chat view shared by all tabs; it moves into the current tab's page and shows its document.
     QWidget *chatPanel_;

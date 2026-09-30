@@ -6,6 +6,8 @@
 #include <QObject>
 
 class QTextDocument;
+class QTimer;
+class TurnLocks;
 
 // An approval or a set of questions from the agent, waiting for the user in the tab.
 struct PendingRequest
@@ -30,6 +32,13 @@ class ChatTab : public QObject
 
 public:
     ChatTab(AgentProvider *provider, const QString &workingDirectory, QObject *parent = nullptr);
+    ~ChatTab() override;
+
+    // Messages then wait until no other agent works in the same or a nested directory.
+    void setTurnLocks(TurnLocks *locks);
+    bool isWaiting() const { return !waitingFor_.isEmpty(); }
+    // Drops the messages that wait for the directory.
+    void cancelWaiting();
 
     AgentProvider *provider() const { return provider_; }
     AgentBackend *agent() const { return agent_; }
@@ -81,6 +90,10 @@ private:
     void appendText(const QString &text);
     void showHistory(const QList<ChatEntry> &entries, bool hasMore, const QString &notice);
     void finishQuestions();
+    // Hands the next message to the agent once the previous turn has ended and the directory is free.
+    // Returns false when the agent refused the message.
+    bool dispatch();
+    void releaseDirectory();
 
     AgentProvider *provider_;
     AgentBackend *agent_ = nullptr;
@@ -93,6 +106,12 @@ private:
     QStringList sentMessages_;
     QString lockNotice_;
     QList<PendingRequest> requests_;
+    TurnLocks *locks_ = nullptr;
+    QTimer *retry_;
+    QStringList outgoing_;
+    QString waitingFor_;
+    bool inTurn_ = false;
+    bool holdsDirectory_ = false;
     bool live_ = false;
     bool hasMore_ = false;
     bool pendingAttach_ = false;

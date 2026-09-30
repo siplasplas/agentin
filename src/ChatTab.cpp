@@ -1,17 +1,87 @@
 #include "ChatTab.h"
 
+#include "TurnLocks.h"
+
 #include <QDir>
 #include <QPlainTextDocumentLayout>
 #include <QRegularExpression>
 #include <QTextCursor>
 #include <QTextDocument>
+#include <QTimer>
 
 ChatTab::ChatTab(AgentProvider *provider, const QString &workingDirectory, QObject *parent)
     : QObject(parent), provider_(provider), document_(new QTextDocument(this)),
       path_(workingDirectory), title_("New chat")
 {
     document_->setDocumentLayout(new QPlainTextDocumentLayout(document_));
+    // Other windows and outside tools do not announce a free directory, so waiting chats also retry.
+    retry_ = new QTimer(this);
+    retry_->setInterval(2000);
+    connect(retry_, &QTimer::timeout, this, &ChatTab::dispatch);
     setAgent(provider->createChat(workingDirectory, this));
+}
+
+ChatTab::~ChatTab()
+{
+    releaseDirectory();
+}
+
+void ChatTab::setTurnLocks(TurnLocks *locks)
+{
+    locks_ = locks;
+    connect(locks, &TurnLocks::released, this, [this] {
+        if (isWaiting()) QTimer::singleShot(0, this, &ChatTab::dispatch);
+    });
+}
+
+void ChatTab::cancelWaiting()
+{
+    if (!isWaiting()) return;
+    outgoing_.clear();
+    waitingFor_.clear();
+    retry_->stop();
+    emit logMessage("[Stopped waiting; the messages were not sent.]");
+    emit changed();
+}
+
+bool ChatTab::dispatch()
+{
+    if (outgoing_.isEmpty() || inTurn_) return true;
+    // A read-only turn cannot change files, so it neither takes nor waits for the directory.
+    if (locks_ && !holdsDirectory_ && !agent_->isReadOnly()) {
+        const QString label = provider_->name() + " chat \"" + title_.left(40) + "\"";
+        const QString holder = locks_->acquire(QString("%1").arg(quintptr(this)), path_, label);
+        if (!holder.isEmpty()) {
+            if (waitingFor_ != holder) {
+                waitingFor_ = holder;
+                emit logMessage("[" + provider_->name() + " waits for " + QDir::toNativeSeparators(path_)
+                                + ": it is used by " + holder + "]");
+                emit changed();
+            }
+            retry_->start();
+            return true;
+        }
+        holdsDirectory_ = true;
+    }
+    retry_->stop();
+    const bool wasWaiting = isWaiting();
+    waitingFor_.clear();
+    inTurn_ = true;
+    if (!agent_->prompt(outgoing_.takeFirst())) {
+        inTurn_ = false;
+        releaseDirectory();
+        emit changed();
+        return false;
+    }
+    if (wasWaiting) emit changed();
+    return true;
+}
+
+void ChatTab::releaseDirectory()
+{
+    if (!holdsDirectory_) return;
+    holdsDirectory_ = false;
+    if (locks_) locks_->release(QString("%1").arg(quintptr(this)));
 }
 
 QString ChatTab::key(const QString &provider, const QString &id)
@@ -27,6 +97,7 @@ QString ChatTab::key() const
 QString ChatTab::headerText() const
 {
     QStringList parts{provider_->name(), title_, QDir::toNativeSeparators(path_)};
+    if (isWaiting()) parts.append("waiting: the directory is used by " + waitingFor_);
     if (!lockNotice_.isEmpty()) parts.append("locked: " + lockNotice_);
     else if (!live_) parts.append("read-only preview");
     return parts.join("  •  ");
@@ -115,11 +186,13 @@ bool ChatTab::send(const QString &text)
         emit logMessage("[The displayed chat is a read-only preview. Double-click it in the tree to continue it.]");
         return false;
     }
-    if (!agent_->prompt(text)) return false;
+    // The title names the chat also to other chats that wait for its directory.
     if (id_.isEmpty() && title_ == "New chat") {
         title_ = text.simplified().left(200);
         emit changed();
     }
+    outgoing_.append(text);
+    if (!dispatch()) return false;
     appendText("\nYou: " + text + '\n');
     sentMessages_.append(text);
     emit userMessagesChanged();
@@ -153,6 +226,10 @@ void ChatTab::setAgent(AgentBackend *agent)
             requests_.clear();
             emit requestsChanged();
         }
+        // Between turns the directory is free for other agents; the next queued message takes it again.
+        inTurn_ = false;
+        releaseDirectory();
+        QTimer::singleShot(0, this, &ChatTab::dispatch);
         if (status != "completed")
             emit logMessage("[" + name + " response: " + status + (details.isEmpty() ? "" : ": " + details) + "]");
     });

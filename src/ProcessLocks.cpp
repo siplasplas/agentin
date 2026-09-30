@@ -68,3 +68,31 @@ QString commandLineLock(const QString &sessionId)
     }
     return {};
 }
+
+QString processStartTime(qint64 pid)
+{
+    return processStatFields(pid).value(19);
+}
+
+bool isProcessAlive(qint64 pid, const QString &startTime)
+{
+    const QString current = processStartTime(pid);
+    return !current.isEmpty() && (startTime.isEmpty() || current == startTime);
+}
+
+QList<BusyAgentSession> busyClaudeSessions(const QString &configDirectory)
+{
+    QList<BusyAgentSession> sessions;
+    const QDir registry(QDir(configDirectory).filePath("sessions"));
+    for (const QFileInfo &info : registry.entryInfoList({"*.json"}, QDir::Files)) {
+        QFile file(info.filePath());
+        if (!file.open(QIODevice::ReadOnly)) continue;
+        const QJsonObject entry = QJsonDocument::fromJson(file.readAll()).object();
+        const qint64 pid = entry.value("pid").toInteger();
+        if (entry.value("status").toString() != "busy" || pid <= 0 || isOwnDescendant(pid)
+            || !isProcessAlive(pid, entry.value("procStart").toString())) continue;
+        sessions.append({pid, entry.value("cwd").toString(),
+                         QString("a Claude Code %1 (PID %2)").arg(entry.value("kind").toString("session")).arg(pid)});
+    }
+    return sessions;
+}

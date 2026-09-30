@@ -5,6 +5,7 @@
 #include "GeminiAgent.h"
 #include "MainWindow.h"
 #include "MessageInput.h"
+#include "TurnLocks.h"
 
 #include <QCheckBox>
 #include <QButtonGroup>
@@ -108,7 +109,8 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
           QDir(dataDirectory_).filePath("gemini-conversations.json"), this)),
       antigravity_(new AntigravityProvider(antigravityProgram,
                                            QDir(dataDirectory_).filePath("antigravity-conversations.json"), this)),
-      providers_{codex_, claude_, gemini_, glm_, antigravity_}
+      providers_{codex_, claude_, gemini_, glm_, antigravity_},
+      turnLocks_(new TurnLocks(dataDirectory_, this))
 {
     claude_->excludeSessionsOf(glm_);
     setWindowTitle("agentdeskt — Codex, Claude, GLM, Gemini and Antigravity");
@@ -389,6 +391,10 @@ void MainWindow::requestStop()
 {
     ChatTab *tab = currentTab();
     if (!tab) return;
+    if (tab->isWaiting()) {
+        tab->cancelWaiting();
+        return;
+    }
     AgentBackend *agent = tab->agent();
     if (!agent->isResponding()) {
         appendLine("[No active " + agent->name() + " response.]");
@@ -706,6 +712,7 @@ QWidget *MainWindow::addChatTab(AgentProvider *selected, const QString &workingD
     auto *layout = new QVBoxLayout(page);
     layout->setContentsMargins(0, 0, 0, 0);
     auto *tab = new ChatTab(selected, workingDirectory, page);
+    tab->setTurnLocks(turnLocks_);
     connect(tab, &ChatTab::logMessage, this, &MainWindow::appendLine);
     connect(tab, &ChatTab::changed, this, [this, page] { updateTab(page); });
     connect(tab, &ChatTab::textAppended, this, [this, page] {
@@ -771,7 +778,7 @@ void MainWindow::updateTab(QWidget *page)
     tabs_->setTabToolTip(index, tab->headerText());
     tabs_->setTabPopupText(index, tab->headerText());
     tabs_->setTabKey(page, tab->key());
-    tabs_->setTabBusy(page, tab->agent()->isResponding());
+    tabs_->setTabBusy(page, tab->agent()->isResponding() || tab->isWaiting());
     if (page == tabs_->currentWidget()) updateStatus();
 }
 
@@ -814,7 +821,7 @@ void MainWindow::updateStatus()
     loadEarlierButton_->setVisible(tab->hasMoreHistory());
     // Reloading a longer tail while a live response streams would drop the partial answer.
     loadEarlierButton_->setEnabled(!(tab->isLive() && agent->isResponding()));
-    stopButton_->setEnabled(agent->canInterrupt());
+    stopButton_->setEnabled(agent->canInterrupt() || tab->isWaiting());
     sendButton_->setText("Send to " + tab->provider()->name());
     sendButton_->setEnabled(tab->isLive());
     const PendingRequest *request = tab->pendingRequest();

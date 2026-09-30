@@ -219,6 +219,18 @@ typed before browsing comes back. The messages come from the conversation's
 loaded history and from what you sent in the tab, so no separate history is
 stored; older messages become available after **Show earlier messages**.
 
+Two agents never work on turns in the same directory, or in a directory and one
+of its subdirectories, at the same time. A chat holds its directory only from
+sending a message until the agent hands control back, so between turns another
+chat in the same directory can be used. A message that would conflict waits: the
+chat header and the log say which chat holds the directory, and the message is
+sent when that turn ends. **Stop** (or `stop`) gives up waiting. The running turns
+of all agentdeskt windows are kept in `turn-locks.json` in the application data
+directory, and Claude Code sessions outside agentdeskt that are busy on a turn
+count as well. Turns in a read-only Codex chat neither take nor wait for the
+directory. Chats send one message per turn; messages written in the meantime
+wait in the tab.
+
 Any other text is sent to the chat in the current tab when it is not a read-only
 preview. Messages entered while a response is in progress are queued. Requests to
 approve an action or answer a question appear in a

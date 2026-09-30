@@ -205,17 +205,24 @@ ClaudeAgent::ClaudeAgent(ClaudeProvider *provider, const QString &workingDirecto
         emit message("[" + name_ + "] " + kind_.toUpper() + " bridge process error: " + process_->errorString()
                      + " (Python: " + process_->program() + ")");
         if (processError != QProcess::FailedToStart) return;
+        const bool working = busy_ || !queuedPrompts_.isEmpty();
         ready_ = false;
         busy_ = false;
         stopRequested_ = false;
+        queuedPrompts_.clear();
+        if (working) emit turnCompleted("failed", "the bridge did not start");
         emit stateChanged();
     });
     connect(process_, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this,
             [this](int code, QProcess::ExitStatus) {
         emit message(QString("[%1] %2 bridge exited with code %3").arg(name_, kind_.toUpper()).arg(code));
+        const bool working = busy_ || !queuedPrompts_.isEmpty();
         ready_ = false;
         busy_ = false;
         stopRequested_ = false;
+        queuedPrompts_.clear();
+        // Every message sent ends with turnCompleted, so its tab can release the directory it holds.
+        if (working) emit turnCompleted("failed", QString("the bridge exited with code %1").arg(code));
         emit stateChanged();
     });
 }

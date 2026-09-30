@@ -32,6 +32,8 @@ add_executable(agentdeskt
     src/ConversationIndex.h
     src/ProcessLocks.cpp
     src/ProcessLocks.h
+    src/TurnLocks.cpp
+    src/TurnLocks.h
     src/MainWindow.cpp
     src/MainWindow.h
     src/MessageInput.cpp
@@ -66,6 +68,8 @@ if(BUILD_TESTING)
         src/ConversationIndex.h
         src/ProcessLocks.cpp
         src/ProcessLocks.h
+        src/TurnLocks.cpp
+        src/TurnLocks.h
         src/MainWindow.cpp
         src/MainWindow.h
         src/MessageInput.cpp

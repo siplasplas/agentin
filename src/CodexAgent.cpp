@@ -36,11 +36,17 @@ CodexAgent::CodexAgent(CodexConnection *connection, const QString &workingDirect
     connect(connection, &CodexConnection::stateChanged, this, &AgentBackend::stateChanged);
     connect(connection, &CodexConnection::connected, this, [this] {
         if (historyPending_) loadHistory(historyThreadId_, {}, false);
+        // A message sent while the server was still starting waits for a thread.
+        if (!queuedPrompts_.isEmpty() && threadId_.isEmpty()) startThread();
     });
     connect(connection, &CodexConnection::disconnected, this, [this] {
+        const bool working = busy_ || threadOpening_ || !queuedPrompts_.isEmpty();
         threadOpening_ = false;
         threadId_.clear();
+        queuedPrompts_.clear();
         resetTurn();
+        // Every message sent ends with turnCompleted, so its tab can release the directory it holds.
+        if (working) emit turnCompleted("failed", "the Codex App Server disconnected");
     });
 }
 
@@ -281,6 +287,10 @@ void CodexAgent::startThread()
                          [this](const QJsonObject &result, const QString &error) {
         threadOpening_ = false;
         if (!error.isEmpty()) {
+            if (!queuedPrompts_.isEmpty()) {
+                queuedPrompts_.clear();
+                emit turnCompleted("failed", "the conversation could not be started: " + error);
+            }
             emit stateChanged();
             return;
         }
@@ -305,6 +315,7 @@ void CodexAgent::sendNextPrompt()
     connection_->request("turn/start", params, this, [this](const QJsonObject &result, const QString &error) {
         if (!error.isEmpty()) {
             resetTurn();
+            emit turnCompleted("failed", error);
             sendNextPrompt();
         } else if (busy_) {
             activeTurnId_ = result.value("turn").toObject().value("id").toString();
