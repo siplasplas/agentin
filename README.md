@@ -206,7 +206,9 @@ Enter keeps adding lines. A recalled message or pasted text is sent with Enter
 as long as you do not change it. **Settings → Options…** sets the length of a
 short message (0 never sends typed text with Enter) or makes Enter always send
 or always start a new line; the choices are saved as `enterKey` and
-`enterSendsUpTo` in `settings.json`. A badge next to **Send** shows what Enter
+`enterSendsUpTo` in `settings.json`. Undo and redo work in the field, also for a
+recalled message; after sending, Ctrl+Z brings the sent message back for
+editing, unless **Settings → Options…** turns that off (`undoAfterSend`). A badge next to **Send** shows what Enter
 does now: a green arrow when it sends and a gray return sign when it starts a new
 line; its tooltip names the key for the other action.
 

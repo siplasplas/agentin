@@ -319,8 +319,10 @@ void MainWindow::submitCommand()
 {
     const QString command = input_->toPlainText().trimmed();
     if (command.isEmpty()) return;
-    // Clearing is undoable, so Ctrl+Z brings a sent message back for editing.
-    input_->replaceText({});
+    // An undoable clear lets Ctrl+Z bring a sent message back for editing; clear() also drops the
+    // undo history when the options turn that off.
+    if (undoAfterSend_) input_->replaceText({});
+    else input_->clear();
     const QString local = command.toLower();
 
     if (local == "help" || local == "/help") {
@@ -410,6 +412,7 @@ void MainWindow::loadSettings()
     }
     const QString enterKey = settings.value("enterKey").toString();
     input_->setShortMessageLength(settings.value("enterSendsUpTo").toInt(60));
+    undoAfterSend_ = settings.value("undoAfterSend").toBool(true);
     input_->setEnterPolicy(enterKey == "send" ? MessageInput::EnterPolicy::Send
                            : (enterKey == "newline" ? MessageInput::EnterPolicy::NewLine
                                                     : MessageInput::EnterPolicy::Smart));
@@ -427,7 +430,8 @@ void MainWindow::saveSettings()
     QSaveFile file(QDir(dataDirectory_).filePath("settings.json"));
     if (!file.open(QIODevice::WriteOnly)
         || file.write(QJsonDocument(QJsonObject{{"version", 1}, {"enterKey", enterKey},
-                                                         {"enterSendsUpTo", input_->shortMessageLength()}, {"agents", agents}})
+                                                         {"enterSendsUpTo", input_->shortMessageLength()},
+                                                         {"undoAfterSend", undoAfterSend_}, {"agents", agents}})
                           .toJson(QJsonDocument::Indented)) < 0
         || !file.commit()) {
         appendLine("[Could not save settings: " + file.errorString() + "]");
@@ -458,6 +462,10 @@ void MainWindow::showOptionsDialog()
     shortLength->setToolTip("A typed message of one line up to this length is sent with Enter; 0 never sends typed text. "
                             "Recalled and pasted messages are sent with Enter as long as they are unchanged.");
     enterForm->addRow("Short message:", shortLength);
+    auto *undoAfterSend = new QCheckBox("Ctrl+Z after sending brings the sent message back", &dialog);
+    undoAfterSend->setObjectName("undoAfterSend");
+    undoAfterSend->setChecked(undoAfterSend_);
+    enterForm->addRow(QString(), undoAfterSend);
     const auto updateShortLength = [enterInput, shortLength] {
         shortLength->setEnabled(enterInput->currentData().toInt() == int(MessageInput::EnterPolicy::Smart));
     };
@@ -520,6 +528,7 @@ void MainWindow::showOptionsDialog()
     if (dialog.exec() != QDialog::Accepted) return;
     input_->setEnterPolicy(MessageInput::EnterPolicy(enterInput->currentData().toInt()));
     input_->setShortMessageLength(shortLength->value());
+    undoAfterSend_ = undoAfterSend->isChecked();
     for (const Row &row : rows) row.provider->setDefaults(row.model->currentData().toString(), row.effort->currentData().toString());
     saveSettings();
     modelControlsState_.clear();

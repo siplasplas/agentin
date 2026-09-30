@@ -95,4 +95,6 @@ private:
     QTreeWidget *conversationTree_;
     QSet<QString> expandedProviders_;
     QStringList recentDirectories_;
+    // Ctrl+Z in the message field can bring back the message just sent.
+    bool undoAfterSend_ = true;
 };
