@@ -78,8 +78,8 @@ bool ChatView::hasToolContent(const QTextBlock &header) const
     if (!heading || !heading->header) return false;
     for (QTextBlock block = header.next(); block.isValid(); block = block.next()) {
         const auto *data = dynamic_cast<ToolBlockData *>(block.userData());
-        if (!data || data->header || data->group != heading->group) break;
-        if (!block.text().trimmed().isEmpty()) return true;
+        if (data && data->header) break;
+        if (data && data->group == heading->group && !block.text().trimmed().isEmpty()) return true;
     }
     return false;
 }

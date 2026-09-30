@@ -50,6 +50,8 @@ protected:
 private:
     void saveSession();
     void submitCommand();
+    void submitSteer();
+    void updateSteerButton();
     void showHelp();
     void requestStop();
     AgentProvider *provider(const QString &name) const;
@@ -120,6 +122,7 @@ private:
     MessageInput *input_;
     QLabel *enterIndicator_;
     QPushButton *sendButton_;
+    QPushButton *steerButton_;
     QPushButton *stopButton_;
     QPushButton *newChatButton_;
     QLabel *status_;

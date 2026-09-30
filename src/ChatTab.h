@@ -66,6 +66,7 @@ public:
     // Makes the displayed conversation live unless another tool holds it.
     void continueChat();
     bool send(const QString &text);
+    bool steer(const QString &text);
     void loadEarlier();
 
     // Tokens of the latest turn and of the conversation. The conversation total covers the whole
@@ -99,6 +100,7 @@ signals:
     // A turn ended on its own, successfully or not; turns the user stopped are not reported.
     void turnEnded(bool succeeded, qint64 durationMs);
     void requestsChanged();
+    void steeringFailed(const QString &text);
 
 private:
     void setAgent(AgentBackend *agent);

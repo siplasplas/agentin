@@ -49,7 +49,7 @@ void ChatTab::cancelWaiting()
 
 bool ChatTab::dispatch()
 {
-    if (outgoing_.isEmpty() || inTurn_ || agent_->isCompacting()) return true;
+    if (outgoing_.isEmpty() || inTurn_ || agent_->isCompacting() || agent_->isSteering()) return true;
     // A read-only turn in a sandbox cannot change files, so it neither takes nor waits for the directory;
     // an agent that only promises not to change files still waits.
     if (locks_ && !holdsDirectory_ && !(agent_->isReadOnly() && agent_->readOnlyIsEnforced())) {
@@ -303,6 +303,11 @@ bool ChatTab::send(const QString &text)
     return true;
 }
 
+bool ChatTab::steer(const QString &text)
+{
+    return live_ && !pendingRequest() && agent_->steer(text);
+}
+
 void ChatTab::loadEarlier()
 {
     if (!id_.isEmpty()) agent_->loadHistory(id_, path_, true);
@@ -318,6 +323,16 @@ void ChatTab::setAgent(AgentBackend *agent)
         emit changed();
         if (!inTurn_ && !agent_->isCompacting() && !outgoing_.isEmpty())
             QTimer::singleShot(0, this, &ChatTab::dispatch);
+    });
+    connect(agent, &AgentBackend::steerAccepted, this, [this](const QString &text) {
+        appendText("\nYou (steer): " + text + '\n');
+        sentMessages_.append(text);
+        emit userMessagesChanged();
+    });
+    connect(agent, &AgentBackend::steerFailed, this, [this, name](const QString &text, const QString &reason) {
+        emit logMessage("[" + name + " steering was not confirmed: " + reason + "]");
+        appendText("\nYou (steer not confirmed): " + text + '\n');
+        emit steeringFailed(text);
     });
     connect(agent, &AgentBackend::messageStarted, this, [this, name] { appendText("\n" + name + ": "); });
     connect(agent, &AgentBackend::messageDelta, this, &ChatTab::appendText);

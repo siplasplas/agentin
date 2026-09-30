@@ -175,6 +175,15 @@ input, cached and output tokens. For agents other than Codex, the conversation
 figure covers the turns sent from the tab. Antigravity's statistics are read
 where its result event carries them.
 
+During a running Codex turn, **Steer** sends the message field's text directly to
+that turn, while **Send** continues to queue a message for the next turn. Steer is
+available once the turn ID is known, except during manual compaction, stopping,
+or a pending approval/question. Accepted messages appear as `You (steer)` and are
+included in message history. If the turn finishes before the server accepts the
+message, the error is shown and the text is restored to an empty message field
+when its chat is still selected; it is also kept in the transcript. Steering does
+not interrupt tools or guarantee an immediate answer.
+
 The chat header shows elapsed operation time as `mm:ss`: **Task** while an agent
 works and **Compact** during manual or automatic Codex compaction. The counter
 stops at the final duration when the operation ends and follows the selected tab.

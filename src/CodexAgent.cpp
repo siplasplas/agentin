@@ -56,6 +56,12 @@ CodexAgent::CodexAgent(CodexConnection *connection, const QString &workingDirect
         const bool working = busy_ || threadOpening_ || !queuedPrompts_.isEmpty();
         if (!threadId_.isEmpty()) reopenThreadId_ = threadId_;
         threadOpening_ = false;
+        if (steeringInFlight_) {
+            const QString text = steeringText_;
+            steeringInFlight_ = false;
+            steeringText_.clear();
+            emit steerFailed(text, "The Codex App Server disconnected before confirming the message.");
+        }
         threadId_.clear();
         queuedPrompts_.clear();
         if (refreshingHistory_) ++historyGeneration_;
@@ -89,7 +95,7 @@ bool CodexAgent::newConversation(const QString &workingDirectory)
         emit message("[Codex App Server is not connected.]");
         return false;
     }
-    if (busy_ || threadOpening_) {
+    if (busy_ || threadOpening_ || steeringInFlight_) {
         emit message("[Wait for the current Codex response to finish.]");
         return false;
     }
@@ -103,7 +109,7 @@ bool CodexAgent::newConversation(const QString &workingDirectory)
 bool CodexAgent::resumeConversation(const QString &id, const QString &workingDirectory)
 {
     if (id.isEmpty() || !connection_ || !connection_->isConnected()) return false;
-    if (busy_ || threadOpening_) {
+    if (busy_ || threadOpening_ || steeringInFlight_) {
         emit message("[Wait for the current Codex response to finish.]");
         return false;
     }
@@ -146,10 +152,39 @@ void CodexAgent::interrupt()
     emit stateChanged();
 }
 
+bool CodexAgent::canSteer() const
+{
+    return connection_ && connection_->isConnected() && busy_ && !manualCompaction_ && !stopRequested_
+        && !threadId_.isEmpty() && !activeTurnId_.isEmpty() && !steeringInFlight_;
+}
+
+bool CodexAgent::steer(const QString &text)
+{
+    if (text.trimmed().isEmpty() || !canSteer()) return false;
+    steeringInFlight_ = true;
+    steeringText_ = text;
+    const QString id = threadId_;
+    const QString turnId = activeTurnId_;
+    emit stateChanged();
+    connection_->request("turn/steer", {{"threadId", id}, {"expectedTurnId", turnId},
+                                      {"input", QJsonArray{QJsonObject{{"type", "text"}, {"text", text}}}}}, this,
+                         [this, id, text](const QJsonObject &, const QString &error) {
+        if (!steeringInFlight_ || id != threadId_) return;
+        steeringInFlight_ = false;
+        steeringText_.clear();
+        if (error.isEmpty()) emit steerAccepted(text);
+        else emit steerFailed(text, error);
+        if (!busy_ && compactedHistoryPending_) refreshAfterCompaction();
+        emit stateChanged();
+        sendNextPrompt();
+    });
+    return true;
+}
+
 bool CodexAgent::canCompact() const
 {
     return connection_ && connection_->isConnected() && !threadId_.isEmpty()
-        && !busy_ && !threadOpening_ && !refreshingHistory_ && queuedPrompts_.isEmpty();
+        && !busy_ && !threadOpening_ && !refreshingHistory_ && !steeringInFlight_ && queuedPrompts_.isEmpty();
 }
 
 bool CodexAgent::compact()
@@ -212,7 +247,7 @@ void CodexAgent::loadHistory(const QString &id, const QString &, bool older)
 
 void CodexAgent::refreshAfterCompaction()
 {
-    if (refreshingHistory_ || threadId_.isEmpty() || !connection_ || !connection_->isConnected()) return;
+    if (refreshingHistory_ || steeringInFlight_ || threadId_.isEmpty() || !connection_ || !connection_->isConnected()) return;
     compactedHistoryPending_ = false;
     refreshingHistory_ = true;
     const quint64 generation = ++historyGeneration_;
@@ -402,7 +437,7 @@ void CodexAgent::startThread()
 
 void CodexAgent::sendNextPrompt()
 {
-    if (!connection_ || !connection_->isConnected() || threadId_.isEmpty() || busy_ || refreshingHistory_ || queuedPrompts_.isEmpty()) return;
+    if (!connection_ || !connection_->isConnected() || threadId_.isEmpty() || busy_ || refreshingHistory_ || steeringInFlight_ || queuedPrompts_.isEmpty()) return;
     const QString text = queuedPrompts_.takeFirst();
     busy_ = true;
     activeTurnId_.clear();

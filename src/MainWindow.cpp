@@ -207,6 +207,11 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     enterIndicator_->setObjectName("enterIndicator");
     sendButton_ = new QPushButton("Send", central);
     sendButton_->setObjectName("sendButton");
+    steerButton_ = new QPushButton("Steer", central);
+    steerButton_->setObjectName("steerButton");
+    steerButton_->setToolTip("Send this message to the running turn; Send queues it for the next turn");
+    steerButton_->setEnabled(false);
+    steerButton_->hide();
     stopButton_ = new QPushButton("Stop", central);
     stopButton_->setObjectName("stopButton");
     stopButton_->setEnabled(false);
@@ -291,6 +296,7 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     inputRow->addWidget(input_, 1);
     inputRow->addWidget(enterIndicator_);
     inputRow->addWidget(sendButton_);
+    inputRow->addWidget(steerButton_);
     inputRow->addWidget(stopButton_);
     auto *statusRow = new QHBoxLayout;
     statusRow->addWidget(status_, 1);
@@ -382,6 +388,8 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     showMuteState();
     connect(input_, &MessageInput::enterActionChanged, this, &MainWindow::showEnterAction);
     connect(sendButton_, &QPushButton::clicked, this, &MainWindow::submitCommand);
+    connect(steerButton_, &QPushButton::clicked, this, &MainWindow::submitSteer);
+    connect(input_, &QPlainTextEdit::textChanged, this, &MainWindow::updateSteerButton);
     connect(stopButton_, &QPushButton::clicked, this, &MainWindow::requestStop);
     connect(newChatButton_, &QPushButton::clicked, this, &MainWindow::showNewConversationDialog);
     auto *newChatShortcut = new QShortcut(QKeySequence("Ctrl+T"), this);
@@ -538,6 +546,24 @@ void MainWindow::submitCommand()
     }
 }
 
+void MainWindow::submitSteer()
+{
+    ChatTab *tab = currentTab();
+    const QString text = input_->toPlainText().trimmed();
+    if (!tab || text.isEmpty() || !tab->steer(text)) return;
+    if (undoAfterSend_) input_->replaceText({});
+    else input_->clear();
+    input_->setFocus();
+}
+
+void MainWindow::updateSteerButton()
+{
+    const ChatTab *tab = currentTab();
+    steerButton_->setVisible(tab && tab->agent()->supportsSteering());
+    steerButton_->setEnabled(tab && tab->isLive() && !tab->pendingRequest()
+                            && tab->agent()->canSteer() && !input_->toPlainText().trimmed().isEmpty());
+}
+
 void MainWindow::showHelp()
 {
     appendLine("Commands:");
@@ -546,7 +572,8 @@ void MainWindow::showHelp()
     appendLine("  clear      clear the log pane");
     appendLine("  stop       interrupt the current response");
     appendLine("  quit       close the application");
-    appendLine("All other text is sent to the chat in the current tab as a message.\n");
+    appendLine("All other text is sent to the chat in the current tab as a message.");
+    appendLine("During a Codex turn, Steer sends the message to that turn; Send queues it for the next turn.\n");
     const ChatTab *tab = currentTab();
     const AgentHelp help = (tab ? tab->provider() : providers_.first())->help();
     for (const QString &line : help.lines) appendLine(line);
@@ -1219,6 +1246,9 @@ QWidget *MainWindow::addChatTab(AgentProvider *selected, const QString &workingD
     tab->setTurnLocks(turnLocks_);
     tab->document()->setDefaultFont(chatView_->font());
     connect(tab, &ChatTab::logMessage, this, &MainWindow::appendLine);
+    connect(tab, &ChatTab::steeringFailed, this, [this, tab](const QString &text) {
+        if (currentTab() == tab && input_->toPlainText().isEmpty()) input_->replaceText(text);
+    });
     connect(tab, &ChatTab::changed, this, [this, page] { updateTab(page); });
     connect(tab, &ChatTab::textAppended, this, [this, page] {
         if (tabs_->currentWidget() != page) {
@@ -1330,6 +1360,7 @@ void MainWindow::updateOperationTime()
 void MainWindow::updateStatus()
 {
     updateOperationTime();
+    updateSteerButton();
     const ChatTab *tab = currentTab();
     if (!tab) {
         status_->setText("No chat open");

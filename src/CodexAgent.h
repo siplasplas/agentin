@@ -37,6 +37,10 @@ public:
     bool resumeConversation(const QString &id, const QString &workingDirectory) override;
     bool prompt(const QString &text) override;
     void interrupt() override;
+    bool supportsSteering() const override { return true; }
+    bool canSteer() const override;
+    bool isSteering() const override { return steeringInFlight_; }
+    bool steer(const QString &text) override;
     bool supportsCompaction() const override { return true; }
     bool canCompact() const override;
     bool isCompacting() const override { return manualCompaction_; }
@@ -93,6 +97,8 @@ private:
     bool refreshingHistory_ = false;
     bool compactedHistoryPending_ = false;
     bool threadOpening_ = false;
+    bool steeringInFlight_ = false;
+    QString steeringText_;
     bool busy_ = false;
     bool manualCompaction_ = false;
     bool stopRequested_ = false;

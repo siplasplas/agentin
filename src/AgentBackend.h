@@ -218,6 +218,10 @@ public:
     // accepted message ends with turnCompleted, also when the turn fails or the agent stops.
     virtual bool prompt(const QString &text) = 0;
     virtual void interrupt() = 0;
+    virtual bool supportsSteering() const { return false; }
+    virtual bool canSteer() const { return false; }
+    virtual bool isSteering() const { return false; }
+    virtual bool steer(const QString &text) { Q_UNUSED(text); return false; }
     virtual bool supportsCompaction() const { return false; }
     virtual bool canCompact() const { return false; }
     virtual bool isCompacting() const { return false; }
@@ -260,6 +264,8 @@ signals:
     void compactionStarted();
     void compactionFinished();
     void contextCompacted();
+    void steerAccepted(const QString &text);
+    void steerFailed(const QString &text, const QString &reason);
     // Refreshes stored history between turns while queued messages stay in the tab.
     void historyRefreshStarted();
     void historyRefreshed(const QString &id, const QList<ChatEntry> &entries, bool hasMore);
