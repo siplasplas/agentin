@@ -38,6 +38,7 @@ CodexConnection::CodexConnection(const QString &program, const QString &workingD
             sendJson({{"method", "initialized"}, {"params", QJsonObject{}}});
             emit connected();
             requestModels({});
+            requestRateLimits();
             if (syncWhenConnected_) {
                 syncWhenConnected_ = false;
                 syncConversations();
@@ -132,6 +133,46 @@ void CodexConnection::requestModels(const QString &cursor)
         models_ = stagedModels_;
         emit modelsChanged();
     });
+}
+
+void CodexConnection::requestRateLimits()
+{
+    request("account/rateLimits/read", {{"excludeResetCreditDetails", true}}, this,
+            [this](const QJsonObject &result, const QString &error) {
+        if (!error.isEmpty()) return;
+        rateLimits_.clear();
+        const QJsonObject byLimit = result.value("rateLimitsByLimitId").toObject();
+        for (const QJsonValue &snapshot : byLimit) updateRateLimits(snapshot.toObject());
+        if (byLimit.isEmpty()) updateRateLimits(result.value("rateLimits").toObject());
+        emit usageChanged();
+    });
+}
+
+// A snapshot describes one limit with up to two windows; which windows exist depends on the plan.
+void CodexConnection::updateRateLimits(const QJsonObject &snapshot)
+{
+    if (snapshot.isEmpty()) return;
+    const QString limitId = snapshot.value("limitId").toString("codex");
+    QList<UsageLimit> windows;
+    for (const QString &key : {QStringLiteral("primary"), QStringLiteral("secondary")}) {
+        const QJsonObject window = snapshot.value(key).toObject();
+        if (window.isEmpty()) continue;
+        UsageLimit limit;
+        limit.id = limitId + '/' + key;
+        limit.name = snapshot.value("limitName").toString();
+        limit.windowMinutes = window.value("windowDurationMins").toInteger();
+        limit.usedPercent = window.value("usedPercent").toDouble();
+        limit.resetsAt = window.value("resetsAt").toInteger();
+        windows.append(limit);
+    }
+    rateLimits_.insert(limitId, windows);
+}
+
+QList<UsageLimit> CodexConnection::usageLimits() const
+{
+    QList<UsageLimit> result;
+    for (const QList<UsageLimit> &windows : rateLimits_) result += windows;
+    return result;
 }
 
 AgentBackend *CodexConnection::createChat(const QString &workingDirectory, QObject *parent)
@@ -408,6 +449,9 @@ void CodexConnection::handleLine(const QByteArray &line)
         }
     } else if (chat) {
         chat->handleNotification(method, params);
+    } else if (method == "account/rateLimits/updated") {
+        updateRateLimits(params.value("rateLimits").toObject());
+        emit usageChanged();
     } else if (method == "warning" || method == "configWarning") {
         emit message("[Warning] " + params.value("message").toString(params.value("summary").toString()));
     }

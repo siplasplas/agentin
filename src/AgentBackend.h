@@ -62,6 +62,19 @@ struct AgentModel
     bool isDefault = false;
 };
 
+// One usage limit window of the account, such as five hours or a week.
+struct UsageLimit
+{
+    QString id;
+    // Qualifies the window when an account has several of the same length, such as a model family.
+    QString name;
+    qint64 windowMinutes = 0;
+    // Negative when the agent reported the window without a percentage.
+    double usedPercent = -1;
+    qint64 resetsAt = 0;
+    QString status;
+};
+
 class AgentBackend;
 
 // One kind of agent: it lists its conversations for the tree and creates a chat session per tab.
@@ -89,6 +102,8 @@ public:
     virtual QList<QJsonObject> conversations() const = 0;
     // Models chats can switch to; empty when the agent offers no choice.
     virtual QList<AgentModel> models() const { return {}; }
+    // Account usage limits as far as the agent reports them.
+    virtual QList<UsageLimit> usageLimits() const { return {}; }
     // Model and effort that new chats start with, from the application options; empty means the
     // agent's own default.
     QString defaultModel() const { return defaultModel_; }
@@ -106,6 +121,7 @@ signals:
     void stateChanged();
     void conversationsChanged();
     void modelsChanged();
+    void usageChanged();
 
 private:
     QString defaultModel_;

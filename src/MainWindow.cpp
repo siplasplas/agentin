@@ -6,6 +6,7 @@
 #include "MainWindow.h"
 
 #include <QComboBox>
+#include <QDateTime>
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QDir>
@@ -44,6 +45,18 @@ QString shortPreview(const QString &value, int limit = 72)
 {
     const QString singleLine = value.simplified();
     return singleLine.size() > limit ? singleLine.left(limit - 1) + QChar(0x2026) : singleLine;
+}
+
+QString windowName(const UsageLimit &limit)
+{
+    const qint64 minutes = limit.windowMinutes;
+    QString length;
+    if (minutes == 7 * 24 * 60) length = "week";
+    else if (minutes > 0 && minutes % (24 * 60) == 0) length = QString("%1 days").arg(minutes / (24 * 60));
+    else if (minutes > 0 && minutes % 60 == 0) length = QString("%1 h").arg(minutes / 60);
+    else if (minutes > 0) length = QString("%1 min").arg(minutes);
+    else length = "limit";
+    return limit.name.isEmpty() ? length : limit.name + " " + length;
 }
 
 // The model list with a "Default model" entry first, which keeps the agent's own default model.
@@ -105,6 +118,8 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     newChatButton_ = new QPushButton("New chat…", central);
     newChatButton_->setObjectName("newChatButton");
     status_ = new QLabel(central);
+    usage_ = new QLabel(central);
+    usage_->setObjectName("usageLabel");
     tabs_ = new MruTabWidget(central);
     tabs_->setObjectName("chatTabs");
     tabs_->setTabsClosable(true);
@@ -160,6 +175,7 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     inputRow->addWidget(stopButton_);
     auto *statusRow = new QHBoxLayout;
     statusRow->addWidget(status_, 1);
+    statusRow->addWidget(usage_);
     statusRow->addWidget(newChatButton_);
     layout->addLayout(statusRow);
     layout->addWidget(tabs_, 1);
@@ -235,6 +251,7 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
         connect(listed, &AgentProvider::stateChanged, this, &MainWindow::updateStatus);
         connect(listed, &AgentProvider::conversationsChanged, this, &MainWindow::refreshConversationTree);
         connect(listed, &AgentProvider::modelsChanged, this, &MainWindow::updateModelControls);
+        connect(listed, &AgentProvider::usageChanged, this, &MainWindow::updateUsage);
     }
 
     appendLine("Directory: " + workingDirectory_);
@@ -689,6 +706,7 @@ void MainWindow::updateStatus()
         stopButton_->setEnabled(false);
         input_->setPlaceholderText("Type help or new, then press Enter");
         updateModelControls();
+        updateUsage();
         return;
     }
     const AgentBackend *agent = tab->agent();
@@ -704,6 +722,34 @@ void MainWindow::updateStatus()
     input_->setPlaceholderText(tab->isLive() ? "Enter a message or help, then press Enter"
                                              : "Read-only preview. Type help, new or clear, then press Enter");
     updateModelControls();
+    updateUsage();
+}
+
+// Shows how much of each usage limit window is left for the current tab's agent.
+void MainWindow::updateUsage()
+{
+    const ChatTab *tab = currentTab();
+    QList<UsageLimit> limits = tab ? tab->provider()->usageLimits() : QList<UsageLimit>{};
+    std::sort(limits.begin(), limits.end(), [](const UsageLimit &left, const UsageLimit &right) {
+        return left.windowMinutes == right.windowMinutes ? left.name < right.name
+                                                         : left.windowMinutes < right.windowMinutes;
+    });
+    QStringList parts;
+    QStringList details;
+    for (const UsageLimit &limit : limits) {
+        const QString name = windowName(limit);
+        const QString left = limit.usedPercent < 0 ? limit.status
+                                                   : QString("%1% left").arg(qRound(100 - limit.usedPercent));
+        parts.append(name + ": " + left);
+        QString detail = name + ": ";
+        detail += limit.usedPercent < 0 ? "usage not reported" : QString("%1% used").arg(qRound(limit.usedPercent));
+        if (limit.resetsAt > 0)
+            detail += ", resets " + QDateTime::fromSecsSinceEpoch(limit.resetsAt).toString("ddd d MMM HH:mm");
+        if (!limit.status.isEmpty()) detail += " (" + limit.status + ")";
+        details.append(detail);
+    }
+    usage_->setText(parts.isEmpty() ? QString() : tab->provider()->name() + " limits  " + parts.join("  •  "));
+    usage_->setToolTip(details.join('\n'));
 }
 
 // Shows the current chat's model and effort. Without a choice yet, the provider's default model and

@@ -4,6 +4,7 @@
 #include "ConversationIndex.h"
 
 #include <QJsonObject>
+#include <QMap>
 #include <QPointer>
 
 #include <functional>
@@ -30,6 +31,7 @@ public:
     void refreshConversations() override;
     QList<QJsonObject> conversations() const override { return index_.treeEntries(); }
     QList<AgentModel> models() const override;
+    QList<UsageLimit> usageLimits() const override { return usage_.values(); }
     AgentBackend *createChat(const QString &workingDirectory, QObject *parent) override;
 
     // Claude and GLM share the SDK transcript store; sessions recorded by the other agent are not listed here.
@@ -39,6 +41,8 @@ public:
     QString pythonProgram() const { return pythonProgram_; }
     QString scriptPath() const { return scriptPath_; }
     void rememberConversation(const QString &id, const QString &workingDirectory, const QString &firstPrompt);
+    // Records a rate limit event that a chat's bridge received.
+    void updateUsage(const QJsonObject &event);
     // Runs the bridge for a one-shot query and calls done when it ends or fails to start, unless
     // context has been destroyed by then.
     void runHelper(const QStringList &arguments, const QString &workingDirectory, QObject *context,
@@ -54,6 +58,7 @@ private:
     ConversationIndex index_;
     const ClaudeProvider *excluded_ = nullptr;
     QList<QProcess *> helperProcesses_;
+    QMap<QString, UsageLimit> usage_;
 };
 
 class ClaudeAgent : public AgentBackend

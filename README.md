@@ -138,6 +138,16 @@ The options are saved in `settings.json` in the application data directory.
 A continued Codex conversation keeps the model and effort it used; Claude and
 Gemini sessions do not record them, so continued chats start with the defaults.
 
+The status row shows how much of the account's usage limits is left for the
+agent in the current tab, for example `Codex limits  week: 36% left`; hover over
+it to see the used percentage and when each window resets. Which windows exist
+depends on the plan. Codex reads them from the App Server when it connects
+(`account/rateLimits/read`) and updates them as the server reports changes.
+Claude reports its windows (five hours, a week, and weekly windows per model
+family) only while it answers and only when a window's state changes, so they
+appear after a response that included such an event. Gemini, GLM and
+Antigravity do not report their limits.
+
 Select a chat in the conversation tree to show a read-only preview of its
 latest messages in the preview tab, whose title is shown in italics. Selecting
 another chat replaces the preview; a chat that is already open in a tab is shown

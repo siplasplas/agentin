@@ -57,6 +57,7 @@ private:
     void appendLine(const QString &text);
     void updateStatus();
     void updateModelControls();
+    void updateUsage();
     void chooseModel();
 
     QString workingDirectory_;
@@ -85,6 +86,7 @@ private:
     QPushButton *stopButton_;
     QPushButton *newChatButton_;
     QLabel *status_;
+    QLabel *usage_;
     QTreeWidget *conversationTree_;
     QSet<QString> expandedProviders_;
     QStringList recentDirectories_;

@@ -130,6 +130,22 @@ QList<AgentModel> ClaudeProvider::models() const
     return result;
 }
 
+// The SDK reports a window only when its status changes, so windows appear after some turns.
+void ClaudeProvider::updateUsage(const QJsonObject &event)
+{
+    const QString type = event.value("limit").toString();
+    if (type.isEmpty() || type == "overage") return;
+    UsageLimit limit = usage_.value(type);
+    limit.id = type;
+    limit.windowMinutes = type == "five_hour" ? 5 * 60 : 7 * 24 * 60;
+    limit.name = type == "seven_day_opus" ? "Opus" : (type == "seven_day_sonnet" ? "Sonnet" : QString());
+    if (event.value("utilization").isDouble()) limit.usedPercent = event.value("utilization").toDouble() * 100;
+    if (event.value("resetsAt").isDouble()) limit.resetsAt = event.value("resetsAt").toInteger();
+    limit.status = event.value("status").toString();
+    usage_.insert(type, limit);
+    emit usageChanged();
+}
+
 AgentBackend *ClaudeProvider::createChat(const QString &workingDirectory, QObject *parent)
 {
     return new ClaudeAgent(this, workingDirectory, parent);
@@ -470,6 +486,8 @@ void ClaudeAgent::handleLine(const QByteArray &line)
         sessionId_ = event.value("id").toString();
         emit conversationOpened(sessionId_, false);
         if (provider_) provider_->rememberConversation(sessionId_, workingDirectory_, firstPrompt_);
+    } else if (type == "rate_limit") {
+        if (provider_) provider_->updateUsage(event);
     } else if (type == "error") {
         emit message("[" + name_ + "] " + event.value("message").toString());
     }

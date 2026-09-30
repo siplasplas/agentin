@@ -5,6 +5,7 @@
 #include <QHash>
 #include <QJsonObject>
 #include <QJsonValue>
+#include <QMap>
 #include <QObject>
 #include <QPointer>
 #include <QSet>
@@ -36,6 +37,7 @@ public:
     void refreshConversations() override;
     QList<QJsonObject> conversations() const override;
     QList<AgentModel> models() const override { return models_; }
+    QList<UsageLimit> usageLimits() const override;
     AgentBackend *createChat(const QString &workingDirectory, QObject *parent) override;
 
     void start();
@@ -69,6 +71,8 @@ private:
     bool saveConversationIndex();
     void syncConversations();
     void requestModels(const QString &cursor);
+    void requestRateLimits();
+    void updateRateLimits(const QJsonObject &snapshot);
     void requestConversationPage();
     void handleConversationPage(const QJsonObject &result);
     void finishConversationSync();
@@ -88,6 +92,7 @@ private:
     QString syncCursor_;
     QList<AgentModel> models_;
     QList<AgentModel> stagedModels_;
+    QMap<QString, QList<UsageLimit>> rateLimits_;
     QHash<QString, QJsonObject> cachedConversations_;
     QHash<QString, QJsonObject> stagedConversations_;
     QSet<QString> newConversationIds_;

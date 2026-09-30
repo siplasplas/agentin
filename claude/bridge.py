@@ -26,6 +26,11 @@ except ImportError as exc:
     send({"type": "error", "message": f"Claude Agent SDK is unavailable: {exc}. Install claude-agent-sdk in the selected Python environment."})
     raise SystemExit(2)
 
+try:
+    from claude_agent_sdk import RateLimitEvent
+except ImportError:  # SDKs without rate limit events
+    RateLimitEvent = None
+
 
 class Bridge:
     def __init__(self, cwd, provider="claude", model=None, effort=None):
@@ -140,6 +145,10 @@ class Bridge:
                         elif isinstance(block, ToolUseBlock):
                             send({"type": "tool", "name": block.name, "input": block.input})
                     self.streamed_text = False
+                elif RateLimitEvent is not None and isinstance(message, RateLimitEvent):
+                    info = message.rate_limit_info
+                    send({"type": "rate_limit", "limit": info.rate_limit_type, "utilization": info.utilization,
+                          "resetsAt": info.resets_at, "status": info.status})
                 elif isinstance(message, ResultMessage):
                     if getattr(message, "session_id", None):
                         self.session_id = message.session_id
