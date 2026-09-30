@@ -15,6 +15,7 @@ MessageInput::MessageInput(QWidget *parent)
     setLineWrapMode(QPlainTextEdit::WidgetWidth);
     connect(this, &QPlainTextEdit::textChanged, this, [this] {
         if (document()->isEmpty()) typed_ = false;
+        if (!toPlainText().contains('\n')) typedLineBreak_ = false;
         fitHeight();
     });
     fitHeight();
@@ -34,8 +35,7 @@ void MessageInput::keyPressEvent(QKeyEvent *event)
     if (event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter) {
         const Qt::KeyboardModifiers modifiers = event->modifiers() & ~Qt::KeypadModifier;
         if (modifiers == Qt::ShiftModifier) {
-            insertPlainText("\n");
-            typed_ = true;
+            insertLineBreak();
             return;
         }
         if (modifiers == Qt::ControlModifier) {
@@ -43,14 +43,8 @@ void MessageInput::keyPressEvent(QKeyEvent *event)
             return;
         }
         if (modifiers == Qt::NoModifier) {
-            const bool newLine = enterPolicy_ == EnterPolicy::NewLine
-                || (enterPolicy_ == EnterPolicy::Smart && typed_);
-            if (!newLine) {
-                submit();
-                return;
-            }
-            insertPlainText("\n");
-            typed_ = true;
+            if (enterSends()) submit();
+            else insertLineBreak();
             return;
         }
     }
@@ -68,6 +62,20 @@ void MessageInput::keyPressEvent(QKeyEvent *event)
     const int revision = document()->revision();
     QPlainTextEdit::keyPressEvent(event);
     if (document()->revision() != revision && !event->matches(QKeySequence::Paste)) typed_ = true;
+}
+
+bool MessageInput::enterSends() const
+{
+    if (enterPolicy_ != EnterPolicy::Smart) return enterPolicy_ == EnterPolicy::Send;
+    if (!typed_) return true;
+    return !typedLineBreak_ && toPlainText().trimmed().size() <= shortMessageLength_;
+}
+
+void MessageInput::insertLineBreak()
+{
+    insertPlainText("\n");
+    typed_ = true;
+    typedLineBreak_ = true;
 }
 
 void MessageInput::submit()

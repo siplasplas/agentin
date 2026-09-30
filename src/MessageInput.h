@@ -13,8 +13,9 @@ class MessageInput : public QPlainTextEdit
 
 public:
     enum class EnterPolicy {
-        // Enter sends only text the user did not type, that is a recalled message or pasted text
-        // left unchanged; while the user types, Enter starts a new line and Ctrl+Enter sends.
+        // Enter sends a recalled message or pasted text left unchanged, and a typed message of one
+        // line up to shortMessageLength() characters. A longer typed message, or one where the user
+        // typed a line break, gets a new line; Ctrl+Enter sends it.
         Smart,
         Send,
         NewLine,
@@ -24,6 +25,9 @@ public:
 
     EnterPolicy enterPolicy() const { return enterPolicy_; }
     void setEnterPolicy(EnterPolicy policy) { enterPolicy_ = policy; }
+    // 0 means that Enter never sends typed text in the Smart policy.
+    int shortMessageLength() const { return shortMessageLength_; }
+    void setShortMessageLength(int length) { shortMessageLength_ = length; }
 
     // Earlier messages of the conversation, oldest first. Resets browsing.
     void setHistory(const QStringList &messages);
@@ -38,6 +42,8 @@ private:
     bool onFirstLine() const;
     bool onLastLine() const;
     void recall(int step);
+    bool enterSends() const;
+    void insertLineBreak();
     void submit();
     void fitHeight();
 
@@ -48,4 +54,6 @@ private:
     EnterPolicy enterPolicy_ = EnterPolicy::Smart;
     // The user changed the current text with the keyboard; pasting and recalling do not count.
     bool typed_ = false;
+    bool typedLineBreak_ = false;
+    int shortMessageLength_ = 60;
 };

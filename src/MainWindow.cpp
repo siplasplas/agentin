@@ -28,6 +28,7 @@
 #include <QPushButton>
 #include <QSaveFile>
 #include <QSignalBlocker>
+#include <QSpinBox>
 #include <QSplitter>
 #include <QStandardPaths>
 #include <QTextCursor>
@@ -378,6 +379,8 @@ void MainWindow::loadSettings()
     }
     file.seek(0);
     const QString enterKey = QJsonDocument::fromJson(file.readAll()).object().value("enterKey").toString();
+    file.seek(0);
+    input_->setShortMessageLength(QJsonDocument::fromJson(file.readAll()).object().value("enterSendsUpTo").toInt(60));
     input_->setEnterPolicy(enterKey == "send" ? MessageInput::EnterPolicy::Send
                            : (enterKey == "newline" ? MessageInput::EnterPolicy::NewLine
                                                     : MessageInput::EnterPolicy::Smart));
@@ -394,7 +397,8 @@ void MainWindow::saveSettings()
     if (!QDir().mkpath(dataDirectory_)) return;
     QSaveFile file(QDir(dataDirectory_).filePath("settings.json"));
     if (!file.open(QIODevice::WriteOnly)
-        || file.write(QJsonDocument(QJsonObject{{"version", 1}, {"enterKey", enterKey}, {"agents", agents}})
+        || file.write(QJsonDocument(QJsonObject{{"version", 1}, {"enterKey", enterKey},
+                                                         {"enterSendsUpTo", input_->shortMessageLength()}, {"agents", agents}})
                           .toJson(QJsonDocument::Indented)) < 0
         || !file.commit()) {
         appendLine("[Could not save settings: " + file.errorString() + "]");
@@ -411,12 +415,25 @@ void MainWindow::showOptionsDialog()
     auto *enterForm = new QFormLayout;
     auto *enterInput = new QComboBox(&dialog);
     enterInput->setObjectName("enterKeyPolicy");
-    enterInput->addItem("New line while typing; send a recalled or pasted message",
+    enterInput->addItem("Send short messages, start a new line in longer ones",
                         QVariant::fromValue(int(MessageInput::EnterPolicy::Smart)));
     enterInput->addItem("Always send", QVariant::fromValue(int(MessageInput::EnterPolicy::Send)));
     enterInput->addItem("Always start a new line", QVariant::fromValue(int(MessageInput::EnterPolicy::NewLine)));
     enterInput->setCurrentIndex(enterInput->findData(int(input_->enterPolicy())));
     enterForm->addRow("Enter key:", enterInput);
+    auto *shortLength = new QSpinBox(&dialog);
+    shortLength->setObjectName("enterSendsUpTo");
+    shortLength->setRange(0, 10000);
+    shortLength->setSuffix(" characters");
+    shortLength->setValue(input_->shortMessageLength());
+    shortLength->setToolTip("A typed message of one line up to this length is sent with Enter; 0 never sends typed text. "
+                            "Recalled and pasted messages are sent with Enter as long as they are unchanged.");
+    enterForm->addRow("Short message:", shortLength);
+    const auto updateShortLength = [enterInput, shortLength] {
+        shortLength->setEnabled(enterInput->currentData().toInt() == int(MessageInput::EnterPolicy::Smart));
+    };
+    connect(enterInput, QOverload<int>::of(&QComboBox::currentIndexChanged), &dialog, updateShortLength);
+    updateShortLength();
     layout->addLayout(enterForm);
     layout->addWidget(new QLabel("Shift+Enter always starts a new line and Ctrl+Enter always sends.", &dialog));
     layout->addWidget(new QLabel("Model and reasoning effort that new chats start with:", &dialog));
@@ -473,6 +490,7 @@ void MainWindow::showOptionsDialog()
     connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
     if (dialog.exec() != QDialog::Accepted) return;
     input_->setEnterPolicy(MessageInput::EnterPolicy(enterInput->currentData().toInt()));
+    input_->setShortMessageLength(shortLength->value());
     for (const Row &row : rows) row.provider->setDefaults(row.model->currentData().toString(), row.effort->currentData().toString());
     saveSettings();
     modelControlsState_.clear();

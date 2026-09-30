@@ -190,13 +190,18 @@ directory is passed as the CLI process directory. Headless mode uses the CLI's c
 policy; approval prompts are not shown as Qt dialogs.
 
 The client also supports `new`, `clear` (clears the log), `stop`, and `quit`.
+
 The message field grows with its text. Shift+Enter always starts a new line and
-Ctrl+Enter always sends. By default Enter starts a new line while you type, even
-in a single line, so a message is not sent by accident; Enter sends only text you
-did not type, that is a recalled message or pasted text left unchanged. Any
-change made with the keyboard switches Enter back to a new line.
-**Settings → Options…** can make Enter always send or always start a new line;
-the choice is saved as `enterKey` in `settings.json`. Up and Down move between lines and, on the first or last line, recall the
+Ctrl+Enter always sends. By default Enter sends a short message of one line (up
+to 60 characters) and starts a new line in a longer one, so a message you are
+still writing is not sent by accident. Once you type a line break yourself,
+Enter keeps adding lines. A recalled message or pasted text is sent with Enter
+as long as you do not change it. **Settings → Options…** sets the length of a
+short message (0 never sends typed text with Enter) or makes Enter always send
+or always start a new line; the choices are saved as `enterKey` and
+`enterSendsUpTo` in `settings.json`.
+
+Up and Down move between lines and, on the first or last line, recall the
 previous or next message you wrote in the current tab's conversation; Page Up
 and Page Down always recall messages. After the newest message, the text you
 typed before browsing comes back. The messages come from the conversation's
