@@ -22,6 +22,14 @@ MessageInput::MessageInput(QWidget *parent)
     fitHeight();
 }
 
+void MessageInput::setPlaceholderText(const QString &text)
+{
+    if (placeholderText() == text) return;
+    QPlainTextEdit::setPlaceholderText(text);
+    // Qt does not repaint when one visible placeholder replaces another.
+    viewport()->update();
+}
+
 void MessageInput::setHistory(const QStringList &messages)
 {
     if (messages == history_) return;

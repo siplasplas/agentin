@@ -22,6 +22,7 @@ public:
     };
 
     explicit MessageInput(QWidget *parent = nullptr);
+    void setPlaceholderText(const QString &text);
 
     EnterPolicy enterPolicy() const { return enterPolicy_; }
     void setEnterPolicy(EnterPolicy policy);

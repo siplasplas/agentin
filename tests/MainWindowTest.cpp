@@ -1,5 +1,6 @@
 #include "CodexLocator.h"
 #include "ChatTab.h"
+#include "ChatView.h"
 #include "CommandApproval.h"
 #include "CodexAgent.h"
 #include "CodexConnection.h"
@@ -33,6 +34,7 @@
 #include <QTabWidget>
 #include <QTextBlock>
 #include <QRadioButton>
+#include <QScrollBar>
 #include <QtTest>
 
 static void startChat(MainWindow &window, const QString &provider, const QString &path);
@@ -42,6 +44,7 @@ class MainWindowTest : public QObject
     Q_OBJECT
 
 private slots:
+    void foldedOutputScrolling();
     void reasoningPanelAndStreaming();
     void codexReasoningAndQuestions();
     void usageLimitPacing();
@@ -66,6 +69,75 @@ private slots:
     void claudeAttachRespectsExternalLock();
     void geminiAttachRespectsExternalLock();
 };
+
+void MainWindowTest::foldedOutputScrolling()
+{
+    ChatView view;
+    view.setReadOnly(true);
+    view.resize(420, 240);
+    QStringList lines;
+    for (int group = 0; group < 40; ++group) {
+        lines.append(QString("Tool %1: ").arg(group) + QString(250, 'h'));
+        for (int line = 0; line < 20; ++line)
+            lines.append(QString("Output %1: ").arg(line) + QString(180, 'x'));
+    }
+    lines.append("Final response");
+    view.setPlainText(lines.join('\n'));
+    QList<ToolBlockData *> headings;
+    QTextBlock block = view.document()->begin();
+    for (int group = 0; group < 40; ++group) {
+        for (int line = 0; line <= 20; ++line) {
+            auto *data = new ToolBlockData;
+            data->group = group;
+            data->header = line == 0;
+            data->collapsed = false;
+            block.setUserData(data);
+            if (data->header) headings.append(data);
+            block = block.next();
+        }
+    }
+    view.refreshTools();
+    view.show();
+    QCoreApplication::processEvents();
+    view.moveCursor(QTextCursor::End);
+    view.ensureCursorVisible();
+    const int expandedMaximum = view.verticalScrollBar()->maximum();
+    QVERIFY(expandedMaximum > 100);
+    for (auto *heading : headings) heading->collapsed = true;
+    view.refreshTools();
+    QVERIFY(view.verticalScrollBar()->maximum() < view.document()->lineCount());
+    QVERIFY(view.verticalScrollBar()->maximum() < expandedMaximum);
+    for (int cycle = 0; cycle < 3; ++cycle) {
+        for (int value = 0; value <= view.verticalScrollBar()->maximum(); ++value)
+            view.verticalScrollBar()->setValue(value);
+        QCoreApplication::processEvents();
+        QVERIFY(view.cursorForPosition(QPoint(10, 10)).block().isVisible());
+        headings.last()->collapsed = false;
+        view.refreshTools();
+        view.verticalScrollBar()->setValue(view.verticalScrollBar()->maximum());
+        headings.last()->collapsed = true;
+        view.refreshTools();
+        QVERIFY(view.verticalScrollBar()->maximum() < view.document()->lineCount());
+    }
+    for (int part = 0; part < 100; ++part) {
+        QTextCursor cursor(view.document());
+        cursor.movePosition(QTextCursor::End);
+        cursor.insertText("\n" + QString(100 + part, 's'));
+        auto *data = new ToolBlockData;
+        data->group = headings.last()->group;
+        cursor.block().setUserData(data);
+        view.refreshTools();
+        view.moveCursor(QTextCursor::End);
+        view.ensureCursorVisible();
+        for (int direction : {-120, 120}) {
+            QWheelEvent wheel(QPointF(10, 10), view.viewport()->mapToGlobal(QPoint(10, 10)),
+                              QPoint(), QPoint(0, direction), Qt::NoButton, Qt::NoModifier,
+                              Qt::NoScrollPhase, false);
+            QCoreApplication::sendEvent(view.viewport(), &wheel);
+        }
+        QCoreApplication::processEvents();
+    }
+}
 
 void MainWindowTest::codexReasoningAndQuestions()
 {

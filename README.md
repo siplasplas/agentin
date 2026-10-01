@@ -213,6 +213,8 @@ a minus marks expanded output. Headings without additional content have an empty
 box and cannot be toggled. The final tool status stays visible. Folding keeps
 the full text in the conversation and also applies to multiline tool entries
 in loaded history.
+The scroll range follows the visible lines when tool output is folded, expanded,
+or streamed, including wrapped headings and output.
 
 **Settings → Notifications…** sets desktop notifications and sounds (WAV, MP3 or
 OGG files, played with ffplay, mpv, pw-play or paplay, whichever is installed).
@@ -310,7 +312,8 @@ Antigravity does not expose its history, so no preview is available. Messages
 cannot be sent to a previewed chat; `help`, `new`, `clear`, and `quit` still work.
 
 Double-click a chat to keep its tab and continue it. Its history stays visible
-and new messages are added below it. A chat that is open in another tool stays read-only and the
+and new messages are added below it. The message field hint updates immediately
+when the preview becomes live. A chat that is open in another tool stays read-only and the
 chat header shows it as locked:
 
 - Codex: the App Server decides; if `thread/resume` fails, its error is shown.

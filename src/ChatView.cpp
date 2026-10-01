@@ -5,6 +5,7 @@
 #include <QResizeEvent>
 #include <QPlainTextDocumentLayout>
 #include <QTextDocument>
+#include <QTextLayout>
 
 ChatView::ChatView(QWidget *parent) : QPlainTextEdit(parent), foldMargin_(new QWidget(this))
 {
@@ -37,15 +38,22 @@ void ChatView::refreshTools()
         }
         if (block.isVisible() != visible) {
             block.setVisible(visible);
-            block.setLineCount(visible ? 1 : 0);
+            // Folding changes visibility, not the cached text layout. Preserve
+            // wrapped line counts when expanding an already laid-out block.
+            block.setLineCount(visible ? qMax(1, block.layout()->lineCount()) : 0);
             changed = true;
         }
     }
     setExtraSelections(selections);
     if (changed) {
-        document()->markContentsDirty(0, document()->characterCount());
         auto *layout = qobject_cast<QPlainTextDocumentLayout *>(document()->documentLayout());
-        if (layout) layout->requestUpdate();
+        if (layout) {
+            // Update the scrollbar range before repainting. Invalidating every
+            // block here leaves stale line counts until lazy layout runs during
+            // scrolling, which can reenter Qt's scrollbar updates recursively.
+            emit layout->documentSizeChanged(layout->documentSize());
+            layout->requestUpdate();
+        }
     }
     viewport()->update();
     foldMargin_->update();
