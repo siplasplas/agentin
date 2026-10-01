@@ -22,6 +22,11 @@ cmake --build build
 ./build/agentin -C /path/to/project
 ```
 
+`cmake --install build` (with `--prefix` to choose another location) installs
+`bin/agentin` and the Claude bridge as `share/agentin/claude_bridge.py`. The
+executable uses the bridge next to itself, as in the build directory, and
+otherwise the one in `../share/agentin`; `--claude-bridge` overrides both.
+
 For Claude, provide `ANTHROPIC_API_KEY` in the application's environment:
 
 ```sh

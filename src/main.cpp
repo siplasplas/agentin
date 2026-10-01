@@ -36,8 +36,15 @@ int main(int argc, char *argv[])
     const QString localPython = QDir(QCoreApplication::applicationDirPath()).filePath("../.venv/bin/python");
     if (claudePython.isEmpty() && QFileInfo(localPython).isExecutable())
         claudePython = QFileInfo(localPython).absoluteFilePath();
-    const QString claudeScript = parser.isSet(claudeBridgeOption) ? parser.value(claudeBridgeOption)
-        : QDir(QCoreApplication::applicationDirPath()).filePath("claude_bridge.py");
+    // The build copies the bridge next to the executable; an installation puts it in ../share/agentin.
+    QString claudeScript = parser.value(claudeBridgeOption);
+    const QDir executableDirectory(QCoreApplication::applicationDirPath());
+    if (claudeScript.isEmpty()) {
+        claudeScript = executableDirectory.filePath("claude_bridge.py");
+        const QString installed = executableDirectory.filePath("../share/agentin/claude_bridge.py");
+        if (!QFileInfo::exists(claudeScript) && QFileInfo::exists(installed))
+            claudeScript = QFileInfo(installed).absoluteFilePath();
+    }
     MainWindow window(codexProgram, QDir(parser.value(cwdOption)).absolutePath(), claudePython, claudeScript,
                       parser.value(geminiOption), nullptr, {}, parser.value(antigravityOption));
     if (claudePython.isEmpty()) window.useManagedClaudeEnvironment();

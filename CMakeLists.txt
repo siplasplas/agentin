@@ -52,6 +52,11 @@ add_executable(agentin
 target_link_libraries(agentin PRIVATE Qt6::Widgets qt-extra)
 target_include_directories(agentin PRIVATE src)
 
+include(GNUInstallDirs)
+install(TARGETS agentin RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+# The executable looks for the bridge in ../share/agentin relative to its own directory.
+install(FILES ${CMAKE_CURRENT_BINARY_DIR}/claude_bridge.py DESTINATION ${CMAKE_INSTALL_DATADIR}/agentin)
+
 option(BUILD_TESTING "Build tests" OFF)
 include(CTest)
 if(BUILD_TESTING)
