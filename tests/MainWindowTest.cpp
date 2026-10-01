@@ -434,9 +434,9 @@ void MainWindowTest::usageLimitPacing()
     const UsageAssessment yellow = assessUsageLimit(limit, now);
     QCOMPARE(int(yellow.pace), int(UsagePace::Yellow));
     QCOMPARE(yellow.remainingPercent, 80.0);
-    QCOMPARE(yellow.greenAt, start + week / 5 + 1);
-    QCOMPARE(int(assessUsageLimit(limit, yellow.greenAt - 1).pace), int(UsagePace::Yellow));
-    QCOMPARE(int(assessUsageLimit(limit, yellow.greenAt).pace), int(UsagePace::Green));
+    QCOMPARE(yellow.balanceAt, start + week / 5 + 1);
+    QCOMPARE(int(assessUsageLimit(limit, yellow.balanceAt - 1).pace), int(UsagePace::Yellow));
+    QCOMPARE(int(assessUsageLimit(limit, yellow.balanceAt).pace), int(UsagePace::Green));
     limit.usedPercent = 100;
     QCOMPARE(int(assessUsageLimit(limit, now).pace), int(UsagePace::Red));
     QCOMPARE(assessUsageLimit(limit, now).remainingPercent, 0.0);
@@ -507,7 +507,7 @@ void MainWindowTest::providerLimitsPanelAndVisibility()
         QVERIFY(weekly);
         QCOMPARE(weekly->text(2), QString("80.0%"));
         QCOMPARE(weekly->data(4, Qt::UserRole).toInt(), int(UsagePace::Yellow));
-        QVERIFY(weekly->text(4).startsWith("Pause until "));
+        QVERIFY(weekly->text(4).startsWith("Balance at "));
         claude->updateUsage({{"limit", "seven_day"}, {"utilization", 1.0}, {"resetsAt", reset}, {"status", "rejected"}});
         QCOMPARE(weekly->data(4, Qt::UserRole).toInt(), int(UsagePace::Red));
         QCOMPARE(weekly->foreground(2).color(), QColor("#d32f2f"));

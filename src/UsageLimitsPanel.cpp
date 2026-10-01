@@ -22,6 +22,7 @@ UsageAssessment assessUsageLimit(const UsageLimit &limit, qint64 now)
     if (percentageKnown) result.remainingPercent = 100 - used;
     if (used >= 100 || limit.status == "rejected") {
         result.pace = UsagePace::Red;
+        result.balanceAt = qMax<qint64>(0, limit.resetsAt);
         return result;
     }
     if (!percentageKnown || limit.resetsAt <= 0 || limit.windowMinutes <= 0
@@ -30,10 +31,13 @@ UsageAssessment assessUsageLimit(const UsageLimit &limit, qint64 now)
     const qint64 start = limit.resetsAt - duration;
     if (now < start) return result;
     const double elapsedPercent = double(now - start) / duration * 100;
-    if (used < elapsedPercent) result.pace = UsagePace::Green;
-    else {
+    const qint64 balance = start + qint64(std::floor(duration * used / 100)) + 1;
+    if (used < elapsedPercent) {
+        result.pace = UsagePace::Green;
+        result.balanceAt = qMin(now, balance);
+    } else {
         result.pace = UsagePace::Yellow;
-        result.greenAt = qMax(now + 1, start + qint64(std::floor(duration * used / 100)) + 1);
+        result.balanceAt = qMax(now + 1, balance);
     }
     return result;
 }
@@ -116,10 +120,14 @@ void UsageLimitsPanel::refresh(qint64 now)
             QString pace;
             QColor color = palette().color(QPalette::Text);
             switch (assessment.pace) {
-            case UsagePace::Green: pace = "On pace"; color = QColor("#218739"); break;
+            case UsagePace::Green:
+                pace = "Balance at " + timestamp(assessment.balanceAt); color = QColor("#218739"); break;
             case UsagePace::Yellow:
-                pace = "Pause until " + timestamp(assessment.greenAt); color = QColor("#b77900"); break;
-            case UsagePace::Red: pace = "Exhausted"; color = QColor("#d32f2f"); break;
+                pace = "Balance at " + timestamp(assessment.balanceAt); color = QColor("#b77900"); break;
+            case UsagePace::Red:
+                pace = assessment.balanceAt > 0 ? "Balance at " + timestamp(assessment.balanceAt) : "Exhausted";
+                color = QColor("#d32f2f");
+                break;
             case UsagePace::Expired: pace = "Awaiting updated limits"; break;
             case UsagePace::Unknown: pace = "Pace not reported"; break;
             }
@@ -127,9 +135,11 @@ void UsageLimitsPanel::refresh(qint64 now)
                 limit.resetsAt > 0 ? timestamp(limit.resetsAt) : "Not reported", pace};
             QString tooltip = text.join(" · ");
             tooltip += "\nBased on the last limits reported by the provider. "
-                       "Green: usage is below elapsed window time. Yellow: let time catch up. Red: exhausted.";
+                       "Balance: when elapsed window time equals the usage. Green: balance passed, usage is "
+                       "below elapsed time. Yellow: let time catch up until the balance. Red: exhausted until the "
+                       "window ends.";
             if (assessment.pace == UsagePace::Yellow)
-                tooltip += "\nAssumes no further use. If several windows need a break, wait until the latest time.";
+                tooltip += "\nAssumes no further use. If several windows need a break, wait until the latest balance.";
             if (assessment.pace == UsagePace::Expired)
                 tooltip += "\nThe previous window ended; no new quota is assumed before the provider reports it.";
             if (!limit.status.isEmpty()) tooltip += "\nProvider status: " + limit.status;

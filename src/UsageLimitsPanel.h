@@ -12,8 +12,9 @@ struct UsageAssessment
 {
     UsagePace pace = UsagePace::Unknown;
     double remainingPercent = -1;
-    // The first whole second when unchanged usage is below the elapsed fraction.
-    qint64 greenAt = 0;
+    // The first whole second when unchanged usage is below the elapsed fraction; past for green,
+    // future for yellow, the window end for red.
+    qint64 balanceAt = 0;
 };
 
 UsageAssessment assessUsageLimit(const UsageLimit &limit, qint64 now);

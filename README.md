@@ -287,11 +287,12 @@ height is saved. Column headings are hidden to keep the panel compact.
 
 Green means the consumed percentage is strictly below the fraction of the window
 that has elapsed. Yellow means it is equal or greater: for example, after one day
-of a seven-day window, consuming at least 1/7 is yellow. Yellow rows show **Pause
-until**: the first second when unchanged usage would fall below the elapsed
-fraction. This assumes no further account use; with several constrained windows,
-wait until the latest suggested time. Red means 100% is used or the provider
-reports rejection. The panel recalculates pacing each second while visible.
+of a seven-day window, consuming at least 1/7 is yellow. Each row shows **Balance
+at**: the first second when the elapsed fraction exceeds the consumed percentage.
+On green rows that moment has passed; on yellow rows it is ahead, assuming no
+further account use, and with several constrained windows you wait until the
+latest balance. Red means 100% is used or the provider reports rejection; its
+balance is the end of the window, the same as its reset time. The panel recalculates pacing each second while visible.
 After a reported reset passes, it shows **Awaiting updated limits**, without
 assuming that a fresh quota is available.
 
