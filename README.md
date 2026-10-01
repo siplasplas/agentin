@@ -1,4 +1,4 @@
-# agentdeskt
+# agentin
 
 A Qt 6 desktop client for Codex, Claude, GLM, Gemini, and Antigravity. Start a
 chat with an agent, enter a message, and read streamed responses in the chat
@@ -19,7 +19,7 @@ Test and Python 3.
 ```sh
 cmake -S . -B build
 cmake --build build
-./build/agentdeskt -C /path/to/project
+./build/agentin -C /path/to/project
 ```
 
 For Claude, install the SDK in a project virtual environment and provide
@@ -28,7 +28,7 @@ For Claude, install the SDK in a project virtual environment and provide
 ```sh
 python3 -m venv .venv
 .venv/bin/python -m pip install claude-agent-sdk
-ANTHROPIC_API_KEY=your-key ./build/agentdeskt -C /path/to/project
+ANTHROPIC_API_KEY=your-key ./build/agentin -C /path/to/project
 ```
 
 For GLM, install the same SDK and set `ZAI_API_KEY` to your Z.AI Coding Plan
@@ -37,7 +37,7 @@ key. The GLM bridge connects to Z.AI's Anthropic-compatible endpoint. Set
 separate processes and conversations.
 
 ```sh
-ZAI_API_KEY=your-zai-key ./build/agentdeskt -C /path/to/project
+ZAI_API_KEY=your-zai-key ./build/agentin -C /path/to/project
 ```
 
 For Gemini, install and authenticate [Gemini CLI](https://geminicli.com/docs/get-started/).
@@ -205,7 +205,7 @@ without being appended a second time. Older messages remain available through
 
 In a Codex chat, **Fast** after the **Compact** token counter requests faster model responses
 with higher limit usage, where supported. It applies from the next turn and is
-kept separately for each open chat. It is always off after restarting agentdeskt,
+kept separately for each open chat. It is always off after restarting agentin,
 including restored conversations; the setting is not saved in Codex configuration.
 
 The chat, message field and log use a 10-point monospace font by default.
@@ -245,7 +245,7 @@ replaces the current playback, and closing the application stops it.
 
 Announcements can be spoken instead, for example "Codex finished: fix the build"
 or "Claude is waiting for you: …", so it is clear which chat needs attention.
-agentdeskt looks for Piper (on `PATH`, in `~/.venvs/piper/bin` or `~/.local/bin`)
+agentin looks for Piper (on `PATH`, in `~/.venvs/piper/bin` or `~/.local/bin`)
 with a voice (a `.onnx` model with its `.onnx.json`, for example in `~/piper` or
 `~/.local/share/piper`), or for espeak-ng. The speech is generated when needed,
 so the repository contains no audio files. A Polish Piper voice (its file name
@@ -379,13 +379,13 @@ sending a message until the agent hands control back, so between turns another
 chat in the same directory can be used. A message that would conflict waits: the
 chat header and the log say which chat holds the directory, and the message is
 sent when that turn ends. **Stop** (or `stop`) gives up waiting. The running turns
-of all agentdeskt windows are kept in `turn-locks.json` in the application data
-directory, and Claude Code sessions outside agentdeskt that are busy on a turn
-count as well, as do Codex turns outside agentdeskt: Codex (usually its App
+of all agentin windows are kept in `turn-locks.json` in the application data
+directory, and Claude Code sessions outside agentin that are busy on a turn
+count as well, as do Codex turns outside agentin: Codex (usually its App
 Server daemon, which the Codex CLI and desktop app use) keeps each session's
 `~/.codex/sessions/.../rollout-*.jsonl` open, and a session whose last turn has
 started but not completed holds its directory, unless the turn runs in Codex's
-read-only sandbox. Gemini CLI and Antigravity CLI running outside agentdeskt publish
+read-only sandbox. Gemini CLI and Antigravity CLI running outside agentin publish
 no turn state, so such a process holds its directory for as long as it runs; the
 waiting chat names it with its PID, and closing it lets the chat continue.
 Processes started in `/` or the home directory are not counted, because they
@@ -420,12 +420,12 @@ suggestions cannot change the permission mode to `auto`, `acceptEdits`, or
 `bypassPermissions`. Existing allow rules still apply in `default` mode.
 
 For Codex command approval requests, **Trust git add for this chat** and
-**Trust git commit for this chat** remember the command family in agentdeskt's
+**Trust git commit for this chat** remember the command family in agentin's
 memory, without writing a lasting Codex rule. Matching simple commands receive
 `accept` (allow once), even when their arguments change. Normal shell `-c`/`-lc`
 wrappers and Git directory options are recognized; compound commands, shell
 expansions, configuration overrides, and unknown syntax are never automatically
-trusted. **Settings → Approvals…** lists these rules as managed by agentdeskt;
+trusted. **Settings → Approvals…** lists these rules as managed by agentin;
 removing one immediately restores questions, including during a running turn.
 Trust belongs to one conversation in one chat and ends when changing the
 conversation or exiting the application.
@@ -454,7 +454,7 @@ cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
-If the Codex App Server exits while it was working, agentdeskt starts it again
+If the Codex App Server exits while it was working, agentin starts it again
 after a growing delay (1 s, 2 s, 4 s and so on, at most 30 s) and each Codex tab
 reopens its thread; the turn that was running is reported as failed. After more
 than five exits within five minutes it is left stopped.

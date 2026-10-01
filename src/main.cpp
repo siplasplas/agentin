@@ -11,7 +11,7 @@
 int main(int argc, char *argv[])
 {
     QApplication app(argc, argv);
-    QCoreApplication::setApplicationName("agentdeskt");
+    QCoreApplication::setApplicationName("agentin");
     QCoreApplication::setApplicationVersion("0.1.0");
 
     QCommandLineParser parser;

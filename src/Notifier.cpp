@@ -238,7 +238,7 @@ bool Notifier::say(const Settings &settings, const QString &text)
     }
     if (engine != "piper") return false;
     static int counter = 0;
-    const QString output = QDir(QDir::tempPath()).filePath(QString("agentdeskt-voice-%1-%2.wav")
+    const QString output = QDir(QDir::tempPath()).filePath(QString("agentin-voice-%1-%2.wav")
                                                                  .arg(QCoreApplication::applicationPid()).arg(++counter));
     temporaryFiles_.append(output);
     QProcess *piper = startPlaybackProcess(findPiper(settings),

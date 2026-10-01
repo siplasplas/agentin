@@ -14,12 +14,12 @@ the agent proposes (Codex command prefixes, Claude Code's suggested permission r
 
 ## Directory lock for running turns
 
-The lock is in place for all tabs and agentdeskt windows (registry `turn-locks.json`), counts busy
+The lock is in place for all tabs and agentin windows (registry `turn-locks.json`), counts busy
 Claude Code sessions from their registry, Codex turns from the rollout files that Codex keeps open, and
 running Gemini and Antigravity CLI processes, and lets read-only Codex turns through; read-only turns of
 the other agents (their plan modes) still wait, because only Codex enforces them. Still open:
 
 - **Writable directories of other agents:** Codex reports its writable roots, and they are held with
   the working directory. Claude, GLM, Gemini and Antigravity chats hold only their working directory,
-  since agentdeskt does not give them other directories; Claude Code sessions outside agentdeskt do
+  since agentin does not give them other directories; Claude Code sessions outside agentin do
   not report theirs.

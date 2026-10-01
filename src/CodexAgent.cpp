@@ -468,7 +468,7 @@ void CodexAgent::startThread()
     if (!connection_ || !connection_->isConnected() || threadOpening_) return;
     threadOpening_ = true;
     emit message("[Starting a new conversation]");
-    QJsonObject params{{"cwd", workingDirectory_}, {"serviceName", "agentdeskt"}};
+    QJsonObject params{{"cwd", workingDirectory_}, {"serviceName", "agentin"}};
     const QString startModel = modelChosen_ ? model_ : connection_->defaultModel();
     if (!startModel.isEmpty()) params.insert("model", startModel);
     if (sandboxChosen_ && readOnly_) params.insert("sandbox", "read-only");

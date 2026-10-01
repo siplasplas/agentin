@@ -506,7 +506,7 @@ def read_session(session_id, directory, limit):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Claude Agent SDK bridge for agentdeskt")
+    parser = argparse.ArgumentParser(description="Claude Agent SDK bridge for agentin")
     parser.add_argument("--cwd", required=True)
     parser.add_argument("--provider", choices=("claude", "glm"), default="claude")
     parser.add_argument("--model")

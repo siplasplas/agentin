@@ -207,7 +207,7 @@ QList<BusyAgentSession> runningCodexTurns(const QString &codexHome)
             BusyAgentSession session = codexRolloutState(target, &running);
             if (!running || session.directory.isEmpty()) continue;
             session.pid = pid;
-            session.description = QString("a Codex turn outside agentdeskt (PID %1)").arg(pid);
+            session.description = QString("a Codex turn outside agentin (PID %1)").arg(pid);
             sessions.append(session);
         }
     }

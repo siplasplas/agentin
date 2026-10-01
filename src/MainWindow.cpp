@@ -123,7 +123,7 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
       turnLocks_(new TurnLocks(dataDirectory_, this)), notifier_(new Notifier(this))
 {
     claude_->excludeSessionsOf(glm_);
-    setWindowTitle("agentdeskt — Codex, Claude, GLM, Gemini and Antigravity");
+    setWindowTitle("agentin — Codex, Claude, GLM, Gemini and Antigravity");
     resize(900, 700);
     auto *conversationMenu = menuBar()->addMenu("Conversations");
     auto *newConversationAction = conversationMenu->addAction("New conversation in directory…");
@@ -1065,7 +1065,7 @@ void MainWindow::showApprovalsDialog()
     layout->addWidget(tree);
     auto *note = new QLabel("Chat command trust is withdrawn immediately. Codex may keep using a removed lasting rule "
                             "until its App Server restarts. Codex cannot "
-                            "withdraw native App Server session approvals; they end when agentdeskt closes. Withdrawing "
+                            "withdraw native App Server session approvals; they end when agentin closes. Withdrawing "
                             "the session approvals of a Claude or GLM chat reconnects it and withdraws all of them.",
                             &dialog);
     note->setWordWrap(true);
@@ -1097,7 +1097,7 @@ void MainWindow::showApprovalsDialog()
             if (!tab) continue;
             for (const QString &rule : tab->agent()->trustedSessionCommands()) {
                 auto *item = new QTreeWidgetItem(session, {tab->provider()->name(), rule,
-                    "chat \"" + tab->title().left(40) + "\" (managed by agentdeskt)"});
+                    "chat \"" + tab->title().left(40) + "\" (managed by agentin)"});
                 item->setData(0, Qt::UserRole + 1, QVariant::fromValue<QObject *>(tabs_->widget(i)));
                 item->setData(0, Qt::UserRole + 2, rule);
             }

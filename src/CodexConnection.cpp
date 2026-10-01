@@ -33,7 +33,7 @@ CodexConnection::CodexConnection(const QString &program, const QString &workingD
 {
     connect(server_, &QProcess::started, this, [this] {
         request("initialize", {{"clientInfo", QJsonObject{
-                    {"name", "agentdeskt"}, {"title", "agentdeskt Qt"}, {"version", "0.1.0"}}},
+                    {"name", "agentin"}, {"title", "agentin Qt"}, {"version", "0.1.0"}}},
                 {"capabilities", QJsonObject{{"experimentalApi", true}}}},
                 this, [this](const QJsonObject &, const QString &error) {
             if (!error.isEmpty()) return;
@@ -90,7 +90,7 @@ CodexConnection::CodexConnection(const QString &program, const QString &workingD
             crashTimes_.append(now);
             while (!crashTimes_.isEmpty() && now - crashTimes_.first() > 5 * 60 * 1000) crashTimes_.removeFirst();
             if (crashTimes_.size() > 5) {
-                emit message("[The Codex App Server keeps exiting, so it is not restarted. Restart agentdeskt to try again.]");
+                emit message("[The Codex App Server keeps exiting, so it is not restarted. Restart agentin to try again.]");
             } else {
                 const int delay = qMin(30, 1 << (crashTimes_.size() - 1));
                 emit message(QString("[Restarting the Codex App Server in %1 s]").arg(delay));

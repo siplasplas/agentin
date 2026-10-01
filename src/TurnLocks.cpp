@@ -87,7 +87,7 @@ QString TurnLocks::acquire(const QString &owner, const QStringList &directories,
     QDir().mkpath(QFileInfo(registryPath_).absolutePath());
     QLockFile guard(guardPath_);
     guard.setStaleLockTime(10000);
-    if (!guard.tryLock(2000)) return "another agentdeskt window that is updating the lock registry";
+    if (!guard.tryLock(2000)) return "another agentin window that is updating the lock registry";
 
     const qint64 self = QCoreApplication::applicationPid();
     const QStringList paths = lockable(directories);
@@ -109,7 +109,7 @@ QString TurnLocks::acquire(const QString &owner, const QStringList &directories,
         if (holder.isEmpty() && overlapsAny(paths, entryDirectories(entry))) {
             const QStringList held = entryDirectories(entry);
             holder = entry.value("label").toString() + " in " + held.value(0) + alsoWrites(held.mid(1));
-            if (pid != self) holder += QString(" in another agentdeskt window (PID %1)").arg(pid);
+            if (pid != self) holder += QString(" in another agentin window (PID %1)").arg(pid);
         }
     }
     if (holder.isEmpty()) {
