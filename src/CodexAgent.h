@@ -28,6 +28,9 @@ public:
     QString model() const override;
     QString effort() const override;
     void setModel(const QString &model, const QString &effort) override;
+    bool supportsFastMode() const override { return true; }
+    bool isFastMode() const override { return fastMode_; }
+    void setFastMode(bool fast) override;
     bool supportsReadOnly() const override { return true; }
     bool isReadOnly() const override { return readOnly_; }
     bool readOnlyIsEnforced() const override { return true; }
@@ -76,6 +79,7 @@ private:
     QString effort_;
     // Set once the user picks a model, so the thread's reported settings no longer replace it.
     bool modelChosen_ = false;
+    bool fastMode_ = false;
     // The thread's token total before the running turn, found from the first report in the turn.
     TokenUsage turnBaseline_;
     bool turnBaselineKnown_ = false;

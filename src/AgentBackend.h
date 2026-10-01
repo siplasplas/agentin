@@ -207,6 +207,11 @@ public:
         Q_UNUSED(effort);
     }
 
+    // Optional faster service for subsequent turns. This preference is not persisted.
+    virtual bool supportsFastMode() const { return false; }
+    virtual bool isFastMode() const { return false; }
+    virtual void setFastMode(bool fast) { Q_UNUSED(fast); }
+
     // Read-only turns: the agent may read files but not change them. Only agents that enforce this
     // themselves offer it; the setting applies from the next message on.
     virtual bool supportsReadOnly() const { return false; }

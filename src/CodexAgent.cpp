@@ -488,6 +488,13 @@ void CodexAgent::startThread()
     emit stateChanged();
 }
 
+void CodexAgent::setFastMode(bool fast)
+{
+    if (fastMode_ == fast) return;
+    fastMode_ = fast;
+    emit stateChanged();
+}
+
 void CodexAgent::sendNextPrompt()
 {
     if (!connection_ || !connection_->isConnected() || threadId_.isEmpty() || busy_ || refreshingHistory_ || steeringInFlight_ || queuedPrompts_.isEmpty()) return;
@@ -498,6 +505,7 @@ void CodexAgent::sendNextPrompt()
     stopSent_ = false;
     turnBaselineKnown_ = false;
     QJsonObject params{{"threadId", threadId_}, {"summary", "detailed"},
+                       {"serviceTierForTurn", fastMode_ ? "fast" : "default"},
                        {"input", QJsonArray{QJsonObject{{"type", "text"}, {"text", text}}}}};
     if (modelChosen_ && !model_.isEmpty()) params.insert("model", model_);
     if (modelChosen_ && !effort_.isEmpty()) params.insert("effort", effort_);

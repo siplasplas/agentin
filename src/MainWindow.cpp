@@ -192,6 +192,10 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     effortInput_ = new QComboBox(this);
     effortInput_->setObjectName("effortSelect");
     effortInput_->setToolTip("Reasoning effort for the next messages in this chat");
+    fastInput_ = new QCheckBox("Fast", this);
+    fastInput_->setObjectName("fastToggle");
+    fastInput_->setToolTip("Faster model responses with higher usage of limits, where supported. "
+                           "Applies from the next turn; always off after restarting the application.");
     readOnlyInput_ = new QCheckBox("Read-only", this);
     readOnlyInput_->setObjectName("readOnlyToggle");
     for (QComboBox *combo : {modelInput_, effortInput_}) {
@@ -260,11 +264,12 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     contextTokens_->setObjectName("contextTokens");
     contextTokens_->setReadOnly(true);
     contextTokens_->setAlignment(Qt::AlignRight);
-    contextTokens_->setFixedWidth(contextTokens_->fontMetrics().horizontalAdvance("999'999'999") + 24);
+    contextTokens_->setFixedWidth(contextTokens_->fontMetrics().horizontalAdvance("9'999'999") + 20);
     contextTokens_->setToolTip("Current context tokens reported by App Server; updated after compaction");
     compactionRow->addWidget(compactButton_);
     compactionRow->addWidget(contextTokens_);
     compactionRow->addWidget(new QLabel("tokens", compactionPanel_));
+    compactionRow->addWidget(fastInput_);
     compactionRow->addStretch(1);
     compactionPanel_->hide();
     connect(compactButton_, &QPushButton::clicked, this, [this] {
@@ -414,6 +419,9 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
 
     connect(modelInput_, QOverload<int>::of(&QComboBox::activated), this, &MainWindow::chooseModel);
     connect(effortInput_, QOverload<int>::of(&QComboBox::activated), this, &MainWindow::chooseModel);
+    connect(fastInput_, &QCheckBox::toggled, this, [this](bool checked) {
+        if (ChatTab *tab = currentTab()) tab->agent()->setFastMode(checked);
+    });
     connect(readOnlyInput_, &QCheckBox::clicked, this, [this](bool checked) {
         if (ChatTab *tab = currentTab()) tab->agent()->setReadOnly(checked);
     });
@@ -1704,6 +1712,13 @@ void MainWindow::updateModelControls()
 {
     const ChatTab *tab = currentTab();
     const QList<AgentModel> models = tab ? tab->provider()->models() : QList<AgentModel>{};
+    {
+        const QSignalBlocker fastBlocker(fastInput_);
+        const bool supported = tab && tab->agent()->supportsFastMode();
+        fastInput_->setVisible(supported);
+        fastInput_->setEnabled(supported && tab->isLive());
+        fastInput_->setChecked(supported && tab->agent()->isFastMode());
+    }
     QStringList state{tab ? tab->provider()->name() : QString(), tab && tab->isLive() ? "live" : "read-only",
                       tab ? tab->agent()->model() : QString(), tab ? tab->agent()->effort() : QString()};
     for (const AgentModel &model : models) state.append(model.id + ':' + model.efforts.join(','));

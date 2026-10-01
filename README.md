@@ -203,6 +203,11 @@ starting another turn. Messages queued before or during the refresh stay visible
 without being appended a second time. Older messages remain available through
 **Show earlier messages**. A refresh error leaves the existing transcript intact.
 
+In a Codex chat, **Fast** after the **Compact** token counter requests faster model responses
+with higher limit usage, where supported. It applies from the next turn and is
+kept separately for each open chat. It is always off after restarting agentdeskt,
+including restored conversations; the setting is not saved in Codex configuration.
+
 The chat, message field and log use a 10-point monospace font by default.
 **Settings → Chat font…** changes the font and size and saves the choice.
 **Settings → Chat font size…** also accepts fractional sizes, such as 10.5 points,

@@ -116,6 +116,7 @@ private:
     QPlainTextEdit *reasoning_;
     QComboBox *modelInput_;
     QComboBox *effortInput_;
+    QCheckBox *fastInput_;
     QCheckBox *readOnlyInput_;
     QLabel *tokens_;
     QWidget *compactionPanel_;

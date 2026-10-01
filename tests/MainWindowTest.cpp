@@ -45,6 +45,7 @@ class MainWindowTest : public QObject
 
 private slots:
     void foldedOutputScrolling();
+    void codexFastMode();
     void reasoningPanelAndStreaming();
     void codexReasoningAndQuestions();
     void usageLimitPacing();
@@ -137,6 +138,95 @@ void MainWindowTest::foldedOutputScrolling()
         }
         QCoreApplication::processEvents();
     }
+}
+
+void MainWindowTest::codexFastMode()
+{
+    const QString python = QStandardPaths::findExecutable("python3");
+    if (python.isEmpty()) QSKIP("Python is needed for the fake App Server");
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString fakeServer = directory.filePath("codex");
+    QFile script(fakeServer);
+    QVERIFY(script.open(QIODevice::WriteOnly));
+    script.write(("#!" + python + "\n").toUtf8());
+    script.write(R"PY(import json, os, sys
+folder = os.path.dirname(__file__)
+for line in sys.stdin:
+    request = json.loads(line)
+    if "id" not in request:
+        continue
+    method = request.get("method")
+    result = {}
+    if method in ("thread/start", "thread/resume", "thread/read"):
+        result = {"thread": {"id": "fast-thread", "cwd": folder, "turns": []}, "serviceTier": "fast"}
+    elif method in ("thread/list", "model/list"):
+        result = {"data": [], "nextCursor": None}
+    elif method == "turn/start":
+        params = request["params"]
+        assert "serviceTier" not in params
+        with open(os.path.join(folder, "tier.txt"), "w") as output:
+            output.write(params["serviceTierForTurn"])
+        print(json.dumps({"id": request["id"], "result": {"turn": {"id": "fast-turn"}}}), flush=True)
+        print(json.dumps({"method": "turn/completed", "params": {"threadId": "fast-thread",
+            "turn": {"id": "fast-turn", "status": "completed"}}}), flush=True)
+        continue
+    print(json.dumps({"id": request["id"], "result": result}), flush=True)
+)PY");
+    script.close();
+    QVERIFY(script.setPermissions(QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner));
+    const auto readTier = [&] {
+        QFile file(directory.filePath("tier.txt"));
+        return file.open(QIODevice::ReadOnly) ? QString::fromUtf8(file.readAll()) : QString();
+    };
+    {
+        MainWindow window(fakeServer, directory.path(), "/nonexistent/python", "/nonexistent/bridge",
+                          "/nonexistent/gemini", nullptr, directory.filePath("index.json"), "/nonexistent/agy",
+                          directory.filePath("gemini"));
+        window.restoreSession(false);
+        window.show();
+        auto *fast = window.findChild<QCheckBox *>("fastToggle");
+        auto *tabs = window.findChild<QTabWidget *>("chatTabs");
+        auto *tab = tabs->currentWidget()->findChild<ChatTab *>();
+        QVERIFY(fast && tab);
+        QVERIFY(fast->isVisible() && fast->isEnabled() && !fast->isChecked());
+        QTRY_VERIFY(window.findChild<CodexConnection *>()->isConnected());
+        QSignalSpy finished(tab->agent(), &AgentBackend::turnCompleted);
+        QVERIFY(tab->send("Standard speed"));
+        QTRY_COMPARE(finished.size(), 1);
+        QCOMPARE(readTier(), QString("default"));
+        fast->click();
+        QVERIFY(tab->agent()->isFastMode());
+        QVERIFY(tab->send("Fast speed"));
+        QTRY_COMPARE(finished.size(), 2);
+        QCOMPARE(readTier(), QString("fast"));
+        fast->click();
+        QVERIFY(tab->send("Standard again"));
+        QTRY_COMPARE(finished.size(), 3);
+        QCOMPARE(readTier(), QString("default"));
+        fast->click();
+        QWidget *codexPage = tabs->currentWidget();
+        startChat(window, "Claude", directory.path());
+        QVERIFY(!fast->isVisible());
+        tabs->setCurrentWidget(codexPage);
+        QVERIFY(fast->isVisible() && fast->isChecked());
+        window.close();
+    }
+    MainWindow reopened(fakeServer, directory.path(), "/nonexistent/python", "/nonexistent/bridge",
+                        "/nonexistent/gemini", nullptr, directory.filePath("index.json"), "/nonexistent/agy",
+                        directory.filePath("gemini"));
+    reopened.restoreSession(false);
+    reopened.show();
+    auto *fast = reopened.findChild<QCheckBox *>("fastToggle");
+    auto *tabs = reopened.findChild<QTabWidget *>("chatTabs");
+    auto *tab = tabs->currentWidget()->findChild<ChatTab *>();
+    QVERIFY(fast && tab);
+    QTRY_VERIFY(tab->isLive());
+    QVERIFY(!fast->isChecked());
+    QSignalSpy finished(tab->agent(), &AgentBackend::turnCompleted);
+    QVERIFY(tab->send("Restored standard speed"));
+    QTRY_COMPARE(finished.size(), 1);
+    QCOMPARE(readTier(), QString("default"));
 }
 
 void MainWindowTest::codexReasoningAndQuestions()
