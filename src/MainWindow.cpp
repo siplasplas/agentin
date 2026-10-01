@@ -533,6 +533,14 @@ void MainWindow::saveSession()
     }
 }
 
+void MainWindow::useManagedClaudeEnvironment()
+{
+    auto *environment = new ClaudeEnvironment(QDir(dataDirectory_).filePath("claude-venv"), this);
+    connect(environment, &ClaudeEnvironment::message, this, &MainWindow::appendLine);
+    claude_->setEnvironment(environment);
+    glm_->setEnvironment(environment);
+}
+
 void MainWindow::restoreSession(bool keepStartChat)
 {
     sessionEnabled_ = true;

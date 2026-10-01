@@ -6,7 +6,6 @@
 #include <QCommandLineParser>
 #include <QDir>
 #include <QFileInfo>
-#include <QStandardPaths>
 
 int main(int argc, char *argv[])
 {
@@ -34,15 +33,14 @@ int main(int argc, char *argv[])
 
     const QString codexProgram = parser.isSet(codexOption) ? parser.value(codexOption) : locateCodex();
     QString claudePython = parser.value(claudePythonOption);
-    if (claudePython.isEmpty()) {
-        const QString localPython = QDir(QCoreApplication::applicationDirPath()).filePath("../.venv/bin/python");
-        claudePython = QFileInfo(localPython).isExecutable()
-            ? QFileInfo(localPython).absoluteFilePath() : QStandardPaths::findExecutable("python3");
-    }
+    const QString localPython = QDir(QCoreApplication::applicationDirPath()).filePath("../.venv/bin/python");
+    if (claudePython.isEmpty() && QFileInfo(localPython).isExecutable())
+        claudePython = QFileInfo(localPython).absoluteFilePath();
     const QString claudeScript = parser.isSet(claudeBridgeOption) ? parser.value(claudeBridgeOption)
         : QDir(QCoreApplication::applicationDirPath()).filePath("claude_bridge.py");
     MainWindow window(codexProgram, QDir(parser.value(cwdOption)).absolutePath(), claudePython, claudeScript,
                       parser.value(geminiOption), nullptr, {}, parser.value(antigravityOption));
+    if (claudePython.isEmpty()) window.useManagedClaudeEnvironment();
     // A directory given with -C keeps its new chat next to the reopened tabs.
     window.restoreSession(parser.isSet(cwdOption));
     window.show();

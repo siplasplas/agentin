@@ -9,8 +9,111 @@
 #include <QProcess>
 #include <QStandardPaths>
 
+#include <utility>
+
 namespace {
 constexpr int kHistoryPageSize = 20;
+
+QString lastLines(const QString &text, int count)
+{
+    const QStringList lines = text.split('\n', Qt::SkipEmptyParts);
+    return lines.mid(qMax(0, lines.size() - count)).join('\n');
+}
+}
+
+ClaudeEnvironment::ClaudeEnvironment(const QString &directory, QObject *parent)
+    : QObject(parent), directory_(directory)
+{
+}
+
+ClaudeEnvironment::~ClaudeEnvironment()
+{
+    if (!process_) return;
+    disconnect(process_, nullptr, this, nullptr);
+    process_->kill();
+    process_->waitForFinished(1000);
+}
+
+QString ClaudeEnvironment::pythonProgram() const
+{
+#ifdef Q_OS_WIN
+    return QDir(directory_).filePath("Scripts/python.exe");
+#else
+    return QDir(directory_).filePath("bin/python");
+#endif
+}
+
+void ClaudeEnvironment::prepare(QObject *context, const std::function<void()> &done)
+{
+    if (ready_) {
+        done();
+        return;
+    }
+    waiters_.append({context, done});
+    if (process_) return;
+    if (!QFileInfo(pythonProgram()).isExecutable()) {
+        const QString python = QStandardPaths::findExecutable("python3");
+        if (python.isEmpty()) {
+            emit message("[Claude Agent SDK: python3 was not found, so its environment cannot be created]");
+            finish(false);
+            return;
+        }
+        emit message("[Claude Agent SDK: creating a Python environment in " + directory_ + "]");
+        run(python, {"-m", "venv", directory_}, [this](bool ok, const QString &output) {
+            if (ok) {
+                install();
+                return;
+            }
+            emit message("[Claude Agent SDK: the Python environment could not be created (on Debian and Ubuntu "
+                         "install python3-venv)]\n" + lastLines(output, 5));
+            finish(false);
+        });
+        return;
+    }
+    run(pythonProgram(), {"-c", "import claude_agent_sdk"}, [this](bool ok, const QString &) {
+        if (ok) finish(true);
+        else install();
+    });
+}
+
+void ClaudeEnvironment::install()
+{
+    emit message("[Claude Agent SDK: installing claude-agent-sdk into " + directory_ + ", this can take a minute]");
+    run(pythonProgram(), {"-m", "pip", "install", "--upgrade", "claude-agent-sdk"},
+        [this](bool ok, const QString &output) {
+        emit message(ok ? QString("[Claude Agent SDK: installed]")
+                        : "[Claude Agent SDK: installation failed]\n" + lastLines(output, 10));
+        finish(ok);
+    });
+}
+
+void ClaudeEnvironment::finish(bool ready)
+{
+    // A failed attempt is repeated the next time a bridge starts, for example after installing python3-venv.
+    ready_ = ready;
+    const auto waiters = std::exchange(waiters_, {});
+    for (const auto &[context, done] : waiters)
+        if (context) done();
+}
+
+void ClaudeEnvironment::run(const QString &program, const QStringList &arguments,
+                            const std::function<void(bool ok, const QString &output)> &next)
+{
+    process_ = new QProcess(this);
+    process_->setProcessChannelMode(QProcess::MergedChannels);
+    connect(process_, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this,
+            [this, next](int code, QProcess::ExitStatus status) {
+        QProcess *process = std::exchange(process_, nullptr);
+        process->deleteLater();
+        next(status == QProcess::NormalExit && code == 0, QString::fromUtf8(process->readAll()));
+    });
+    connect(process_, &QProcess::errorOccurred, this, [this, next](QProcess::ProcessError error) {
+        if (error != QProcess::FailedToStart) return;
+        QProcess *process = std::exchange(process_, nullptr);
+        process->deleteLater();
+        next(false, process->errorString());
+    });
+    process_->start(program, arguments);
 }
 
 ClaudeProvider::ClaudeProvider(const QString &pythonProgram, const QString &scriptPath, const QString &workingDirectory,
@@ -169,12 +272,33 @@ void ClaudeProvider::reportIndexError(const QString &error)
     if (!error.isEmpty()) emit message("[" + error + "]");
 }
 
+void ClaudeProvider::setEnvironment(ClaudeEnvironment *environment)
+{
+    environment_ = environment;
+    pythonProgram_ = environment->pythonProgram();
+}
+
+void ClaudeProvider::prepareEnvironment(QObject *context, const std::function<void()> &done)
+{
+    if (environment_) environment_->prepare(context, done);
+    else done();
+}
+
 void ClaudeProvider::runHelper(const QStringList &arguments, const QString &workingDirectory, QObject *context,
                                const std::function<void(QProcess *process, bool started)> &done)
 {
+    const QPointer<QObject> guard(context);
+    prepareEnvironment(this, [this, arguments, workingDirectory, guard, done] {
+        if (guard) startHelper(arguments, workingDirectory, guard, done);
+    });
+}
+
+void ClaudeProvider::startHelper(const QStringList &arguments, const QString &workingDirectory,
+                                 const QPointer<QObject> &guard,
+                                 const std::function<void(QProcess *process, bool started)> &done)
+{
     auto *process = new QProcess(this);
     helperProcesses_.append(process);
-    const QPointer<QObject> guard(context);
     const auto finish = [this, process, done, guard](bool started) {
         helperProcesses_.removeAll(process);
         process->deleteLater();
@@ -253,6 +377,7 @@ QString ClaudeAgent::statusText() const
 {
     if (busy_) return name_ + " is responding…";
     if (ready_) return name_ + " ready";
+    if (preparing_) return "Preparing the Claude Agent SDK environment…";
     if (isRunning()) return kind_ == "glm" ? "Connecting to GLM via Claude Agent SDK…" : "Connecting to Claude Agent SDK…";
     return name_ + " bridge is not running";
 }
@@ -264,10 +389,24 @@ bool ClaudeAgent::isRunning() const
 
 void ClaudeAgent::start(const QString &workingDirectory)
 {
-    if (isRunning()) return;
+    if (isRunning() || preparing_) return;
     if (!workingDirectory.isEmpty()) workingDirectory_ = workingDirectory;
-    process_->setWorkingDirectory(workingDirectory_);
     if (!provider_) return;
+    preparing_ = true;
+    provider_->prepareEnvironment(this, [this] {
+        preparing_ = false;
+        startBridge();
+        emit stateChanged();
+    });
+    if (preparing_) emit stateChanged();
+}
+
+// The working directory, model and options are read when the bridge starts, since they may change while
+// its environment is being prepared.
+void ClaudeAgent::startBridge()
+{
+    if (!provider_) return;
+    process_->setWorkingDirectory(workingDirectory_);
     QStringList arguments{"-u", provider_->scriptPath(), "--cwd", workingDirectory_, "--provider", kind_};
     if (!model_.isEmpty()) arguments << "--model" << model_;
     if (!effort_.isEmpty()) arguments << "--effort" << effort_;

@@ -46,6 +46,9 @@ public:
     // Reopens the tabs saved when the window was last closed, and saves them on close from now on.
     // The chat that opens at start stays when keepStartChat is true, otherwise it is replaced.
     void restoreSession(bool keepStartChat);
+    // Claude and GLM run their bridge in a virtual environment in the application data directory,
+    // created with claude-agent-sdk when one of them is first used.
+    void useManagedClaudeEnvironment();
 
 protected:
     void closeEvent(QCloseEvent *event) override;

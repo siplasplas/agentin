@@ -22,13 +22,26 @@ cmake --build build
 ./build/agentin -C /path/to/project
 ```
 
-For Claude, install the SDK in a project virtual environment and provide
-`ANTHROPIC_API_KEY` in the application's environment:
+For Claude, provide `ANTHROPIC_API_KEY` in the application's environment:
+
+```sh
+ANTHROPIC_API_KEY=your-key ./build/agentin -C /path/to/project
+```
+
+Claude and GLM need the Claude Agent SDK. The first time either is used (a new
+or resumed chat, a history preview, or expanding Claude in the tree), the
+application creates a Python virtual environment `claude-venv` in its
+application data directory and installs `claude-agent-sdk` into it; the log
+shows the progress. This needs `python3` with the `venv` module (on Debian and
+Ubuntu the `python3-venv` package) and network access, takes about a minute and
+a few hundred megabytes, and happens once; Claude and GLM share the
+environment. A failed installation is tried again the next time Claude or GLM
+starts. When developing, you can instead install the SDK in a project virtual
+environment, which the application then uses:
 
 ```sh
 python3 -m venv .venv
 .venv/bin/python -m pip install claude-agent-sdk
-ANTHROPIC_API_KEY=your-key ./build/agentin -C /path/to/project
 ```
 
 For GLM, install the same SDK and set `ZAI_API_KEY` to your Z.AI Coding Plan
@@ -55,8 +68,10 @@ interactively first. The application starts `agy --output-format stream-json
 --prompt ...` for each turn and uses `--conversation ID` for later turns. Pass
 `--antigravity /path/to/agy` if the executable is not in `PATH`.
 
-The client automatically uses `.venv/bin/python` when the build directory is
-directly inside this project. Otherwise pass `--claude-python /path/to/python`. Use
+The client uses `.venv/bin/python` when the build directory is directly inside
+this project and that environment exists. `--claude-python /path/to/python`
+selects another Python with the SDK installed; in both cases nothing is
+installed automatically. Use
 `--claude-bridge /path/to/bridge.py` when running an executable from another
 location without its copied bridge script.
 

@@ -11,6 +11,36 @@
 
 class QProcess;
 
+// A Python virtual environment that gets claude-agent-sdk the first time a Claude or GLM bridge needs it.
+class ClaudeEnvironment : public QObject
+{
+    Q_OBJECT
+
+public:
+    explicit ClaudeEnvironment(const QString &directory, QObject *parent = nullptr);
+    ~ClaudeEnvironment() override;
+
+    QString pythonProgram() const;
+    bool isPreparing() const { return process_ != nullptr; }
+    // Checks the environment, creating it and installing the SDK when needed, then calls done whether or
+    // not that worked, unless context has been destroyed by then; a failed bridge reports its own error.
+    void prepare(QObject *context, const std::function<void()> &done);
+
+signals:
+    void message(const QString &text);
+
+private:
+    void install();
+    void finish(bool ready);
+    void run(const QString &program, const QStringList &arguments,
+             const std::function<void(bool ok, const QString &output)> &next);
+
+    QString directory_;
+    bool ready_ = false;
+    QProcess *process_ = nullptr;
+    QList<QPair<QPointer<QObject>, std::function<void()>>> waiters_;
+};
+
 // Claude or GLM through claude/bridge.py, which runs the Claude Agent SDK. The provider keeps the
 // conversation index and runs one-shot bridge queries; each chat has its own bridge process.
 class ClaudeProvider : public AgentProvider
@@ -44,6 +74,10 @@ public:
     void setExtraModels(const QStringList &models) { extraModels_ = models; emit modelsChanged(); }
     QString pythonProgram() const { return pythonProgram_; }
     QString scriptPath() const { return scriptPath_; }
+    // Runs the bridge with the environment's Python, which is prepared before the first bridge starts.
+    void setEnvironment(ClaudeEnvironment *environment);
+    bool isPreparingEnvironment() const { return environment_ && environment_->isPreparing(); }
+    void prepareEnvironment(QObject *context, const std::function<void()> &done);
     void rememberConversation(const QString &id, const QString &workingDirectory, const QString &firstPrompt);
     // Records a rate limit event that a chat's bridge received.
     void updateUsage(const QJsonObject &event);
@@ -54,7 +88,10 @@ public:
 
 private:
     void reportIndexError(const QString &error);
+    void startHelper(const QStringList &arguments, const QString &workingDirectory, const QPointer<QObject> &context,
+                     const std::function<void(QProcess *process, bool started)> &done);
 
+    QPointer<ClaudeEnvironment> environment_;
     QString pythonProgram_;
     QString scriptPath_;
     QString workingDirectory_;
@@ -100,6 +137,7 @@ public:
 private:
     bool isRunning() const;
     void start(const QString &workingDirectory);
+    void startBridge();
     void sendNextPrompt();
     bool applySettings();
     void send(const QJsonObject &message);
@@ -126,6 +164,7 @@ private:
     HistoryPages history_;
     quint64 historyGeneration_ = 0;
     bool ready_ = false;
+    bool preparing_ = false;
     bool busy_ = false;
     bool stopRequested_ = false;
     bool textStarted_ = false;
