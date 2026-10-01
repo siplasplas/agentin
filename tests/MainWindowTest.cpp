@@ -1,4 +1,5 @@
 #include "CodexLocator.h"
+#include "ChatTab.h"
 #include "CommandApproval.h"
 #include "CodexAgent.h"
 #include "CodexConnection.h"
@@ -30,6 +31,8 @@
 #include <QStandardPaths>
 #include <QSplitter>
 #include <QTabWidget>
+#include <QTextBlock>
+#include <QRadioButton>
 #include <QtTest>
 
 static void startChat(MainWindow &window, const QString &provider, const QString &path);
@@ -39,6 +42,8 @@ class MainWindowTest : public QObject
     Q_OBJECT
 
 private slots:
+    void reasoningPanelAndStreaming();
+    void codexReasoningAndQuestions();
     void usageLimitPacing();
     void providerLimitsPanelAndVisibility();
     void audioChooserPathsAndLastDirectory();
@@ -61,6 +66,195 @@ private slots:
     void claudeAttachRespectsExternalLock();
     void geminiAttachRespectsExternalLock();
 };
+
+void MainWindowTest::codexReasoningAndQuestions()
+{
+    const QString python = QStandardPaths::findExecutable("python3");
+    if (python.isEmpty()) QSKIP("Python is needed for the fake App Server");
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString fakeServer = directory.filePath("codex");
+    QFile script(fakeServer);
+    QVERIFY(script.open(QIODevice::WriteOnly));
+    script.write(("#!" + python + "\n").toUtf8());
+    script.write(R"PY(import json, os, sys
+folder = os.path.dirname(__file__)
+assert "features.default_mode_request_user_input=true" in sys.argv
+
+def send(value):
+    print(json.dumps(value), flush=True)
+
+def notify(method, **params):
+    send({"method": method, "params": {"threadId": "question-thread", **params}})
+
+for line in sys.stdin:
+    request = json.loads(line)
+    method = request.get("method")
+    if not method:
+        if request.get("id") == "question-1":
+            with open(os.path.join(folder, "answer.json"), "w") as output:
+                json.dump(request["result"], output)
+            notify("serverRequest/resolved", requestId="question-1")
+        continue
+    if "id" not in request:
+        continue
+    if method == "initialize":
+        assert request["params"]["capabilities"]["experimentalApi"]
+        result = {}
+    elif method == "thread/start":
+        result = {"thread": {"id": "question-thread", "cwd": folder}}
+    elif method == "turn/start":
+        assert request["params"]["summary"] == "detailed"
+        result = {"turn": {"id": "turn-1"}}
+        send({"id": request["id"], "result": result})
+        notify("turn/started", turn={"id": "turn-1"})
+        notify("item/reasoning/summaryTextDelta", turnId="turn-1", itemId="reason-1", summaryIndex=0, delta="Shared reasoning")
+        notify("item/started", turnId="turn-1", item={"type": "commandExecution", "id": "shell-1", "command": "ls"})
+        for index in range(512):
+            notify("item/commandExecution/outputDelta", turnId="turn-1", itemId="shell-1", delta=f"file-{index}\n")
+        notify("item/completed", turnId="turn-1", item={"type": "commandExecution", "id": "shell-1", "status": "completed"})
+        send({"id": "question-1", "method": "item/tool/requestUserInput", "params": {
+            "threadId": "question-thread", "turnId": "turn-1", "itemId": "ask-1", "isBlocking": False,
+            "questions": [{"id": "implementation", "header": "Implementation", "question": "Code or plan?",
+                "isOther": True, "options": [{"label": "Implement", "description": "Change the code"},
+                                             {"label": "Plan", "description": "Design only"}]}]}})
+        notify("turn/completed", turn={"id": "turn-1", "status": "completed"})
+        continue
+    elif method == "thread/list":
+        result = {"data": [], "nextCursor": None}
+    elif method == "model/list":
+        result = {"data": [], "nextCursor": None}
+    else:
+        result = {}
+    send({"id": request["id"], "result": result})
+)PY");
+    script.close();
+    QVERIFY(script.setPermissions(QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner));
+    MainWindow window(fakeServer, directory.path(), "/nonexistent/python", "/nonexistent/bridge",
+                      "/nonexistent/gemini", nullptr, directory.filePath("index.json"), "/nonexistent/agy",
+                      directory.filePath("gemini"));
+    window.show();
+    window.findChild<QAction *>("showReasoning")->trigger();
+    auto *tabs = window.findChild<QTabWidget *>("chatTabs");
+    QVERIFY(tabs);
+    auto *tab = tabs->currentWidget()->findChild<ChatTab *>();
+    QVERIFY(tab);
+    auto *connection = window.findChild<CodexConnection *>();
+    QVERIFY(connection);
+    QTRY_VERIFY(connection->isConnected());
+    auto *input = window.findChild<QPlainTextEdit *>("commandInput");
+    QVERIFY(input);
+    input->setPlainText("Question test");
+    window.findChild<QPushButton *>("sendButton")->click();
+    auto *reasoning = window.findChild<QPlainTextEdit *>("reasoningPanel");
+    auto *panel = window.findChild<QWidget *>("requestPanel");
+    QVERIFY(reasoning && panel);
+    QTRY_COMPARE(reasoning->toPlainText(), QString("Shared reasoning"));
+    QTRY_VERIFY(tab->document()->toPlainText().contains("file-511"));
+    QTRY_VERIFY(!tab->document()->findBlock(tab->document()->toPlainText().indexOf("file-511")).isVisible());
+    QTRY_VERIFY(!tab->agent()->isResponding());
+    QTRY_VERIFY(panel->isVisible());
+    auto options = panel->findChildren<QRadioButton *>();
+    QCOMPARE(options.size(), 2);
+    options.first()->click();
+    QPushButton *answer = nullptr;
+    for (auto *button : panel->findChildren<QPushButton *>())
+        if (button->text() == "Answer") answer = button;
+    QVERIFY(answer);
+    answer->click();
+    QTRY_VERIFY(QFileInfo(directory.filePath("answer.json")).size() > 0);
+    QFile savedAnswer(directory.filePath("answer.json"));
+    QVERIFY(savedAnswer.open(QIODevice::ReadOnly));
+    QCOMPARE(QJsonDocument::fromJson(savedAnswer.readAll()).object().value("answers").toObject()
+        .value("implementation").toObject().value("answers").toArray(), QJsonArray{"Implement"});
+    QVERIFY(!panel->isVisible());
+    auto *agent = qobject_cast<CodexAgent *>(tab->agent());
+    QVERIFY(agent);
+    const QJsonObject question{{"threadId", "question-thread"}, {"turnId", "turn-2"}, {"itemId", "ask-2"},
+        {"isBlocking", false}, {"questions", QJsonArray{QJsonObject{{"id", "q"}, {"header", "Q"}, {"question", "Continue?"}}}}};
+    agent->handleServerRequest("item/tool/requestUserInput", "question-2", question);
+    QVERIFY(panel->isVisible());
+    agent->handleNotification("serverRequest/resolved", {{"threadId", "question-thread"}, {"requestId", "question-2"}});
+    QVERIFY(!panel->isVisible());
+    QJsonObject blocking = question;
+    blocking.remove("isBlocking");
+    agent->handleServerRequest("item/tool/requestUserInput", 42, blocking);
+    QVERIFY(panel->isVisible());
+    agent->handleNotification("turn/completed", {{"threadId", "question-thread"},
+        {"turn", QJsonObject{{"id", "turn-2"}, {"status", "interrupted"}}}});
+    QVERIFY(!panel->isVisible());
+    agent->handleServerRequest("item/tool/requestUserInput", "question-3", question);
+    connection->disconnected();
+    QVERIFY(!panel->isVisible());
+}
+
+void MainWindowTest::reasoningPanelAndStreaming()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    {
+        MainWindow window("/nonexistent/codex", directory.path(), "/nonexistent/python", "/nonexistent/bridge",
+                          "/nonexistent/gemini", nullptr, directory.filePath("index.json"), "/nonexistent/agy",
+                          directory.filePath("gemini"));
+        window.show();
+        auto *panel = window.findChild<QPlainTextEdit *>("reasoningPanel");
+        auto *visible = window.findChild<QAction *>("showReasoning");
+        auto *splitter = window.findChild<QSplitter *>("conversationReasoningSplitter");
+        auto *tabs = window.findChild<QTabWidget *>("chatTabs");
+        QVERIFY(panel && visible && splitter && tabs);
+        QVERIFY(panel->isReadOnly());
+        QVERIFY(!visible->isChecked());
+        visible->trigger();
+        QTRY_VERIFY(panel->isVisible());
+        QCOMPARE(splitter->widget(1), panel);
+        QTRY_VERIFY(qAbs(splitter->sizes().value(0) - splitter->sizes().value(1)) <= 2);
+        auto *tab = tabs->currentWidget()->findChild<ChatTab *>();
+        QVERIFY(tab);
+        auto *agent = qobject_cast<CodexAgent *>(tab->agent());
+        QVERIFY(agent);
+        const auto delta = [&](const QString &text, int index = 0) {
+            agent->handleNotification("item/reasoning/summaryTextDelta",
+                {{"threadId", "test"}, {"turnId", "turn"}, {"itemId", "reason-1"},
+                 {"summaryIndex", index}, {"delta", text}});
+        };
+        delta("First");
+        delta(" section");
+        delta("Second section", 1);
+        QCOMPARE(panel->toPlainText(), QString("First section\n\nSecond section"));
+        agent->handleNotification("item/completed", {{"threadId", "test"}, {"turnId", "turn"},
+            {"item", QJsonObject{{"type", "reasoning"}, {"id", "reason-1"},
+                                {"summary", QJsonArray{"First section", "Second section"}}}}});
+        QCOMPARE(panel->toPlainText(), QString("First section\n\nSecond section"));
+        agent->handleNotification("item/reasoning/textDelta", {{"threadId", "test"}, {"turnId", "turn"},
+            {"itemId", "reason-2"}, {"contentIndex", 0}, {"delta", "Raw text"}});
+        QVERIFY(panel->toPlainText().endsWith("Raw text"));
+        QVERIFY(!tab->document()->toPlainText().contains("First section"));
+        startChat(window, "Claude", directory.path());
+        QVERIFY(panel->toPlainText().isEmpty());
+        auto *claudeTab = tabs->currentWidget()->findChild<ChatTab *>();
+        QVERIFY(claudeTab);
+        claudeTab->agent()->reasoningUpdated("claude-1", "Claude thinking");
+        QCOMPARE(panel->toPlainText(), QString("Claude thinking"));
+        // Background reasoning stays in its own conversation.
+        agent->reasoningUpdated("reason-2", "Raw text continued");
+        QCOMPARE(panel->toPlainText(), QString("Claude thinking"));
+        tabs->setCurrentIndex(0);
+        QVERIFY(panel->toPlainText().endsWith("Raw text continued"));
+        // Reloading overlapping history replaces the same item instead of duplicating it.
+        agent->historyLoaded("", {{"reasoning", "Saved summary", "reason-1"}, {"assistant", "Saved answer"}}, false, {});
+        QCOMPARE(panel->toPlainText(), QString("Saved summary\n\nRaw text continued"));
+        QVERIFY(tab->document()->toPlainText().contains("Saved answer"));
+        QVERIFY(!tab->document()->toPlainText().contains("Saved summary"));
+        ChatTab preview(tab->provider(), directory.path());
+        preview.agent()->reasoningUpdated("old", "Old preview text");
+        preview.showPreview(tab->provider(), "different", directory.path(), "Different conversation");
+        QVERIFY(preview.reasoningDocument()->isEmpty());
+    }
+    MainWindow restarted("/nonexistent/codex", directory.path(), "/nonexistent/python", "/nonexistent/bridge",
+                         "/nonexistent/gemini", nullptr, directory.filePath("index.json"), "/nonexistent/agy",
+                         directory.filePath("gemini"));
+    QVERIFY(restarted.findChild<QAction *>("showReasoning")->isChecked());
+}
 
 void MainWindowTest::usageLimitPacing()
 {

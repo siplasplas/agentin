@@ -373,7 +373,7 @@ void ClaudeAgent::loadHistory(const QString &id, const QString &workingDirectory
         QList<ChatEntry> entries;
         for (const QJsonValue &value : result.value("entries").toArray()) {
             const QJsonObject entry = value.toObject();
-            entries.append({entry.value("role").toString(), entry.value("text").toString()});
+            entries.append({entry.value("role").toString(), entry.value("text").toString(), entry.value("id").toString()});
         }
         history_.reset(id, entries, kHistoryPageSize);
         emit historyLoaded(id, history_.visible(), history_.hasMore(), {});
@@ -494,6 +494,8 @@ void ClaudeAgent::handleLine(const QByteArray &line)
             emit messageStarted();
         }
         emit messageDelta(event.value("text").toString());
+    } else if (type == "reasoning") {
+        emit reasoningUpdated(event.value("id").toString(), event.value("text").toString());
     } else if (type == "tool") {
         emit toolStarted(event.value("name").toString(),
                          QString::fromUtf8(QJsonDocument(event.value("input").toObject()).toJson(QJsonDocument::Compact)));

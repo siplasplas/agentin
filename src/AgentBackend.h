@@ -11,6 +11,7 @@ struct ChatEntry
 {
     QString role;
     QString text;
+    QString id;
 };
 
 // A conversation read in full once and revealed page by page from its end, for agents whose
@@ -251,6 +252,8 @@ signals:
     void messageStarted();
     void messageDelta(const QString &text);
     void messageFinished();
+    // The complete currently available text of one reasoning item, updated while streaming.
+    void reasoningUpdated(const QString &id, const QString &text);
     void toolStarted(const QString &name, const QString &details);
     void toolOutput(const QString &text);
     void toolFinished(const QString &name, const QString &status);
@@ -263,7 +266,8 @@ signals:
     // alwaysRule describes the lasting rule the agent proposes; empty when it proposes none.
     void approvalRequested(int id, const QString &title, const QString &description, bool canAcceptForSession,
                            const QString &alwaysRule, const QString &sessionRule = {});
-    void questionsRequested(int id, const QList<AgentQuestion> &questions);
+    void questionsRequested(int id, const QList<AgentQuestion> &questions, bool blocking = true);
+    void requestResolved(int id);
     void conversationOpened(const QString &id, bool resumed);
     void conversationOpenFailed(const QString &id, const QString &reason);
     // Entries are the complete list to show for the conversation, oldest first.

@@ -248,6 +248,26 @@ sentences; other voices speak English. The voice and its pace are chosen and tri
 in **Settings → Notifications…**; a slowness above 1 (1.3 by default) speaks
 slower and usually clearer. Without a voice program the sound files play.
 
+Incoming Codex messages are processed in short batches, and streamed chat view
+updates are coalesced, allowing the interface to handle input between batches
+when tool output arrives in bursts.
+
+Codex is launched with structured questions enabled in its default mode, using a
+process-local configuration override. Blocking questions end with their turn;
+nonblocking questions remain visible and answerable until answered or resolved by
+the server. A question written only as ordinary chat text does not create a form.
+
+**View → Reasoning** toggles a read-only panel beneath the conversation tree.
+It is hidden by default, and the visibility preference is saved. Drag the divider
+between the tree and the panel to adjust their heights. The panel follows the
+selected conversation and keeps background conversations separate. It displays
+reasoning summaries or raw text supplied by Codex, preferring raw text when
+available, and thinking blocks supplied by Claude/GLM. Text updates during a turn
+and is also read from loaded history. It is separate from the main transcript;
+Codex turns explicitly request detailed reasoning summaries; models that do not
+expose text can still report reasoning-token usage while leaving the panel empty. Only text shared by
+the provider is shown, not hidden reasoning or encrypted/redacted blocks.
+
 **View → Provider limits** shows account limits for the selected conversation's
 provider. Switching chats switches the panel; unsupported providers and unreported
 windows do not add placeholder rows. It is visible by default, and visibility is

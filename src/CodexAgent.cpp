@@ -8,6 +8,17 @@
 namespace {
 constexpr int kHistoryPageSize = 40;
 
+QString reasoningText(const QJsonObject &item)
+{
+    QStringList parts;
+    // Raw content takes precedence when the model supplies it; otherwise show the summary.
+    QJsonArray sections = item.value("content").toArray();
+    if (sections.isEmpty()) sections = item.value("summary").toArray();
+    for (const QJsonValue &section : sections)
+        if (!section.toString().isEmpty()) parts.append(section.toString());
+    return parts.join("\n\n");
+}
+
 // Converts one Codex App Server thread item into chat entries.
 QList<ChatEntry> historyEntries(const QJsonObject &item)
 {
@@ -22,6 +33,8 @@ QList<ChatEntry> historyEntries(const QJsonObject &item)
     } else if (type == "agentMessage") {
         const QString text = item.value("text").toString().trimmed();
         if (!text.isEmpty()) return {{"assistant", text}};
+    } else if (type == "reasoning") {
+        return {{"reasoning", reasoningText(item), item.value("id").toString()}};
     } else if (type == "commandExecution") {
         QString text = "$ " + item.value("command").toString();
         const QString output = item.value("aggregatedOutput").toString();
@@ -64,7 +77,9 @@ CodexAgent::CodexAgent(CodexConnection *connection, const QString &workingDirect
             emit steerFailed(text, "The Codex App Server disconnected before confirming the message.");
         }
         threadId_.clear();
+        for (int id : serverRequests_.keys()) emit requestResolved(id);
         serverRequests_.clear();
+        pendingQuestions_.clear();
         proposedRules_.clear();
         requestSessionRules_.clear();
         queuedPrompts_.clear();
@@ -203,6 +218,7 @@ bool CodexAgent::compact()
     busy_ = true;
     manualCompaction_ = true;
     activeTurnId_.clear();
+    reasoningItems_.clear();
     stopRequested_ = false;
     stopSent_ = false;
     turnBaselineKnown_ = false;
@@ -431,7 +447,9 @@ void CodexAgent::openThread(const QJsonObject &result, bool resumed)
 // Detaches this chat from its thread so the server can unload it once no client uses it.
 void CodexAgent::closeThread()
 {
+    for (int id : serverRequests_.keys()) emit requestResolved(id);
     serverRequests_.clear();
+    pendingQuestions_.clear();
     proposedRules_.clear();
     requestSessionRules_.clear();
     if (connection_ && !threadId_.isEmpty()) {
@@ -479,7 +497,7 @@ void CodexAgent::sendNextPrompt()
     stopRequested_ = false;
     stopSent_ = false;
     turnBaselineKnown_ = false;
-    QJsonObject params{{"threadId", threadId_},
+    QJsonObject params{{"threadId", threadId_}, {"summary", "detailed"},
                        {"input", QJsonArray{QJsonObject{{"type", "text"}, {"text", text}}}}};
     if (modelChosen_ && !model_.isEmpty()) params.insert("model", model_);
     if (modelChosen_ && !effort_.isEmpty()) params.insert("effort", effort_);
@@ -526,7 +544,19 @@ void CodexAgent::handleNotification(const QString &method, const QJsonObject &pa
 {
     const QJsonObject item = params.value("item").toObject();
     const QString itemId = params.value("itemId").toString(item.value("id").toString());
-    if (method == "turn/started") {
+    if (method == "serverRequest/resolved") {
+        const QJsonValue resolved = params.value("requestId");
+        for (auto it = serverRequests_.begin(); it != serverRequests_.end(); ++it) {
+            if (it.value() != resolved) continue;
+            const int id = it.key();
+            serverRequests_.erase(it);
+            pendingQuestions_.remove(id);
+            proposedRules_.remove(id);
+            requestSessionRules_.remove(id);
+            emit requestResolved(id);
+            break;
+        }
+    } else if (method == "turn/started") {
         if (busy_) {
             activeTurnId_ = params.value("turn").toObject().value("id").toString();
             sendStopIfPossible();
@@ -538,6 +568,17 @@ void CodexAgent::handleNotification(const QString &method, const QJsonObject &pa
             emit messageStarted();
         }
         emit messageDelta(params.value("delta").toString());
+    } else if (method == "item/reasoning/summaryTextDelta" || method == "item/reasoning/textDelta") {
+        QJsonObject &snapshot = reasoningItems_[itemId];
+        const bool raw = method == "item/reasoning/textDelta";
+        const QString field = raw ? "content" : "summary";
+        const int index = params.value(raw ? "contentIndex" : "summaryIndex").toInt();
+        if (index < 0 || index > 10000) return;
+        QJsonArray sections = snapshot.value(field).toArray();
+        while (sections.size() <= index) sections.append("");
+        sections[index] = sections.at(index).toString() + params.value("delta").toString();
+        snapshot.insert(field, sections);
+        emit reasoningUpdated(itemId, reasoningText(snapshot));
     } else if (method == "item/commandExecution/outputDelta") {
         streamedCommands_.insert(itemId);
         emit toolOutput(params.value("delta").toString());
@@ -554,6 +595,10 @@ void CodexAgent::handleNotification(const QString &method, const QJsonObject &pa
                 emit messageDelta(item.value("text").toString());
             }
             emit messageFinished();
+        } else if (type == "reasoning") {
+            const QString text = reasoningText(item);
+            if (!text.isEmpty()) emit reasoningUpdated(completedId, text);
+            reasoningItems_.remove(completedId);
         } else if (type == "commandExecution") {
             if (!streamedCommands_.remove(completedId)) {
                 const QString output = item.value("aggregatedOutput").toString();
@@ -671,7 +716,7 @@ void CodexAgent::handleServerRequest(const QString &method, const QJsonValue &id
             alwaysRule = "Allow commands starting with \"" + words.join(' ') + "\" without asking";
         }
         emit approvalRequested(requestId, "Approve Codex action", description.trimmed(), true, alwaysRule, sessionRule);
-    } else if (method == "item/tool/requestUserInput") {
+    } else if (method == "item/tool/requestUserInput" || method == "tool/requestUserInput") {
         QList<AgentQuestion> questions;
         for (const QJsonValue &value : params.value("questions").toArray()) {
             const QJsonObject object = value.toObject();
@@ -690,7 +735,7 @@ void CodexAgent::handleServerRequest(const QString &method, const QJsonValue &id
         const int requestId = nextServerRequest_++;
         serverRequests_.insert(requestId, id);
         pendingQuestions_.insert(requestId, questions);
-        emit questionsRequested(requestId, questions);
+        emit questionsRequested(requestId, questions, params.value("isBlocking").toBool(true));
     } else {
         emit message("[Unsupported server request: " + method + "]");
         connection_->respondError(id, -32601, "Unsupported request");

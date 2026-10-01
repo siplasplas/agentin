@@ -49,6 +49,7 @@
 #include <QSignalBlocker>
 #include <QSpinBox>
 #include <QSplitter>
+#include <QScrollBar>
 #include <QStandardPaths>
 #include <QTextCursor>
 #include <QTextDocument>
@@ -166,6 +167,10 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     usageVisibleAction_->setObjectName("showUsageLimits");
     usageVisibleAction_->setCheckable(true);
     usageVisibleAction_->setChecked(true);
+    reasoningVisibleAction_ = viewMenu->addAction("Reasoning");
+    reasoningVisibleAction_->setObjectName("showReasoning");
+    reasoningVisibleAction_->setCheckable(true);
+
 
     auto *central = new QWidget(this);
     auto *layout = new QVBoxLayout(central);
@@ -324,7 +329,31 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     conversationTree_->setObjectName("conversationTree");
     conversationTree_->setHeaderHidden(true);
     conversationTree_->setMinimumWidth(0);
-    chatSplitter->addWidget(conversationTree_);
+    auto *leftSplitter = new QSplitter(Qt::Vertical, chatSplitter);
+    leftSplitter->setObjectName("conversationReasoningSplitter");
+    leftSplitter->setHandleWidth(6);
+    leftSplitter->addWidget(conversationTree_);
+    reasoning_ = new QPlainTextEdit(leftSplitter);
+    reasoning_->setObjectName("reasoningPanel");
+    reasoning_->setReadOnly(true);
+    reasoning_->setMinimumSize(0, 0);
+    reasoning_->setPlaceholderText("Reasoning — no text reported for this conversation");
+    reasoning_->setToolTip("Reasoning text or summaries shared by the selected conversation's provider");
+    leftSplitter->addWidget(reasoning_);
+    leftSplitter->setStretchFactor(0, 1);
+    leftSplitter->setStretchFactor(1, 1);
+    leftSplitter->setSizes({300, 300});
+    reasoning_->hide();
+    connect(reasoningVisibleAction_, &QAction::toggled, this, [this, leftSplitter](bool visible) {
+        reasoning_->setVisible(visible);
+        if (visible && !leftSplitter->property("reasoningShown").toBool()) {
+            const int half = qMax(1, (leftSplitter->height() - leftSplitter->handleWidth()) / 2);
+            leftSplitter->setSizes({half, half});
+            leftSplitter->setProperty("reasoningShown", true);
+        }
+        saveSettings();
+    });
+    chatSplitter->addWidget(leftSplitter);
     chatSplitter->addWidget(central);
     // The tree can be dragged down to nothing and widened to read long directories; the chat stays.
     chatSplitter->setCollapsible(0, true);
@@ -454,6 +483,7 @@ MainWindow::~MainWindow()
     disconnect(tabs_, nullptr, this, nullptr);
     for (AgentProvider *listed : providers_) disconnect(listed, nullptr, this, nullptr);
     chatView_->setDocument(emptyDocument_);
+    reasoning_->setDocument(emptyDocument_);
     chatPanel_->setParent(this);
     while (tabs_->count() > 0) {
         QWidget *page = tabs_->widget(0);
@@ -669,6 +699,12 @@ void MainWindow::loadSettings()
         usageVisibleAction_->setChecked(visible);
         usage_->setVisible(visible);
     }
+    {
+        const QSignalBlocker blocker(reasoningVisibleAction_);
+        const bool visible = settings.value("showReasoning").toBool(false);
+        reasoningVisibleAction_->setChecked(visible);
+        reasoning_->setVisible(visible);
+    }
     usagePanelHeight_ = qMax(1, settings.value("usagePanelHeight").toInt(usage_->sizeHint().height()));
     usageSplitter_->setSizes({usagePanelHeight_, 600});
     updateUsage();
@@ -693,9 +729,13 @@ void MainWindow::applyChatFont(const QFont &font)
     chatView_->setFont(font);
     input_->setFont(font);
     log_->setFont(font);
+    reasoning_->setFont(font);
     emptyDocument_->setDefaultFont(font);
     for (int i = 0; i < tabs_->count(); ++i) {
-        if (ChatTab *tab = chatTab(tabs_->widget(i))) tab->document()->setDefaultFont(font);
+        if (ChatTab *tab = chatTab(tabs_->widget(i))) {
+            tab->document()->setDefaultFont(font);
+            tab->reasoningDocument()->setDefaultFont(font);
+        }
     }
 }
 
@@ -717,6 +757,7 @@ void MainWindow::saveSettings()
                                                          {"notifications", notifier_->settings().toJson()},
                                                          {"lastAudioDirectory", lastAudioDirectory_},
                                                          {"showUsageLimits", usageVisibleAction_->isChecked()},
+                                                         {"showReasoning", reasoningVisibleAction_->isChecked()},
                                                          {"usagePanelHeight", usagePanelHeight_},
                                                          {"glmModels", QJsonArray::fromStringList(glm_->extraModels())},
                                                          {"agents", agents}})
@@ -1310,6 +1351,15 @@ QWidget *MainWindow::addChatTab(AgentProvider *selected, const QString &workingD
     auto *tab = new ChatTab(selected, workingDirectory, page);
     tab->setTurnLocks(turnLocks_);
     tab->document()->setDefaultFont(chatView_->font());
+    tab->reasoningDocument()->setDefaultFont(chatView_->font());
+    connect(tab->reasoningDocument(), &QTextDocument::contentsChanged, this, [this, tab] {
+        if (reasoning_->document() != tab->reasoningDocument()) return;
+        auto *scroll = reasoning_->verticalScrollBar();
+        if (scroll->value() >= scroll->maximum() - reasoning_->fontMetrics().height() * 2) {
+            reasoning_->moveCursor(QTextCursor::End);
+            reasoning_->ensureCursorVisible();
+        }
+    });
     connect(tab, &ChatTab::logMessage, this, &MainWindow::appendLine);
     connect(tab, &ChatTab::steeringFailed, this, [this, tab](const QString &text) {
         if (currentTab() == tab && input_->toPlainText().isEmpty()) input_->replaceText(text);
@@ -1320,9 +1370,15 @@ QWidget *MainWindow::addChatTab(AgentProvider *selected, const QString &workingD
             tabs_->setTabAttention(page, true);
             return;
         }
-        chatView_->refreshTools();
-        chatView_->moveCursor(QTextCursor::End);
-        chatView_->ensureCursorVisible();
+        if (chatRefreshPending_) return;
+        chatRefreshPending_ = true;
+        QTimer::singleShot(0, this, [this] {
+            chatRefreshPending_ = false;
+            // Refresh the current document, even if the user changed tabs during the batch.
+            chatView_->refreshTools();
+            chatView_->moveCursor(QTextCursor::End);
+            chatView_->ensureCursorVisible();
+        });
     });
     // A tab in the background that waits for an answer is marked until the user switches to it.
     connect(tab, &ChatTab::requestsChanged, this, [this, page, tab] {
@@ -1427,6 +1483,11 @@ void MainWindow::updateStatus()
     updateOperationTime();
     updateSteerButton();
     const ChatTab *tab = currentTab();
+    QTextDocument *reasoningDocument = tab ? tab->reasoningDocument() : emptyDocument_;
+    if (reasoning_->document() != reasoningDocument) {
+        reasoning_->setDocument(reasoningDocument);
+        reasoning_->moveCursor(QTextCursor::End);
+    }
     if (!tab) {
         status_->setText("No chat open");
         status_->setToolTip({});

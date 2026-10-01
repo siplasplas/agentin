@@ -86,6 +86,7 @@ private:
     QStringList queuedPrompts_;
     QSet<QString> streamedMessages_;
     QSet<QString> streamedCommands_;
+    QHash<QString, QJsonObject> reasoningItems_;
     QHash<int, QJsonValue> serverRequests_;
     QHash<int, QList<AgentQuestion>> pendingQuestions_;
     // Command prefixes Codex proposed as lasting rules, by approval request.

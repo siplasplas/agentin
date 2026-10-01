@@ -113,6 +113,7 @@ private:
     // Which request the panel shows; rebuilding it would drop the options the user ticked.
     QString requestPanelState_;
     QPlainTextEdit *log_;
+    QPlainTextEdit *reasoning_;
     QComboBox *modelInput_;
     QComboBox *effortInput_;
     QCheckBox *readOnlyInput_;
@@ -123,6 +124,7 @@ private:
     QLabel *operationTime_;
     // What the model controls last showed; rebuilding them would close an open drop-down list.
     QString modelControlsState_;
+    bool chatRefreshPending_ = false;
     MessageInput *input_;
     QLabel *enterIndicator_;
     QPushButton *sendButton_;
@@ -134,6 +136,7 @@ private:
     QSplitter *usageSplitter_;
     int usagePanelHeight_ = 0;
     QAction *usageVisibleAction_;
+    QAction *reasoningVisibleAction_;
     QTreeWidget *conversationTree_;
     QSet<QString> expandedProviders_;
     QStringList recentDirectories_;

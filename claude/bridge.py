@@ -6,6 +6,7 @@ import dataclasses
 import json
 import os
 import sys
+import uuid
 
 
 def send(message):
@@ -20,6 +21,7 @@ try:
         ClaudeSDKClient,
         ResultMessage,
         TextBlock,
+        ThinkingBlock,
         ToolUseBlock,
     )
     from claude_agent_sdk.types import PermissionResultAllow, PermissionResultDeny, StreamEvent
@@ -208,28 +210,49 @@ class Bridge:
         self.turn_had_text = False
         status = "completed"
         details = ""
+        thinking_id = str(uuid.uuid4())
+        thinking = {}
         try:
             await self.client.query(text)
             async for message in self.client.receive_response():
                 if isinstance(message, StreamEvent):
                     event = message.event
-                    if event.get("type") == "content_block_delta":
+                    if event.get("type") == "message_start":
+                        thinking_id = event.get("message", {}).get("id") or str(uuid.uuid4())
+                        thinking = {}
+                    elif event.get("type") == "content_block_start":
+                        block = event.get("content_block", {})
+                        if block.get("type") == "thinking":
+                            index = event.get("index", 0)
+                            thinking[index] = block.get("thinking", "")
+                            if thinking[index]:
+                                send({"type": "reasoning", "id": f"{thinking_id}:{index}", "text": thinking[index]})
+                    elif event.get("type") == "content_block_delta":
                         delta = event.get("delta", {})
-                        if delta.get("type") == "text_delta":
+                        if delta.get("type") == "thinking_delta":
+                            index = event.get("index", 0)
+                            thinking[index] = thinking.get(index, "") + delta.get("thinking", "")
+                            send({"type": "reasoning", "id": f"{thinking_id}:{index}", "text": thinking[index]})
+                        elif delta.get("type") == "text_delta":
                             chunk = delta.get("text", "")
                             if chunk:
                                 send({"type": "delta", "text": chunk})
                                 self.streamed_text = True
                                 self.turn_had_text = True
                 elif isinstance(message, AssistantMessage):
-                    for block in message.content:
+                    for index, block in enumerate(message.content):
                         if isinstance(block, TextBlock):
                             if not self.streamed_text and block.text:
                                 send({"type": "delta", "text": block.text})
                                 self.turn_had_text = True
+                        elif isinstance(block, ThinkingBlock):
+                            item_id = getattr(message, "message_id", None) or thinking_id
+                            send({"type": "reasoning", "id": f"{item_id}:{index}", "text": block.thinking})
                         elif isinstance(block, ToolUseBlock):
                             send({"type": "tool", "name": block.name, "input": block.input})
                     self.streamed_text = False
+                    thinking_id = str(uuid.uuid4())
+                    thinking = {}
                 elif RateLimitEvent is not None and isinstance(message, RateLimitEvent):
                     for update in rate_limit_updates(message.rate_limit_info):
                         send(update)
@@ -459,12 +482,15 @@ def message_entries(message):
     if isinstance(content, str):
         return [{"role": message.type, "text": content}] if content.strip() else []
     entries = []
-    for block in content if isinstance(content, list) else []:
+    for index, block in enumerate(content if isinstance(content, list) else []):
         if not isinstance(block, dict):
             continue
         kind = block.get("type")
         if kind == "text" and block.get("text", "").strip():
             entries.append({"role": message.type, "text": block["text"]})
+        elif kind == "thinking" and block.get("thinking", "").strip():
+            item_id = payload.get("id") or getattr(message, "uuid", "history")
+            entries.append({"role": "reasoning", "id": f"{item_id}:{index}", "text": block["thinking"]})
         elif kind == "tool_use":
             entries.append({"role": "tool", "text": block.get("name", "tool")})
     return entries

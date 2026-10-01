@@ -3,6 +3,7 @@
 #include "CodexAgent.h"
 
 #include <QDateTime>
+#include <QElapsedTimer>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -32,7 +33,8 @@ CodexConnection::CodexConnection(const QString &program, const QString &workingD
 {
     connect(server_, &QProcess::started, this, [this] {
         request("initialize", {{"clientInfo", QJsonObject{
-                    {"name", "agentdeskt"}, {"title", "agentdeskt Qt"}, {"version", "0.1.0"}}}},
+                    {"name", "agentdeskt"}, {"title", "agentdeskt Qt"}, {"version", "0.1.0"}}},
+                {"capabilities", QJsonObject{{"experimentalApi", true}}}},
                 this, [this](const QJsonObject &, const QString &error) {
             if (!error.isEmpty()) return;
             initialized_ = true;
@@ -49,11 +51,9 @@ CodexConnection::CodexConnection(const QString &program, const QString &workingD
     });
     connect(server_, &QProcess::readyReadStandardOutput, this, [this] {
         readBuffer_ += server_->readAllStandardOutput();
-        qsizetype newline;
-        while ((newline = readBuffer_.indexOf('\n')) >= 0) {
-            const QByteArray line = readBuffer_.left(newline).trimmed();
-            readBuffer_.remove(0, newline + 1);
-            if (!line.isEmpty()) handleLine(line);
+        if (!readScheduled_) {
+            readScheduled_ = true;
+            QTimer::singleShot(0, this, &CodexConnection::processReadBuffer);
         }
     });
     connect(server_, &QProcess::readyReadStandardError, this, [this] {
@@ -77,6 +77,7 @@ CodexConnection::CodexConnection(const QString &program, const QString &workingD
         const bool wasConnected = initialized_;
         initialized_ = false;
         pendingRequests_.clear();
+        readBuffer_.clear();
         threads_.clear();
         liveThreadDirectories_.clear();
         emit disconnected();
@@ -206,7 +207,7 @@ AgentBackend *CodexConnection::createChat(const QString &workingDirectory, QObje
 void CodexConnection::start()
 {
     server_->setWorkingDirectory(workingDirectory_);
-    server_->start(program_, {"app-server", "--stdio"});
+    server_->start(program_, {"-c", "features.default_mode_request_user_input=true", "app-server", "--stdio"});
 }
 
 bool CodexConnection::isRunning() const
@@ -445,6 +446,29 @@ void CodexConnection::sendJson(const QJsonObject &message)
 {
     if (server_->state() == QProcess::NotRunning) return;
     server_->write(QJsonDocument(message).toJson(QJsonDocument::Compact) + '\n');
+}
+
+void CodexConnection::processReadBuffer()
+{
+    readScheduled_ = false;
+    QElapsedTimer clock;
+    clock.start();
+    qsizetype offset = 0;
+    int processed = 0;
+    while (processed < 128 && clock.elapsed() < 8) {
+        const qsizetype newline = readBuffer_.indexOf('\n', offset);
+        if (newline < 0) break;
+        const QByteArray line = readBuffer_.mid(offset, newline - offset).trimmed();
+        offset = newline + 1;
+        ++processed;
+        if (!line.isEmpty()) handleLine(line);
+    }
+    // Remove the processed prefix once per batch, rather than copying the tail for every line.
+    readBuffer_.remove(0, offset);
+    if (readBuffer_.contains('\n') && !readScheduled_) {
+        readScheduled_ = true;
+        QTimer::singleShot(0, this, &CodexConnection::processReadBuffer);
+    }
 }
 
 void CodexConnection::handleLine(const QByteArray &line)

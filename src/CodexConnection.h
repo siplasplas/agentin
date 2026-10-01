@@ -80,6 +80,7 @@ private:
     void finishConversationSync();
     void sendJson(const QJsonObject &message);
     void handleLine(const QByteArray &line);
+    void processReadBuffer();
     void handleResponse(const QJsonObject &response);
 
     QString program_;
@@ -87,6 +88,7 @@ private:
     QString indexPath_;
     QProcess *server_;
     QByteArray readBuffer_;
+    bool readScheduled_ = false;
     qint64 nextRequestId_ = 1;
     QHash<qint64, PendingRequest> pendingRequests_;
     QHash<QString, QPointer<CodexAgent>> threads_;

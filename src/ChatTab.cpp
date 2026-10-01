@@ -12,11 +12,15 @@
 #include <QTextDocument>
 #include <QTimer>
 
+#include <algorithm>
+
 ChatTab::ChatTab(AgentProvider *provider, const QString &workingDirectory, QObject *parent)
     : QObject(parent), provider_(provider), document_(new QTextDocument(this)),
+      reasoningDocument_(new QTextDocument(this)),
       path_(workingDirectory), title_("New chat")
 {
     document_->setDocumentLayout(new QPlainTextDocumentLayout(document_));
+    reasoningDocument_->setDocumentLayout(new QPlainTextDocumentLayout(reasoningDocument_));
     // Other windows and outside tools do not announce a free directory, so waiting chats also retry.
     retry_ = new QTimer(this);
     retry_->setInterval(2000);
@@ -209,6 +213,7 @@ bool ChatTab::startNew(const QString &workingDirectory)
     lastOperationName_ = "Time";
     live_ = true;
     liveTranscript_.clear();
+    clearReasoning();
     historyRefreshCutoff_ = 0;
     historyRefreshQueuedText_.clear();
     toolGroup_ = 0;
@@ -240,6 +245,7 @@ void ChatTab::showPreview(AgentProvider *provider, const QString &id, const QStr
     pendingAttach_ = false;
     hasMore_ = false;
     liveTranscript_.clear();
+    clearReasoning();
     historyRefreshCutoff_ = 0;
     historyRefreshQueuedText_.clear();
     toolGroup_ = 0;
@@ -313,6 +319,37 @@ void ChatTab::loadEarlier()
     if (!id_.isEmpty()) agent_->loadHistory(id_, path_, true);
 }
 
+void ChatTab::clearReasoning()
+{
+    reasoningItems_.clear();
+    reasoningOrder_.clear();
+    reasoningDocument_->clear();
+}
+
+void ChatTab::rebuildReasoning()
+{
+    QStringList parts;
+    for (const QString &id : reasoningOrder_)
+        if (!reasoningItems_.value(id).isEmpty()) parts.append(reasoningItems_.value(id));
+    reasoningDocument_->setPlainText(parts.join("\n\n"));
+}
+
+void ChatTab::updateReasoning(const QString &id, const QString &text)
+{
+    if (text.isEmpty()) return;
+    const QString before = reasoningItems_.value(id);
+    if (before == text) return;
+    const bool exists = reasoningItems_.contains(id);
+    if (!exists) reasoningOrder_.append(id);
+    reasoningItems_.insert(id, text);
+    if (reasoningOrder_.last() == id && text.startsWith(before)) {
+        QTextCursor cursor(reasoningDocument_);
+        cursor.movePosition(QTextCursor::End);
+        if (!exists && !reasoningDocument_->isEmpty()) cursor.insertText("\n\n");
+        cursor.insertText(text.mid(before.size()));
+    } else rebuildReasoning();
+}
+
 void ChatTab::setAgent(AgentBackend *agent)
 {
     agent_ = agent;
@@ -336,6 +373,7 @@ void ChatTab::setAgent(AgentBackend *agent)
     });
     connect(agent, &AgentBackend::messageStarted, this, [this, name] { appendText("\n" + name + ": "); });
     connect(agent, &AgentBackend::messageDelta, this, &ChatTab::appendText);
+    connect(agent, &AgentBackend::reasoningUpdated, this, &ChatTab::updateReasoning);
     connect(agent, &AgentBackend::messageFinished, this, [this] { appendText("\n"); });
     connect(agent, &AgentBackend::toolStarted, this, [this, name](const QString &tool, const QString &details) {
         toolGroup_ = 0;
@@ -359,9 +397,12 @@ void ChatTab::setAgent(AgentBackend *agent)
     });
     connect(agent, &AgentBackend::turnCompleted, this, [this, name](const QString &status, const QString &details) {
         updateTaskClock();
-        // Requests of a finished turn can no longer be answered.
-        if (!requests_.isEmpty()) {
-            requests_.clear();
+        // Nonblocking questions stay answerable until the server resolves them.
+        const auto firstRemoved = std::remove_if(requests_.begin(), requests_.end(), [](const PendingRequest &request) {
+            return request.blocking;
+        });
+        if (firstRemoved != requests_.end()) {
+            requests_.erase(firstRemoved, requests_.end());
             emit requestsChanged();
         }
         if (!turnUsage_.isEmpty()) {
@@ -393,7 +434,7 @@ void ChatTab::setAgent(AgentBackend *agent)
         requests_.append(request);
         emit requestsChanged();
     });
-    connect(agent, &AgentBackend::questionsRequested, this, [this](int id, const QList<AgentQuestion> &questions) {
+    connect(agent, &AgentBackend::questionsRequested, this, [this](int id, const QList<AgentQuestion> &questions, bool blocking) {
         if (questions.isEmpty()) {
             agent_->answerQuestions(id, {});
             return;
@@ -401,8 +442,17 @@ void ChatTab::setAgent(AgentBackend *agent)
         PendingRequest request;
         request.id = id;
         request.questions = questions;
+        request.blocking = blocking;
         requests_.append(request);
         emit requestsChanged();
+    });
+    connect(agent, &AgentBackend::requestResolved, this, [this](int id) {
+        for (int i = 0; i < requests_.size(); ++i) {
+            if (requests_.at(i).id != id) continue;
+            requests_.removeAt(i);
+            emit requestsChanged();
+            break;
+        }
     });
     // A resumed conversation becomes live only if this tab still shows the chat it asked for.
     connect(agent, &AgentBackend::conversationOpened, this, [this](const QString &id, bool resumed) {
@@ -513,7 +563,17 @@ void ChatTab::showHistory(const QList<ChatEntry> &entries, bool hasMore, const Q
     QStringList blocks;
     QList<int> historyTools;
     historyMessages_.clear();
+    QStringList reasoningHistory;
+    int reasoningIndex = 0;
     for (const ChatEntry &entry : entries) {
+        if (entry.role == "reasoning") {
+            const QString key = entry.id.isEmpty() ? "history-" + QString::number(reasoningIndex++) : entry.id;
+            if (!entry.text.isEmpty()) {
+                reasoningItems_.insert(key, entry.text);
+                reasoningHistory.append(key);
+            }
+            continue;
+        }
         if (entry.role == "user") {
             historyMessages_.append(entry.text);
             blocks.append("You: " + entry.text);
@@ -526,6 +586,10 @@ void ChatTab::showHistory(const QList<ChatEntry> &entries, bool hasMore, const Q
             blocks.append(name + ": " + entry.text);
         }
     }
+    for (const QString &key : reasoningOrder_)
+        if (!reasoningHistory.contains(key)) reasoningHistory.append(key);
+    reasoningOrder_ = reasoningHistory;
+    rebuildReasoning();
     if (!notice.isEmpty()) blocks.append("[" + notice + "]");
     else if (blocks.isEmpty()) blocks.append("[This conversation has no messages to show.]");
     const QString prefix = blocks.join("\n\n") + '\n';

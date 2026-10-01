@@ -55,7 +55,7 @@ class FakeClient:
         self.interrupted = True
 
 
-for name in ("AssistantMessage", "ResultMessage", "TextBlock", "ToolUseBlock", "RateLimitEvent"):
+for name in ("AssistantMessage", "ResultMessage", "TextBlock", "ThinkingBlock", "ToolUseBlock", "RateLimitEvent"):
     setattr(sdk, name, type(name, (Message,), {}))
 sdk.StreamEvent = type("StreamEvent", (Message,), {})
 sdk_types.StreamEvent = sdk.StreamEvent
@@ -72,6 +72,35 @@ spec.loader.exec_module(bridge_module)
 
 
 class ClaudeBridgeTest(unittest.IsolatedAsyncioTestCase):
+    async def test_reasoning_stream_final_and_history(self):
+        events = []
+        with patch.object(bridge_module, "send", events.append):
+            bridge = bridge_module.Bridge("/tmp/project")
+            await bridge.connect()
+            bridge.client.responses = [
+                sdk.StreamEvent(event={"type": "message_start", "message": {"id": "msg-1"}}),
+                sdk.StreamEvent(event={"type": "content_block_start", "index": 0,
+                                       "content_block": {"type": "thinking", "thinking": ""}}),
+                sdk.StreamEvent(event={"type": "content_block_delta", "index": 0,
+                                       "delta": {"type": "thinking_delta", "thinking": "First "}}),
+                sdk.StreamEvent(event={"type": "content_block_delta", "index": 0,
+                                       "delta": {"type": "thinking_delta", "thinking": "thought"}}),
+                sdk.AssistantMessage(message_id="msg-1", content=[
+                    sdk.ThinkingBlock(thinking="First thought", signature="private-signature"),
+                    sdk.TextBlock(text="Answer")]),
+                sdk.AssistantMessage(message_id="msg-2", content=[sdk.ThinkingBlock(thinking="Unstreamed", signature="")]),
+            ]
+            await bridge.run_turn("hi")
+        reasoning = [event for event in events if event["type"] == "reasoning"]
+        self.assertEqual([(event["id"], event["text"]) for event in reasoning], [
+            ("msg-1:0", "First "), ("msg-1:0", "First thought"),
+            ("msg-1:0", "First thought"), ("msg-2:0", "Unstreamed")])
+        self.assertNotIn("private-signature", str(events))
+        self.assertEqual(bridge_module.message_entries(Message(type="assistant", uuid="record", message={
+            "id": "msg-1", "content": [{"type": "thinking", "thinking": "First thought", "signature": "hidden"},
+                                         {"type": "redacted_thinking", "data": "hidden"}]})),
+                         [{"role": "reasoning", "id": "msg-1:0", "text": "First thought"}])
+
     async def test_per_window_rate_limits_reach_the_jsonl_client(self):
         events = []
         with patch.object(bridge_module, "send", events.append):

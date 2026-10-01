@@ -15,6 +15,7 @@ struct PendingRequest
 {
     int id = 0;
     bool approval = false;
+    bool blocking = true;
     QString title;
     QString description;
     bool canAcceptForSession = false;
@@ -45,6 +46,7 @@ public:
     AgentProvider *provider() const { return provider_; }
     AgentBackend *agent() const { return agent_; }
     QTextDocument *document() const { return document_; }
+    QTextDocument *reasoningDocument() const { return reasoningDocument_; }
     QString conversationId() const { return id_; }
     // Identifies the conversation for MruTabWidget::findTab(); empty until it has an ID.
     QString key() const;
@@ -106,6 +108,9 @@ signals:
 private:
     void setAgent(AgentBackend *agent);
     void appendText(const QString &text);
+    void updateReasoning(const QString &id, const QString &text);
+    void rebuildReasoning();
+    void clearReasoning();
     void appendToolText(const QString &text);
     int toolGroup_ = 0;
     int nextToolGroup_ = 0;
@@ -127,6 +132,9 @@ private:
     AgentProvider *provider_;
     AgentBackend *agent_ = nullptr;
     QTextDocument *document_;
+    QTextDocument *reasoningDocument_;
+    QStringList reasoningOrder_;
+    QHash<QString, QString> reasoningItems_;
     QString id_;
     QString path_;
     QString title_;
