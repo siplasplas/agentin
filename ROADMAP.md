@@ -23,3 +23,20 @@ the other agents (their plan modes) still wait, because only Codex enforces them
   the working directory. Claude, GLM, Gemini and Antigravity chats hold only their working directory,
   since agentin does not give them other directories; Claude Code sessions outside agentin do
   not report theirs.
+
+## Files changed by a turn
+
+A window, or a panel beside the chat, listing the files changed since the current turn started, with the
+number of lines added and removed for each:
+
+- **Snapshot:** remember the files of the chat's directory, and the writable directories it holds, when a
+  turn starts (contents, or a cheap fingerprint first and contents only of files that then change), so
+  the comparison does not depend on Git.
+- **Counting:** use the O(NP) diff from libdiffcore (`/home/andrzej/wazne/gitmy/diffmerge/libdiffcore`,
+  `diffcore::DiffEngine` over interned lines). Only its main loop is needed for the counts; the slider
+  heuristics matter only when a diff is shown.
+- **Diff view:** for each file, show the diff computed by the same library, with the slider heuristics.
+- **Opening a file:** clicking a file opens it with the application the system associates with its
+  type (the desktop's default, as `QDesktopServices::openUrl` or `xdg-open` use it), for example
+  JetBrains CLion for `.cpp` or RustRover for `.rs` when those are the defaults, switching to an
+  already running instance when there is one.
