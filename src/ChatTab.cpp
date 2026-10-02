@@ -726,6 +726,15 @@ void ChatTab::showHistory(const QList<ChatEntry> &entries, bool hasMore, const Q
         block.setUserData(data);
     }
     hasMore_ = hasMore;
+    // A tab saved as "New chat" before its first message was named takes the conversation's first message,
+    // or, while older messages are not loaded, the title the agent's list has for it.
+    if (title_ == "New chat" && !id_.isEmpty()) {
+        if (!hasMore && !historyMessages_.isEmpty()) title_ = historyMessages_.first().simplified().left(200);
+        else
+            for (const QJsonObject &conversation : provider_->conversations())
+                if (conversation.value("id").toString() == id_ && !conversation.value("title").toString().isEmpty())
+                    title_ = conversation.value("title").toString();
+    }
     emit userMessagesChanged();
     emit changed();
     emit textAppended();
