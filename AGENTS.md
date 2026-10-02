@@ -51,5 +51,5 @@ The conversation language does not change the English-language requirements for 
 - `ChatTab` is the model of one tab: its chat session, text document, preview or live state, and history. `MainWindow` owns the providers, the conversation tree, the tabs and one chat view that moves into the current tab.
 - `ConversationIndex` keeps a provider's local JSON index; `ProcessLocks` detects conversations held open by other tools.
 - A new agent needs a provider and a chat class; `MainWindow` should not need provider-specific branches.
-- `libdiffcore/` is the O(NP) line diff, taken from diffmerge and maintained here as part of agentin (C++17, Qt Core only); `countLineChanges` in `src/LineChanges.h` counts added and removed lines with the limits of the changed files view.
+- `libdiffcore/` is the O(NP) line diff, taken from diffmerge and maintained here as part of agentin (C++17, Qt Core only); `countLineChanges` in `src/LineChanges.h` counts added and removed lines with the limits of the changed files view. `GitBaseline` (`src/GitBaseline.h`, libgit2) records a Git work tree at the start of a turn and lists the files changed since.
 - Match the surrounding code style. User-visible behavior changes go into `README.md`.

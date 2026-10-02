@@ -9,6 +9,9 @@ find_package(Qt6 REQUIRED COMPONENTS Widgets)
 # QxFileDialog and MruTabWidget come from the qt-extra library (source: /home/andrzej/wazne/gitmy/qt-extra),
 # installed to the system. Version 2.1 adds optional file metadata and the chooser directory getter.
 find_package(qt-extra 2.1 REQUIRED)
+# libgit2 reads the Git baseline of the files a turn changes.
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(LIBGIT2 REQUIRED IMPORTED_TARGET libgit2)
 configure_file(claude/bridge.py ${CMAKE_CURRENT_BINARY_DIR}/claude_bridge.py COPYONLY)
 
 # backward-cpp writes a stack trace after a crash; it declares compatibility with older CMake releases.
@@ -63,8 +66,10 @@ add_executable(agentin
     src/Notifier.h
     src/LineChanges.cpp
     src/LineChanges.h
+    src/GitBaseline.cpp
+    src/GitBaseline.h
 )
-target_link_libraries(agentin PRIVATE Qt6::Widgets qt-extra Backward::Object diffcore::diffcore)
+target_link_libraries(agentin PRIVATE Qt6::Widgets qt-extra Backward::Object diffcore::diffcore PkgConfig::LIBGIT2)
 target_include_directories(agentin PRIVATE src)
 # Keeps the information backward-cpp needs for files and line numbers, also in optimized builds.
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
@@ -122,8 +127,10 @@ if(BUILD_TESTING)
         src/Notifier.h
         src/LineChanges.cpp
         src/LineChanges.h
+        src/GitBaseline.cpp
+        src/GitBaseline.h
     )
-    target_link_libraries(agentin_test PRIVATE Qt6::Widgets Qt6::Test qt-extra diffcore::diffcore)
+    target_link_libraries(agentin_test PRIVATE Qt6::Widgets Qt6::Test qt-extra diffcore::diffcore PkgConfig::LIBGIT2)
     target_include_directories(agentin_test PRIVATE src)
     add_test(NAME agentin_test COMMAND agentin_test)
     set_tests_properties(agentin_test PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")

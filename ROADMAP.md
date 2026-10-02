@@ -32,6 +32,10 @@ lines added and removed for each, a diff of each file, and opening the file in i
 Done: libdiffcore is part of agentin (`libdiffcore/`), with a counting mode of its main loop that keeps
 memory linear and stops at an edit distance bound, a deadline or a cancellation flag
 (`DiffEngine::countChanges`), and `countLineChanges` (`src/LineChanges.h`) applies the limits below.
+Done: `GitBaseline` (`src/GitBaseline.h`, libgit2) captures the start of a turn and lists the changed
+files as described below, keeping the start content of tracked files that already differed from Git in
+memory rather than as blobs, so nothing is written to the repository. Next: the changes model in the
+chat tab with counting in a worker thread, then the window.
 
 ### Baseline: Git plus the start content of files changed before the turn
 
