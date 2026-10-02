@@ -454,7 +454,9 @@ previous or next message you wrote in the current tab's conversation; Page Up
 and Page Down always recall messages. After the newest message, the text you
 typed before browsing comes back. The messages come from the conversation's
 loaded history and from what you sent in the tab, so no separate history is
-stored; older messages become available after **Show earlier messages**.
+stored; older messages become available after **Show earlier messages**. A
+message you wrote several times is recalled once, at the place of its latest
+use.
 
 Two agents never work on turns in the same directory, or in a directory and one
 of its subdirectories, at the same time. A turn holds its working directory and

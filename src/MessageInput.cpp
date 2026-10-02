@@ -1,5 +1,6 @@
 #include "MessageInput.h"
 
+#include <QSet>
 #include <QKeyEvent>
 #include <QTextBlock>
 #include <QTextLayout>
@@ -30,11 +31,20 @@ void MessageInput::setPlaceholderText(const QString &text)
     viewport()->update();
 }
 
+// Each message is recalled once, at the place of its latest use, so repeated messages do not alternate.
 void MessageInput::setHistory(const QStringList &messages)
 {
-    if (messages == history_) return;
+    QStringList unique;
+    QSet<QString> seen;
+    for (auto it = messages.crbegin(); it != messages.crend(); ++it) {
+        const QString key = it->trimmed();
+        if (key.isEmpty() || seen.contains(key)) continue;
+        seen.insert(key);
+        unique.prepend(*it);
+    }
+    if (unique == history_) return;
     const bool browsing = position_ < history_.size();
-    history_ = messages;
+    history_ = unique;
     position_ = history_.size();
     if (browsing) replaceText(draft_);
 }
