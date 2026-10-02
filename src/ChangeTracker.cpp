@@ -67,15 +67,15 @@ public:
     // New, binary, too large and rewritten files get a note instead of a diff.
     void diff(const FileChange &change)
     {
-        FileDiff result{change.root, change.file.path, {}, {}, {}, {}};
+        FileDiff result{change.root, change.file.path, {}, {}, {}, {}, false};
         GitBaseline *baseline = nullptr;
         for (const auto &candidate : baselines_[change.since])
             if (candidate->root() == change.root) baseline = candidate.get();
         if (!baseline) {
             result.note = "This file is no longer tracked.";
-        } else if (change.file.status == ChangedFile::Status::New) {
-            result.note = QString("New file with %1 %2; open it to see its content.")
-                              .arg(change.lines.added).arg(change.lines.added == 1 ? "line" : "lines");
+        } else if (change.file.status == ChangedFile::Status::New && change.lines.kind == LineChanges::Kind::Counted) {
+            result.newFile = true;
+            result.after = splitLines(baseline->contentAfter(change.file));
         } else if (change.lines.kind == LineChanges::Kind::Binary || change.file.status == ChangedFile::Status::Binary) {
             result.note = "Binary file; it is compared by content only.";
         } else if (change.lines.kind == LineChanges::Kind::TooLarge) {
@@ -197,18 +197,24 @@ QDateTime ChangeTracker::startedAt(ChangesSince since) const
     return {};
 }
 
+ChangeTracker::Totals ChangeTracker::totals(ChangesSince since) const
+{
+    Totals totals;
+    for (const FileChange &change : changes_.value(since)) {
+        ++totals.files;
+        if (change.lines.kind != LineChanges::Kind::Counted) continue;
+        totals.added += change.lines.added;
+        totals.removed += change.lines.removed;
+    }
+    return totals;
+}
+
 QString ChangeTracker::summary(ChangesSince since) const
 {
-    const QList<FileChange> changes = changes_.value(since);
-    if (changes.isEmpty()) return {};
-    int added = 0;
-    int removed = 0;
-    for (const FileChange &change : changes) {
-        if (change.lines.kind != LineChanges::Kind::Counted) continue;
-        added += change.lines.added;
-        removed += change.lines.removed;
-    }
-    return QString("%1 %2, +%3 −%4").arg(changes.size()).arg(changes.size() == 1 ? "file" : "files").arg(added).arg(removed);
+    const Totals counted = totals(since);
+    if (counted.files == 0) return {};
+    return QString("%1 %2, +%3 −%4").arg(counted.files).arg(counted.files == 1 ? "file" : "files")
+        .arg(counted.added).arg(counted.removed);
 }
 
 #include "ChangeTracker.moc"

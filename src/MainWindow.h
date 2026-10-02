@@ -131,7 +131,7 @@ private:
     QWidget *chatPanel_;
     QLabel *chatHeader_;
     // Shows the latest turn's changes summary and opens the changes window.
-    QToolButton *changesButton_;
+    QLabel *changesLink_;
     QAction *changesAction_;
     QPushButton *loadEarlierButton_;
     ChatView *chatView_;

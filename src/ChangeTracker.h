@@ -41,6 +41,8 @@ struct FileDiff
     QStringList after;
     QList<diffcore::Hunk> hunks;
     QString note;
+    // A new file is shown as its content, in after, without a diff.
+    bool newFile = false;
 };
 Q_DECLARE_METATYPE(FileDiff)
 
@@ -69,6 +71,14 @@ public:
     QStringList untracked() const { return untracked_; }
     // "7 files, +120 −34", or empty when nothing changed.
     QString summary(ChangesSince since = ChangesSince::Turn) const;
+    struct Totals
+    {
+        int files = 0;
+        int added = 0;
+        int removed = 0;
+    };
+    // Lines of files that could be counted; binary and too large files count only as files.
+    Totals totals(ChangesSince since = ChangesSince::Turn) const;
 
 signals:
     void changesUpdated();

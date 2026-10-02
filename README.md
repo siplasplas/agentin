@@ -189,7 +189,9 @@ Chats in different tabs run independently, also several chats with the same
 agent. All Codex chats share one App Server process. A tab whose agent is
 responding shows a busy marker, and a background tab that receives output is
 marked until you switch to it. Closing a tab while its agent is responding asks
-first and then stops the response. Ctrl+Tab switches tabs in most recently used
+first and then stops the response. Quitting the application (the window's close
+button, Alt+F4 or `quit`) while turns are running lists them and asks whether to
+stop them and quit; otherwise it closes at once. Ctrl+Tab switches tabs in most recently used
 order.
 
 In a Codex tab, choose the model and reasoning effort in the chat header.
@@ -262,16 +264,19 @@ next turn starts. Changes committed during the turn count too; files ignored by
 Git and untracked files the turn did not touch do not, and a new file counts its
 lines as added. Directories outside Git are not tracked.
 
-The summary is a button; it and **Conversations → Changes of the latest turn…**
-open the chat's changes window, which follows the turn live. It lists each file
+The summary, in the header's second row with added lines in green and removed
+ones in red, is a link; it and **Conversations → Changes of the latest turn…**
+open the chat's changes window, which follows the turn live. With **Group new files**, as JetBrains
+IDEs show them, new files are listed below the changed ones. It lists each file
 with its status (`m` modified, `n` new, `d` deleted, `r` renamed in the index,
 `b` binary) and its added and removed lines, and shows the diff of the selected
 file, unified or side by side, with line numbers and three lines of context;
 longer unchanged stretches are folded into one line that opens with a click, and
 the arrow buttons (or Alt+Up and Alt+Down) move between changes. The list starts
 from the latest turn; it can also show the changes since the chat's first turn,
-or against `HEAD` as Git sees them, including changes made before the chat. New,
-binary, too large and largely rewritten files get a note instead of a diff. Double-click or
+or against `HEAD` as Git sees them, including changes made before the chat. A new
+file shows its whole content with line numbers and no diff colors; binary, too
+large and largely rewritten files get a note instead of a diff. Double-click or
 Enter opens a file; the context menu also opens its folder or copies its path.
 
 **Settings → Open files with…** decides which program opens a changed file, by

@@ -1,6 +1,7 @@
 #include "ChangesWindow.h"
 
 #include <QApplication>
+#include <QCheckBox>
 #include <QClipboard>
 #include <QCloseEvent>
 #include <QComboBox>
@@ -67,7 +68,7 @@ QPlainTextEdit *diffView(QWidget *parent, const QString &name)
 
 ChangesWindow::ChangesWindow(ChangeTracker *tracker, const QString &title, QWidget *parent)
     : QWidget(parent, Qt::Window), tracker_(tracker), summary_(new QLabel(this)), since_(new QComboBox(this)),
-      list_(new QTreeWidget(this)), view_(new QComboBox(this)), previous_(new QToolButton(this)),
+      groupNew_(new QCheckBox("Group new files", this)), list_(new QTreeWidget(this)), view_(new QComboBox(this)), previous_(new QToolButton(this)),
       next_(new QToolButton(this)), pages_(new QStackedWidget(this)), unified_(diffView(this, "fileDiff")),
       before_(diffView(this, "fileDiffBefore")), after_(diffView(this, "fileDiffAfter"))
 {
@@ -84,7 +85,11 @@ ChangesWindow::ChangesWindow(ChangeTracker *tracker, const QString &title, QWidg
                        "everything that differs from the current commit");
     summary_->setObjectName("changesSummary");
     summary_->setWordWrap(true);
+    groupNew_->setObjectName("groupNewFiles");
+    groupNew_->setChecked(true);
+    groupNew_->setToolTip("List new files apart from changed ones");
     top->addWidget(since_);
+    top->addWidget(groupNew_);
     top->addWidget(summary_, 1);
     layout->addLayout(top);
 
@@ -143,6 +148,7 @@ ChangesWindow::ChangesWindow(ChangeTracker *tracker, const QString &title, QWidg
         if (tracker_) tracker_->setExtraSince(since());
         updateList();
     });
+    connect(groupNew_, &QCheckBox::toggled, this, &ChangesWindow::updateList);
     connect(view_, QOverload<int>::of(&QComboBox::currentIndexChanged), this, [this](int index) {
         pages_->setCurrentIndex(index);
         render();
@@ -223,6 +229,26 @@ void ChangesWindow::updateList()
     const QSignalBlocker blocker(list_);
     list_->clear();
     QTreeWidgetItem *reselect = nullptr;
+    int newCount = 0;
+    for (const FileChange &change : changes)
+        if (change.file.status == ChangedFile::Status::New) ++newCount;
+    const bool grouped = groupNew_->isChecked() && newCount > 0;
+    list_->setRootIsDecorated(grouped);
+    QTreeWidgetItem *changedGroup = nullptr;
+    QTreeWidgetItem *newGroup = nullptr;
+    if (grouped) {
+        QFont bold = list_->font();
+        bold.setBold(true);
+        if (newCount < changes.size()) {
+            // A heading spans the row, which shows its first column.
+            changedGroup = new QTreeWidgetItem(list_, {QString("Changed files (%1)").arg(changes.size() - newCount)});
+            changedGroup->setFont(0, bold);
+            changedGroup->setFirstColumnSpanned(true);
+        }
+        newGroup = new QTreeWidgetItem(list_, {QString("New files (%1)").arg(newCount)});
+        newGroup->setFont(0, bold);
+        newGroup->setFirstColumnSpanned(true);
+    }
     for (const FileChange &change : changes) {
         // With several work trees, paths are shown in full so that their files can be told apart.
         QString path = roots.size() > 1 ? QDir(change.root).filePath(change.file.path) : change.file.path;
@@ -251,7 +277,10 @@ void ChangesWindow::updateList()
         case LineChanges::Kind::Cancelled:
             break;
         }
-        auto *item = new QTreeWidgetItem(list_, {statusLetter(change.file.status), QDir::toNativeSeparators(path), added, removed});
+        const QStringList columns{statusLetter(change.file.status), QDir::toNativeSeparators(path), added, removed};
+        QTreeWidgetItem *group = !grouped ? nullptr
+            : change.file.status == ChangedFile::Status::New ? newGroup : changedGroup;
+        auto *item = group ? new QTreeWidgetItem(group, columns) : new QTreeWidgetItem(list_, columns);
         item->setData(1, Qt::UserRole, key(change));
         item->setToolTip(1, QDir::toNativeSeparators(QDir(change.root).filePath(change.file.path)));
         item->setForeground(2, QColor(0x1a, 0x7f, 0x37));
@@ -260,6 +289,7 @@ void ChangesWindow::updateList()
         item->setTextAlignment(3, Qt::AlignRight | Qt::AlignVCenter);
         if (key(change) == selected) reselect = item;
     }
+    list_->expandAll();
     if (reselect) list_->setCurrentItem(reselect);
     showSelected();
 }
@@ -362,6 +392,22 @@ void ChangesWindow::render()
     if (!diff_) {
         const QString text = list_->topLevelItemCount() ? "Select a file to see its differences." : QString();
         for (QPlainTextEdit *view : {unified_, before_, after_}) view->setPlainText(text);
+        previous_->setEnabled(false);
+        next_->setEnabled(false);
+        return;
+    }
+    if (diff_->newFile) {
+        // A new file is read as it is: its whole content with line numbers, without diff colors.
+        const int width = QString::number(diff_->after.size()).size();
+        QStringList lines;
+        lines.reserve(qMin(int(diff_->after.size()), kMaximumShownLines));
+        for (int i = 0; i < diff_->after.size() && i < kMaximumShownLines; ++i)
+            lines.append(QString::number(i + 1).rightJustified(width) + "  " + diff_->after.at(i));
+        if (diff_->after.size() > kMaximumShownLines)
+            lines.append(QString("\u2026 the file is cut after %1 lines").arg(kMaximumShownLines));
+        unified_->setPlainText(lines.join('\n'));
+        after_->setPlainText(lines.join('\n'));
+        before_->setPlainText(QString("New file with %1 %2").arg(diff_->after.size()).arg(diff_->after.size() == 1 ? "line" : "lines"));
         previous_->setEnabled(false);
         next_->setEnabled(false);
         return;
@@ -474,7 +520,7 @@ bool ChangesWindow::eventFilter(QObject *object, QEvent *event)
 
 void ChangesWindow::openFile(QTreeWidgetItem *item) const
 {
-    if (!item || !tracker_) return;
+    if (!item || !tracker_ || item->data(1, Qt::UserRole).toString().isEmpty()) return;
     const QString itemKey = item->data(1, Qt::UserRole).toString();
     const QStringList parts = itemKey.split('\n');
     const QString path = QDir(parts.value(0)).filePath(parts.value(1));
@@ -495,7 +541,8 @@ void ChangesWindow::openFile(QTreeWidgetItem *item) const
 void ChangesWindow::showMenu(const QPoint &position)
 {
     QTreeWidgetItem *item = list_->itemAt(position);
-    if (!item) return;
+    // Group headings are not files.
+    if (!item || item->data(1, Qt::UserRole).toString().isEmpty()) return;
     const QStringList parts = item->data(1, Qt::UserRole).toString().split('\n');
     const QString path = QDir(parts.value(0)).filePath(parts.value(1));
     QMenu menu(this);

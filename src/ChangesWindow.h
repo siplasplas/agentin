@@ -9,6 +9,7 @@
 #include <functional>
 #include <optional>
 
+class QCheckBox;
 class QComboBox;
 class QLabel;
 class QPlainTextEdit;
@@ -61,6 +62,8 @@ private:
     std::function<void(const QString &path, int line)> opener_;
     QLabel *summary_;
     QComboBox *since_;
+    // New files listed in a group of their own below the changed ones, as JetBrains IDEs show them.
+    QCheckBox *groupNew_;
     QTreeWidget *list_;
     QComboBox *view_;
     QToolButton *previous_;

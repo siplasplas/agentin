@@ -296,13 +296,6 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     tokens_->setObjectName("tokenUsage");
     auto *headerRow = new QHBoxLayout;
     headerRow->addWidget(chatHeader_, 1);
-    changesButton_ = new QToolButton(chatPanel_);
-    changesButton_->setObjectName("changesButton");
-    changesButton_->setAutoRaise(true);
-    changesButton_->setToolTip("Files the latest turn changed; click to see them and their differences");
-    changesButton_->hide();
-    connect(changesButton_, &QToolButton::clicked, this, &MainWindow::showChangesWindow);
-    headerRow->addWidget(changesButton_);
     operationTime_ = new QLabel("Time 00:00", chatPanel_);
     operationTime_->setObjectName("operationTime");
     operationTime_->setToolTip("Elapsed time of the current task or compaction; keeps the final duration when it ends");
@@ -332,7 +325,6 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     compactionRow->addWidget(contextTokens_);
     compactionRow->addWidget(new QLabel("tokens", compactionPanel_));
     compactionRow->addWidget(fastInput_);
-    compactionRow->addStretch(1);
     compactionPanel_->hide();
     connect(compactButton_, &QPushButton::clicked, this, [this] {
         if (ChatTab *tab = currentTab()) {
@@ -340,7 +332,19 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
         }
         updateStatus();
     });
-    panelLayout->addWidget(compactionPanel_);
+    // The second row: Codex's compaction controls, then the latest turn's changes, a link to their window.
+    auto *secondRow = new QHBoxLayout;
+    secondRow->addWidget(compactionPanel_);
+    changesLink_ = new QLabel(chatPanel_);
+    changesLink_->setObjectName("changesLink");
+    changesLink_->setTextFormat(Qt::RichText);
+    changesLink_->setTextInteractionFlags(Qt::LinksAccessibleByMouse | Qt::LinksAccessibleByKeyboard);
+    changesLink_->setToolTip("Files the latest turn changed; click to see them and their differences");
+    changesLink_->hide();
+    connect(changesLink_, &QLabel::linkActivated, this, &MainWindow::showChangesWindow);
+    secondRow->addWidget(changesLink_);
+    secondRow->addStretch(1);
+    panelLayout->addLayout(secondRow);
     panelLayout->addWidget(loadEarlierButton_);
     panelLayout->addWidget(chatView_, 1);
     requestPanel_ = new QFrame(chatPanel_);
@@ -610,8 +614,33 @@ MainWindow::~MainWindow()
     }
 }
 
+// Quitting cuts off running turns, so the user confirms it; otherwise the window closes at once.
 void MainWindow::closeEvent(QCloseEvent *event)
 {
+    QStringList running;
+    QList<AgentBackend *> agents;
+    for (int i = 0; i < tabs_->count(); ++i) {
+        ChatTab *tab = chatTab(tabs_->widget(i));
+        if (!tab || !tab->agent()->isResponding()) continue;
+        running.append("\u2022 " + tab->provider()->name() + ": " + tab->title().left(60));
+        agents.append(tab->agent());
+    }
+    if (!running.isEmpty()) {
+        QMessageBox box(QMessageBox::Question, "Quit agentin",
+                        (running.size() == 1 ? QString("A turn is still running:") : QString("Turns are still running:"))
+                            + "\n\n" + running.join('\n') + "\n\nStop " + (running.size() == 1 ? "it" : "them") + " and quit?",
+                        QMessageBox::NoButton, this);
+        QPushButton *stop = box.addButton("Stop and quit", QMessageBox::AcceptRole);
+        box.addButton(QMessageBox::Cancel);
+        box.setDefaultButton(QMessageBox::Cancel);
+        box.exec();
+        if (box.clickedButton() != stop) {
+            event->ignore();
+            return;
+        }
+        for (AgentBackend *agent : agents)
+            if (agent->canInterrupt()) agent->interrupt();
+    }
     if (sessionEnabled_) saveSession();
     QMainWindow::closeEvent(event);
 }
@@ -1932,7 +1961,7 @@ void MainWindow::updateStatus()
         status_->setText("No chat open");
         status_->setToolTip({});
         chatHeader_->clear();
-        changesButton_->hide();
+        changesLink_->hide();
         changesAction_->setEnabled(false);
         tokens_->clear();
         compactionPanel_->hide();
@@ -1952,9 +1981,19 @@ void MainWindow::updateStatus()
     status_->setToolTip(status_->text());
     chatHeader_->setText(tab->headerText(false));
     const ChangeTracker *tracker = tab->changeTracker();
-    const QString changes = tracker ? tracker->summary() : QString();
-    changesButton_->setText(changes.isEmpty() ? QString("No changes") : "Changes: " + changes);
-    changesButton_->setVisible(tracker != nullptr);
+    if (tracker) {
+        // Added lines in green and removed ones in red, lighter on a dark background.
+        const bool dark = palette().color(QPalette::Base).lightness() < 128;
+        const ChangeTracker::Totals totals = tracker->totals();
+        const QString text = totals.files == 0
+            ? QString("No changes")
+            : QString("Changes: %1 %2, <span style=\"color:%3\">+%4</span> <span style=\"color:%5\">−%6</span>")
+                  .arg(totals.files).arg(totals.files == 1 ? "file" : "files").arg(dark ? "#3fb950" : "#1a7f37")
+                  .arg(totals.added).arg(dark ? "#f85149" : "#cf222e").arg(totals.removed);
+        changesLink_->setText("<a href=\"changes\" style=\"text-decoration:none; color:"
+                              + palette().color(QPalette::WindowText).name() + "\">" + text + "</a>");
+    }
+    changesLink_->setVisible(tracker != nullptr);
     changesAction_->setEnabled(tracker != nullptr);
     const TokenUsage turn = tab->lastTurnUsage();
     const TokenUsage conversation = tab->conversationUsage();
