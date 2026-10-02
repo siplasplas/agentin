@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QByteArray>
+#include <QStringList>
 
 #include <atomic>
 
@@ -26,6 +27,11 @@ struct LineChanges
 constexpr qint64 kMaximumDiffBytes = 64 * 1024 * 1024;
 constexpr int kMaximumDifferences = 100000;
 constexpr int kDiffTimeLimitMs = 3000;
+
+// Lines as countLineChanges sees them: split at line feeds, a carriage return before one dropped.
+QStringList splitLines(const QByteArray &content);
+// A zero byte near the start, as Git decides that a file is binary.
+bool looksBinary(const QByteArray &content);
 
 // Meant for a worker thread; cancel, when set, stops a long count early.
 LineChanges countLineChanges(const QByteArray &before, const QByteArray &after,

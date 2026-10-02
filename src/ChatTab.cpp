@@ -176,13 +176,14 @@ QString ChatTab::key() const
     return key(provider_->name(), id_);
 }
 
-QString ChatTab::headerText() const
+QString ChatTab::headerText(bool withChanges) const
 {
     QStringList parts{provider_->name(), title_, QDir::toNativeSeparators(path_)};
     if (isWaiting()) parts.append("waiting: the directory is used by " + waitingFor_);
     if (!lockNotice_.isEmpty()) parts.append("locked: " + lockNotice_);
     else if (!live_) parts.append("read-only preview");
-    if (changeTracker_ && !changeTracker_->summary().isEmpty()) parts.append("Changes: " + changeTracker_->summary());
+    if (withChanges && changeTracker_ && !changeTracker_->summary().isEmpty())
+        parts.append("Changes: " + changeTracker_->summary());
     return parts.join("  •  ");
 }
 

@@ -262,6 +262,15 @@ next turn starts. Changes committed during the turn count too; files ignored by
 Git and untracked files the turn did not touch do not, and a new file counts its
 lines as added. Directories outside Git are not tracked.
 
+The summary is a button; it and **Conversations → Changes of the latest turn…**
+open the chat's changes window, which follows the turn live. It lists each file
+with its status (`m` modified, `n` new, `d` deleted, `r` renamed in the index,
+`b` binary) and its added and removed lines, and shows the unified diff of the
+selected file with line numbers and three lines of context. New, binary, too
+large and largely rewritten files get a note instead of a diff. Double-click or
+Enter opens a file with the application the system associates with its type;
+the context menu also opens its folder or copies its path.
+
 The chat header shows elapsed operation time as `mm:ss`: **Task** while an agent
 works and **Compact** during manual or automatic Codex compaction. The counter
 stops at the final duration when the operation ends and follows the selected tab.

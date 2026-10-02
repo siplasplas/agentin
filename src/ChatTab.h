@@ -54,7 +54,8 @@ public:
     static QString key(const QString &provider, const QString &id);
     QString title() const { return title_; }
     QString workingDirectory() const { return path_; }
-    QString headerText() const;
+    // The header without the changes summary is shown beside a button that has it.
+    QString headerText(bool withChanges = true) const;
     // Null until the chat's first turn.
     ChangeTracker *changeTracker() const { return changeTracker_; }
     QString operationTimeText() const;

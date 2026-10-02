@@ -4,14 +4,12 @@
 
 #include <QStringList>
 
-namespace {
-// Git treats a file with a zero byte near its start as binary; the same test is used here.
 bool looksBinary(const QByteArray &content)
 {
     return content.left(8000).contains('\0');
 }
 
-QStringList lines(const QByteArray &content)
+QStringList splitLines(const QByteArray &content)
 {
     QStringList result;
     qsizetype start = 0;
@@ -25,7 +23,6 @@ QStringList lines(const QByteArray &content)
     }
     return result;
 }
-}
 
 LineChanges countLineChanges(const QByteArray &before, const QByteArray &after, const std::atomic<bool> *cancel)
 {
@@ -38,8 +35,8 @@ LineChanges countLineChanges(const QByteArray &before, const QByteArray &after, 
         changes.kind = LineChanges::Kind::TooLarge;
         return changes;
     }
-    const QStringList left = lines(before);
-    const QStringList right = lines(after);
+    const QStringList left = splitLines(before);
+    const QStringList right = splitLines(after);
     changes.linesBefore = int(left.size());
     changes.linesAfter = int(right.size());
     diffcore::CountLimits limits;

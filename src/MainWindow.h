@@ -101,6 +101,7 @@ private:
     void appendText(const QString &text);
     void appendLine(const QString &text);
     void updateStatus();
+    void showChangesWindow();
     void updateOperationTime();
     void updateModelControls();
     void updateUsage();
@@ -126,6 +127,9 @@ private:
     // One chat view shared by all tabs; it moves into the current tab's page and shows its document.
     QWidget *chatPanel_;
     QLabel *chatHeader_;
+    // Shows the latest turn's changes summary and opens the changes window.
+    QToolButton *changesButton_;
+    QAction *changesAction_;
     QPushButton *loadEarlierButton_;
     ChatView *chatView_;
     QTextDocument *emptyDocument_;

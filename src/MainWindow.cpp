@@ -2,6 +2,8 @@
 #include "ApprovalRules.h"
 #include "ChatTab.h"
 #include "ChatView.h"
+#include "ChangesWindow.h"
+#include "ChangeTracker.h"
 #include "ClaudeAgent.h"
 #include "CodexConnection.h"
 #include "GeminiAgent.h"
@@ -131,6 +133,10 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     auto *conversationMenu = menuBar()->addMenu("Conversations");
     auto *newConversationAction = conversationMenu->addAction("New conversation in directory…");
     connect(newConversationAction, &QAction::triggered, this, &MainWindow::showNewConversationDialog);
+    changesAction_ = conversationMenu->addAction("Changes of the latest turn…");
+    changesAction_->setObjectName("showChanges");
+    changesAction_->setEnabled(false);
+    connect(changesAction_, &QAction::triggered, this, &MainWindow::showChangesWindow);
     auto *settingsMenu = menuBar()->addMenu("Settings");
     auto *optionsAction = settingsMenu->addAction("Options…");
     connect(optionsAction, &QAction::triggered, this, &MainWindow::showOptionsDialog);
@@ -285,6 +291,13 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     tokens_->setObjectName("tokenUsage");
     auto *headerRow = new QHBoxLayout;
     headerRow->addWidget(chatHeader_, 1);
+    changesButton_ = new QToolButton(chatPanel_);
+    changesButton_->setObjectName("changesButton");
+    changesButton_->setAutoRaise(true);
+    changesButton_->setToolTip("Files the latest turn changed; click to see them and their differences");
+    changesButton_->hide();
+    connect(changesButton_, &QToolButton::clicked, this, &MainWindow::showChangesWindow);
+    headerRow->addWidget(changesButton_);
     operationTime_ = new QLabel("Time 00:00", chatPanel_);
     operationTime_->setObjectName("operationTime");
     operationTime_->setToolTip("Elapsed time of the current task or compaction; keeps the final duration when it ends");
@@ -1796,6 +1809,22 @@ void MainWindow::updateOperationTime()
     operationTime_->setText(tab ? tab->operationTimeText() : "Time 00:00");
 }
 
+// One window per chat; opening it again raises it.
+void MainWindow::showChangesWindow()
+{
+    ChatTab *tab = currentTab();
+    ChangeTracker *tracker = tab ? tab->changeTracker() : nullptr;
+    if (!tracker) return;
+    ChangesWindow *window = nullptr;
+    for (ChangesWindow *open : findChildren<ChangesWindow *>(QString(), Qt::FindDirectChildrenOnly))
+        if (open->tracker() == tracker) window = open;
+    // The window closes itself when the chat's tracker goes with its tab.
+    if (!window) window = new ChangesWindow(tracker, tab->provider()->name() + ": " + tab->title().left(60), this);
+    window->show();
+    window->raise();
+    window->activateWindow();
+}
+
 void MainWindow::updateStatus()
 {
     updateOperationTime();
@@ -1810,6 +1839,8 @@ void MainWindow::updateStatus()
         status_->setText("No chat open");
         status_->setToolTip({});
         chatHeader_->clear();
+        changesButton_->hide();
+        changesAction_->setEnabled(false);
         tokens_->clear();
         compactionPanel_->hide();
         compactButton_->setEnabled(false);
@@ -1826,7 +1857,12 @@ void MainWindow::updateStatus()
     const AgentBackend *agent = tab->agent();
     status_->setText(agent->statusText() + "  •  " + QDir::toNativeSeparators(tab->workingDirectory()));
     status_->setToolTip(status_->text());
-    chatHeader_->setText(tab->headerText());
+    chatHeader_->setText(tab->headerText(false));
+    const ChangeTracker *tracker = tab->changeTracker();
+    const QString changes = tracker ? tracker->summary() : QString();
+    changesButton_->setText(changes.isEmpty() ? QString("No changes") : "Changes: " + changes);
+    changesButton_->setVisible(tracker != nullptr);
+    changesAction_->setEnabled(tracker != nullptr);
     const TokenUsage turn = tab->lastTurnUsage();
     const TokenUsage conversation = tab->conversationUsage();
     compactionPanel_->setVisible(agent->supportsCompaction());

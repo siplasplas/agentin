@@ -37,7 +37,11 @@ files as described below, keeping the start content of tracked files that alread
 memory rather than as blobs, so nothing is written to the repository.
 Done: `ChangeTracker` (`src/ChangeTracker.h`) captures the baselines when a chat's turn starts, counts in a
 worker thread with a cache by file size and modification time, refreshes every 4 seconds during the turn
-and at its end, and the chat header shows `Changes: 7 files, +120 −34`. Next: the window.
+and at its end, and the chat header shows `Changes: 7 files, +120 −34`.
+Done: `ChangesWindow` (`src/ChangesWindow.h`), opened from that summary, lists the files and shows the
+unified diff of the selected one, computed in the tracker's worker thread, and opens files with their
+default application. Still open: side-by-side diff, moving between hunks, folding long unchanged
+stretches, the "Since" choice, and syntax highlighting (later, possibly with KSyntaxHighlighting).
 
 ### Baseline: Git plus the start content of files changed before the turn
 
