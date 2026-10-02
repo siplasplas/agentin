@@ -39,7 +39,7 @@ The conversation language does not change the English-language requirements for 
 
 ## Tests
 
-- Do not add tests unless the user asks for them.
+- When a change would benefit from tests, propose them briefly (what they would cover and roughly how) and add them once the user agrees; do not add tests without that agreement.
 - Fast tests may be committed and run with `ctest --test-dir build --output-on-failure`: they take seconds, use fake agent scripts, and need no network, accounts, API keys or installed agent CLIs. The current suite is `tests/MainWindowTest.cpp` (Qt Test, offscreen), `tests/ClaudeBridgeTest.py` and libdiffcore's `libdiffcore/tests`.
 - Long-running tests (real agent CLIs, network, accounts, or many seconds each) are not part of the committed suite. Run them at most once, when a feature is handed over, not after every change.
 - While working, run only the one or two tests that cover the change, for example `QT_QPA_PLATFORM=offscreen ./build/agentin_test helpAndConversation`, and say which tests were not run.
