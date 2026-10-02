@@ -41,6 +41,8 @@ public:
 
     // Records the start of a turn.
     bool capture();
+    // Compares with the current HEAD instead, as Git shows changes, including those made before the chat.
+    void followHead();
     bool isCaptured() const { return captured_; }
     // Files changed since capture(), sorted by path.
     QList<ChangedFile> changes();
@@ -75,6 +77,7 @@ private:
     QString prefix_;
     QString error_;
     bool captured_ = false;
+    bool followsHead_ = false;
     QByteArray startCommit_;
     QHash<QString, Kept> kept_;
     QHash<QString, Noted> untracked_;

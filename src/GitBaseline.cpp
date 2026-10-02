@@ -144,6 +144,14 @@ bool GitBaseline::capture()
     return true;
 }
 
+void GitBaseline::followHead()
+{
+    kept_.clear();
+    untracked_.clear();
+    followsHead_ = true;
+    captured_ = repository_ != nullptr;
+}
+
 QByteArray GitBaseline::startBlobId(const QString &path) const
 {
     if (startCommit_.isEmpty()) return {};
@@ -189,6 +197,10 @@ QList<ChangedFile> GitBaseline::changes()
 {
     QList<ChangedFile> result;
     if (!repository_ || !captured_) return result;
+    if (followsHead_) {
+        git_oid current;
+        startCommit_ = git_reference_name_to_id(&current, repository_, "HEAD") == 0 ? idText(current) : QByteArray();
+    }
 
     // Candidates: what differs from the index or HEAD now, what commits made during the turn changed,
     // and what already differed at the start. Renames staged in the index pair an old and a new path.

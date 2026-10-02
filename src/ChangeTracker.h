@@ -6,9 +6,11 @@
 #include <diffcore/DiffTypes.h>
 
 #include <QDateTime>
+#include <QHash>
 #include <QList>
 #include <QMetaType>
 #include <QObject>
+#include <QSet>
 #include <QStringList>
 
 #include <atomic>
@@ -16,9 +18,14 @@
 
 class QThread;
 
+// What changes are compared with: the start of the latest turn, the start of the chat's first turn, or
+// the current Git HEAD, which also shows changes made before the chat.
+enum class ChangesSince { Turn, Chat, Head };
+
 // A changed file with its Git work tree and its line counts.
 struct FileChange
 {
+    ChangesSince since = ChangesSince::Turn;
     QString root;
     ChangedFile file;
     LineChanges lines;
@@ -37,8 +44,9 @@ struct FileDiff
 };
 Q_DECLARE_METATYPE(FileDiff)
 
-// The files a chat's turn changed in the directories it holds. The Git work is done in a worker thread,
-// where the baselines live, and line counts are cached by file size and modification time.
+// The files a chat changed in the directories it holds. The Git work is done in a worker thread, where
+// the baselines live, and line counts are cached by file size and modification time. The latest turn is
+// always counted; another starting point is counted while something, such as the changes window, needs it.
 class ChangeTracker : public QObject
 {
     Q_OBJECT
@@ -47,17 +55,20 @@ public:
     explicit ChangeTracker(QObject *parent = nullptr);
     ~ChangeTracker() override;
 
-    // Records the start of a turn in these directories; earlier changes are forgotten.
+    // Records the start of a turn in these directories; the first turn also starts the chat's baseline.
     void turnStarted(const QStringList &directories);
     void refresh();
+    // Also counts changes since this point, or only the latest turn's for ChangesSince::Turn.
+    void setExtraSince(ChangesSince since);
     // Computes the file's diff in the worker thread and reports it with diffReady().
     void requestDiff(const FileChange &change);
-    QDateTime startedAt() const { return startedAt_; }
-    QList<FileChange> changes() const { return changes_; }
+    // Invalid for ChangesSince::Head, which has no fixed start.
+    QDateTime startedAt(ChangesSince since = ChangesSince::Turn) const;
+    QList<FileChange> changes(ChangesSince since = ChangesSince::Turn) const { return changes_.value(since); }
     // Directories that are not in a Git work tree, whose changes are not tracked.
     QStringList untracked() const { return untracked_; }
     // "7 files, +120 −34", or empty when nothing changed.
-    QString summary() const;
+    QString summary(ChangesSince since = ChangesSince::Turn) const;
 
 signals:
     void changesUpdated();
@@ -68,7 +79,9 @@ private:
     QThread *thread_;
     Worker *worker_;
     std::shared_ptr<std::atomic<bool>> cancel_;
-    QList<FileChange> changes_;
+    QHash<ChangesSince, QList<FileChange>> changes_;
     QStringList untracked_;
-    QDateTime startedAt_;
+    QDateTime turnStartedAt_;
+    QDateTime chatStartedAt_;
+    ChangesSince extraSince_ = ChangesSince::Turn;
 };

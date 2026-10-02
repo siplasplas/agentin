@@ -265,9 +265,13 @@ lines as added. Directories outside Git are not tracked.
 The summary is a button; it and **Conversations → Changes of the latest turn…**
 open the chat's changes window, which follows the turn live. It lists each file
 with its status (`m` modified, `n` new, `d` deleted, `r` renamed in the index,
-`b` binary) and its added and removed lines, and shows the unified diff of the
-selected file with line numbers and three lines of context. New, binary, too
-large and largely rewritten files get a note instead of a diff. Double-click or
+`b` binary) and its added and removed lines, and shows the diff of the selected
+file, unified or side by side, with line numbers and three lines of context;
+longer unchanged stretches are folded into one line that opens with a click, and
+the arrow buttons (or Alt+Up and Alt+Down) move between changes. The list starts
+from the latest turn; it can also show the changes since the chat's first turn,
+or against `HEAD` as Git sees them, including changes made before the chat. New,
+binary, too large and largely rewritten files get a note instead of a diff. Double-click or
 Enter opens a file with the application the system associates with its type;
 the context menu also opens its folder or copies its path.
 
