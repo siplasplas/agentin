@@ -29,6 +29,10 @@ the other agents (their plan modes) still wait, because only Codex enforces them
 A window listing the files changed since the current turn started (or since a chosen point), with the
 lines added and removed for each, a diff of each file, and opening the file in its application.
 
+Done: libdiffcore is part of agentin (`libdiffcore/`), with a counting mode of its main loop that keeps
+memory linear and stops at an edit distance bound, a deadline or a cancellation flag
+(`DiffEngine::countChanges`), and `countLineChanges` (`src/LineChanges.h`) applies the limits below.
+
 ### Baseline: Git plus the start content of files changed before the turn
 
 The content of a file before the turn must be known when the turn starts; after a change it is gone,
@@ -68,8 +72,12 @@ file and without parsing its output. The `git` command line (`rev-parse`, `statu
 `diff-tree`, `cat-file --batch`) is the alternative if a dependency is unwanted; it is slower for many
 files.
 
-**Counting:** the O(NP) diff from libdiffcore (`/home/andrzej/wazne/gitmy/diffmerge/libdiffcore`,
-`diffcore::DiffEngine` over interned lines); its main loop is enough for the counts, and the slider
+**Counting:** the O(NP) diff from libdiffcore (`diffcore::DiffEngine` over interned lines). The library
+comes from `/home/andrzej/wazne/gitmy/diffmerge/libdiffcore` and is included as a subdirectory of
+agentin's sources (`add_subdirectory`), so it is part of agentin and is changed there as needed;
+changes worth sharing can be taken back to diffmerge. It is self-contained: a static library using only
+the Qt Core that agentin already links and the C++ standard library, nothing else from DiffMerge, and it
+compiles as C++17. Its `DIFFMERGE_BUILD_TESTS` option is dropped or renamed in the copy; its main loop is enough for the counts, and the slider
 heuristics matter only when a diff is shown. Counts are computed in a worker thread and cached by the
 pair of content hashes, so live updates during a turn recompute only files that changed again.
 
@@ -79,8 +87,14 @@ to tune after measuring real files:
 
 - text files up to **64 MB** (about one or two million lines) get counts and a diff; larger ones are
   compared by hash only and listed with their sizes, as binary files are;
-- the main loop stops once P exceeds **100 000** differences, and the file is listed as rewritten, with
-  its line counts before and after instead of exact added and removed lines;
+- a file with more than **100 000** differences is listed as rewritten, with its line counts before and
+  after instead of exact added and removed lines. Lines one side has more often than the other bound the
+  differences from below in linear time, which tells most rewritten files apart before the search; the
+  main loop also stops once P passes the limit;
+- the main loop also has a time budget of about **3 seconds** per file: it reads a monotonic clock now
+  and then, for example once per value of P or every few thousand snake steps, so the check costs
+  nothing noticeable, and stops when the budget is spent; the file is then listed as rewritten like
+  above. The same check lets a computation stop early when the file changes again or the window closes;
 - the work runs in the worker thread, so a slow file never blocks the window, which shows "counting…"
   for it until the result arrives.
 

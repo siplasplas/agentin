@@ -39,7 +39,7 @@ The conversation language does not change the English-language requirements for 
 ## Tests
 
 - Do not add tests unless the user asks for them.
-- Fast tests may be committed and run with `ctest --test-dir build --output-on-failure`: they take seconds, use fake agent scripts, and need no network, accounts, API keys or installed agent CLIs. The current suite is `tests/MainWindowTest.cpp` (Qt Test, offscreen) and `tests/ClaudeBridgeTest.py`.
+- Fast tests may be committed and run with `ctest --test-dir build --output-on-failure`: they take seconds, use fake agent scripts, and need no network, accounts, API keys or installed agent CLIs. The current suite is `tests/MainWindowTest.cpp` (Qt Test, offscreen), `tests/ClaudeBridgeTest.py` and libdiffcore's `libdiffcore/tests`.
 - Long-running tests (real agent CLIs, network, accounts, or many seconds each) are not part of the committed suite. Run them at most once, when a feature is handed over, not after every change.
 - While working, run only the one or two tests that cover the change, for example `QT_QPA_PLATFORM=offscreen ./build/agentin_test helpAndConversation`, and say which tests were not run.
 - Fake agent scripts in tests must follow the real protocol. For Codex, `codex app-server generate-json-schema --out <dir>` writes the App Server schema; for example, notifications for a thread carry `threadId`.
@@ -51,4 +51,5 @@ The conversation language does not change the English-language requirements for 
 - `ChatTab` is the model of one tab: its chat session, text document, preview or live state, and history. `MainWindow` owns the providers, the conversation tree, the tabs and one chat view that moves into the current tab.
 - `ConversationIndex` keeps a provider's local JSON index; `ProcessLocks` detects conversations held open by other tools.
 - A new agent needs a provider and a chat class; `MainWindow` should not need provider-specific branches.
+- `libdiffcore/` is the O(NP) line diff, taken from diffmerge and maintained here as part of agentin (C++17, Qt Core only); `countLineChanges` in `src/LineChanges.h` counts added and removed lines with the limits of the changed files view.
 - Match the surrounding code style. User-visible behavior changes go into `README.md`.

@@ -61,8 +61,10 @@ add_executable(agentin
     src/UsageLimitsPanel.h
     src/Notifier.cpp
     src/Notifier.h
+    src/LineChanges.cpp
+    src/LineChanges.h
 )
-target_link_libraries(agentin PRIVATE Qt6::Widgets qt-extra Backward::Object)
+target_link_libraries(agentin PRIVATE Qt6::Widgets qt-extra Backward::Object diffcore::diffcore)
 target_include_directories(agentin PRIVATE src)
 # Keeps the information backward-cpp needs for files and line numbers, also in optimized builds.
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
@@ -76,6 +78,8 @@ install(FILES ${CMAKE_CURRENT_BINARY_DIR}/claude_bridge.py DESTINATION ${CMAKE_I
 
 option(BUILD_TESTING "Build tests" OFF)
 include(CTest)
+# The O(NP) line diff, part of agentin's sources.
+add_subdirectory(libdiffcore)
 if(BUILD_TESTING)
     find_package(Qt6 REQUIRED COMPONENTS Test)
     find_package(Python3 COMPONENTS Interpreter)
@@ -116,8 +120,10 @@ if(BUILD_TESTING)
         src/UsageLimitsPanel.h
         src/Notifier.cpp
         src/Notifier.h
+        src/LineChanges.cpp
+        src/LineChanges.h
     )
-    target_link_libraries(agentin_test PRIVATE Qt6::Widgets Qt6::Test qt-extra)
+    target_link_libraries(agentin_test PRIVATE Qt6::Widgets Qt6::Test qt-extra diffcore::diffcore)
     target_include_directories(agentin_test PRIVATE src)
     add_test(NAME agentin_test COMMAND agentin_test)
     set_tests_properties(agentin_test PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
