@@ -612,7 +612,8 @@ also ends its turn. **Settings → Approvals…** lists the lasting rules (Codex
 `~/.codex/rules/*.rules`, and Claude Code's `permissions.allow` in the user
 settings and in the `.claude` settings of the directories of open chats and
 recent directories) and the approvals given for the session in open chats, and
-removes the selected ones. Codex may keep using a removed rule until its App
+removes the selected ones. A click on a column header sorts the lines within each
+group, and a line's context menu copies the whole line or only its rule. Codex may keep using a removed rule until its App
 Server restarts and cannot withdraw native App Server session approvals; for a Claude or GLM
 chat, withdrawing reconnects it and withdraws all of its session approvals.
 
@@ -637,8 +638,9 @@ chain, unquoted here-documents, relative paths going up with `..`, scripts and
 all other commands still ask.
 
 **Settings → Options…** lists commands that run without asking, by their first
-words; it starts with `git add` and `git commit`. Entries can be added, edited
-with a double-click, and unchecked to keep them listed without effect. A shell
+words; on the first start it holds `git add` and `git commit -m`. Entries can be
+added, edited with a double-click, removed, or unchecked to keep them listed without
+effect. `git push`, `sudo`, `doas` and `su` cannot be added: they are always declined. A shell
 command of a Codex, Claude or GLM chat is allowed when every command of it starts
 with a checked entry, also in a chain joined by `&&`, `||`, `;` or `|`, in a
 `bash -lc '…'` wrapper, and after Git's `-C`, `--git-dir` or `--work-tree`
@@ -650,11 +652,19 @@ way.
 
 For Codex command approval requests, **Trust git add for this chat** and
 **Trust git commit for this chat** remember the command family in agentin's
-memory, without writing a lasting Codex rule. Matching simple commands receive
-`accept` (allow once), even when their arguments change. Normal shell `-c`/`-lc`
-wrappers and Git directory options are recognized; compound commands, shell
-expansions, configuration overrides, and unknown syntax are never automatically
-trusted. **Settings → Approvals…** lists these rules as managed by agentin;
+memory, without writing a lasting Codex rule. A chain such as
+`git add … && git commit -m …` offers both families, each trusted on its own.
+Matching commands receive `accept` (allow once), even when their files and
+messages change, also in a chain of trusted families. Normal shell `-c`/`-lc`
+wrappers and Git directory options are recognized; other commands in a chain,
+shell expansions, configuration overrides, and unknown syntax are never
+automatically trusted.
+
+A lasting **Always allow** rule that Codex proposes for a Git command is saved
+without its files or message, as `git add`, `git commit -m` or `git` with the
+subcommand, so that it matches the next such command; other commands keep the
+proposed rule. `sudo`, `doas`, `su` and `git push` are never offered a lasting
+rule, and requests for them are declined. **Settings → Approvals…** lists these rules as managed by agentin;
 removing one immediately restores questions, including during a running turn.
 Trust belongs to one conversation in one chat and ends when changing the
 conversation or exiting the application.

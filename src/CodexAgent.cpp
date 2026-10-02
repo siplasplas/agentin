@@ -389,7 +389,7 @@ void CodexAgent::answerApproval(int id, ApprovalDecision decision)
         return;
     }
     if (!sessionRule.isEmpty() && decision == ApprovalDecision::AcceptForSession) {
-        trustedSessionCommands_.insert(sessionRule);
+        for (const QString &family : sessionRule.split(", ")) trustedSessionCommands_.insert(family);
         trustedConversationId_ = threadId_;
         decision = ApprovalDecision::Accept;
         emit message("[Trusted for this chat: " + sessionRule + "]");
@@ -793,11 +793,14 @@ void CodexAgent::handleServerRequest(const QString &method, const QJsonValue &id
                     emit message("[Allowed without asking, as the options say: " + trusted + "]");
                     return;
                 }
-                sessionRule = command.sessionRule;
+                // Each command of a chain is a family of its own, trusted separately.
+                sessionRule = sessionCommandFamilies(params.value("command").toString()).join(", ");
             }
-            if (!sessionRule.isEmpty() && trustedSessionCommands_.contains(sessionRule)) {
+            const QString trusted = sessionRule.isEmpty()
+                ? QString() : trustedCommandRule(params.value("command").toString(), trustedSessionCommands_.values());
+            if (!trusted.isEmpty()) {
                 connection_->respond(id, {{"decision", "accept"}});
-                emit message("[Approval allowed by chat trust: " + sessionRule + "]");
+                emit message("[Approval allowed by chat trust: " + trusted + "]");
                 return;
             }
         }
@@ -816,7 +819,9 @@ void CodexAgent::handleServerRequest(const QString &method, const QJsonValue &id
         }
         const int requestId = nextServerRequest_++;
         serverRequests_.insert(requestId, id);
-        const QJsonArray rule = params.value("proposedExecpolicyAmendment").toArray();
+        QStringList proposed;
+        for (const QJsonValue &word : params.value("proposedExecpolicyAmendment").toArray()) proposed.append(word.toString());
+        const QJsonArray rule = QJsonArray::fromStringList(lastingRulePrefix(proposed));
         QString alwaysRule;
         if (!sessionRule.isEmpty()) requestSessionRules_.insert(requestId, sessionRule);
         if (!rule.isEmpty() && sessionRule.isEmpty()) {

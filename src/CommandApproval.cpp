@@ -281,7 +281,15 @@ QString withoutLiteralMessages(QString text)
 
 QStringList defaultTrustedCommands()
 {
-    return {"git add", "git commit"};
+    return {"git add", "git commit -m"};
+}
+
+QString forbiddenTrustedCommand(const QString &prefix)
+{
+    const QStringList words = prefix.split(' ', Qt::SkipEmptyParts);
+    if (QStringList{"sudo", "doas", "su"}.contains(executable(words.value(0)))) return "privilege escalation is always declined";
+    if (words.value(0) == "git" && words.contains("push")) return "git push is always declined";
+    return {};
 }
 
 QStringList trustedCommands()
@@ -291,12 +299,25 @@ QStringList trustedCommands()
 
 void setTrustedCommands(const QStringList &prefixes)
 {
-    trustedCommandList() = prefixes;
+    trustedCommandList().clear();
+    for (const QString &prefix : prefixes)
+        if (forbiddenTrustedCommand(prefix).isEmpty()) trustedCommandList().append(prefix);
 }
 
 QString trustedCommandRule(const QString &command)
 {
-    if (trustedCommandList().isEmpty()) return {};
+    return trustedCommandRule(command, trustedCommandList());
+}
+
+QStringList sessionCommandFamilies(const QString &command)
+{
+    const QString families = trustedCommandRule(command, {"git add", "git commit"});
+    return families.isEmpty() ? QStringList() : families.split(", ");
+}
+
+QString trustedCommandRule(const QString &command, const QStringList &prefixes)
+{
+    if (prefixes.isEmpty()) return {};
     const QString text = withoutLiteralMessages(command);
     if (!plainCommandList(text)) return {};
     const ShellWords parsed = words(text);
@@ -306,7 +327,7 @@ QString trustedCommandRule(const QString &command)
     if (parsed.commands.size() == 1 && only.size() == 3 && (only.at(1) == "-c" || only.at(1) == "-lc")
         && QStringList{"sh", "bash", "zsh", "/bin/sh", "/bin/bash", "/bin/zsh", "/usr/bin/bash", "/usr/bin/zsh"}
                .contains(only.first()))
-        return trustedCommandRule(only.at(2));
+        return trustedCommandRule(only.at(2), prefixes);
     QStringList rules;
     for (QStringList args : parsed.commands) {
         if (args.first().contains('=')) return {};
@@ -321,7 +342,7 @@ QString trustedCommandRule(const QString &command)
             args = QStringList{"git"} + args.mid(qMin(i, int(args.size())));
         }
         QString rule;
-        for (const QString &prefix : trustedCommandList()) {
+        for (const QString &prefix : prefixes) {
             const QStringList words = prefix.split(' ', Qt::SkipEmptyParts);
             if (!words.isEmpty() && args.mid(0, words.size()) == words) rule = words.join(' ');
         }
@@ -329,4 +350,15 @@ QString trustedCommandRule(const QString &command)
         if (!rules.contains(rule)) rules.append(rule);
     }
     return rules.join(", ");
+}
+
+QStringList lastingRulePrefix(const QStringList &proposed)
+{
+    if (proposed.isEmpty() || QStringList{"sudo", "doas", "su"}.contains(executable(proposed.first()))) return {};
+    if (proposed.first() != "git") return proposed;
+    const QString subcommand = proposed.value(1);
+    if (subcommand.isEmpty() || subcommand.startsWith('-') || subcommand == "push") return {};
+    QStringList prefix{"git", subcommand};
+    if (subcommand == "commit" && (proposed.value(2) == "-m" || proposed.value(2) == "--message")) prefix.append(proposed.at(2));
+    return prefix;
 }

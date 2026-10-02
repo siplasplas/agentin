@@ -18,6 +18,8 @@
 #include <QButtonGroup>
 #include <QCloseEvent>
 #include <QComboBox>
+#include <QGuiApplication>
+#include <QClipboard>
 #include <QFrame>
 #include <QRadioButton>
 #include <QRegularExpression>
@@ -1162,14 +1164,19 @@ void MainWindow::loadSettings()
     experimentalAgents_ = settings.value("experimentalAgents").toBool(false);
     openRules_ = FileOpener::rulesFromJson(settings.value("openWith").toArray());
     trustedCommands_.clear();
-    if (settings.value("trustedCommands").isArray()) {
-        for (const QJsonValue &value : settings.value("trustedCommands").toArray()) {
-            const QString command = value.toObject().value("command").toString().simplified();
-            if (!command.isEmpty()) trustedCommands_.append({command, value.toObject().value("enabled").toBool(true)});
-        }
-    } else {
-        for (const QString &command : defaultTrustedCommands()) trustedCommands_.append({command, true});
+    for (const QJsonValue &value : settings.value("trustedCommands").toArray()) {
+        QString command = value.toObject().value("command").toString().simplified();
+        // The earlier default "git commit" became "git commit -m", keeping its check box.
+        if (command == "git commit") command = "git commit -m";
+        if (!command.isEmpty() && forbiddenTrustedCommand(command).isEmpty()
+            && std::none_of(trustedCommands_.cbegin(), trustedCommands_.cend(),
+                            [&command](const TrustedCommand &entry) { return entry.command == command; }))
+            trustedCommands_.append({command, value.toObject().value("enabled").toBool(true)});
     }
+    // The defaults are listed when the settings have no list yet, as on the first start; later the list is
+    // the user's, with whatever they removed or unchecked.
+    if (!settings.value("trustedCommands").isArray())
+        for (const QString &command : defaultTrustedCommands()) trustedCommands_.append({command, true});
     applyTrustedCommands();
     fastChats_.clear();
     for (const QJsonValue &value : settings.value("fastChats").toArray())
@@ -1406,7 +1413,13 @@ void MainWindow::showOptionsDialog()
     trustedCommands_.clear();
     for (int i = 0; i < trustedList->count(); ++i) {
         const QString command = trustedList->item(i)->text().simplified();
-        if (!command.isEmpty()) trustedCommands_.append({command, trustedList->item(i)->checkState() == Qt::Checked});
+        if (command.isEmpty()) continue;
+        const QString forbidden = forbiddenTrustedCommand(command);
+        if (!forbidden.isEmpty()) {
+            appendLine("[Not added to the commands allowed without asking: \"" + command + "\"; " + forbidden + "]");
+            continue;
+        }
+        trustedCommands_.append({command, trustedList->item(i)->checkState() == Qt::Checked});
     }
     applyTrustedCommands();
     setExperimentalAgentsEnabled(experimental->isChecked());
@@ -1646,6 +1659,25 @@ void MainWindow::showNotificationsDialog()
     saveSettings();
 }
 
+namespace {
+// The approvals dialog's groups keep their order whichever column and direction the lines are sorted by.
+class ApprovalGroupItem : public QTreeWidgetItem
+{
+public:
+    ApprovalGroupItem(QTreeWidget *tree, const QString &text, int order) : QTreeWidgetItem(tree, {text}), order_(order) {}
+    bool operator<(const QTreeWidgetItem &other) const override
+    {
+        const auto *group = dynamic_cast<const ApprovalGroupItem *>(&other);
+        if (!group) return QTreeWidgetItem::operator<(other);
+        const bool ascending = !treeWidget() || treeWidget()->header()->sortIndicatorOrder() == Qt::AscendingOrder;
+        return ascending ? order_ < group->order_ : order_ > group->order_;
+    }
+
+private:
+    int order_;
+};
+}
+
 // Lists lasting "always" rules and the approvals given for the session in open chats, and removes
 // the selected ones where the agent allows it.
 void MainWindow::showApprovalsDialog()
@@ -1658,7 +1690,24 @@ void MainWindow::showApprovalsDialog()
     tree->setObjectName("approvalsTree");
     tree->setHeaderLabels({"Agent", "Allowed", "Where"});
     tree->setRootIsDecorated(true);
+    // A click on a column header sorts the lines within each group by it.
+    tree->setSortingEnabled(true);
+    tree->sortByColumn(0, Qt::AscendingOrder);
     layout->addWidget(tree);
+    // A line can be copied whole, its columns separated by tabs, or only what it allows.
+    tree->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(tree, &QWidget::customContextMenuRequested, &dialog, [tree](const QPoint &position) {
+        QTreeWidgetItem *item = tree->itemAt(position);
+        if (!item) return;
+        QStringList columns;
+        for (int column = 0; column < tree->columnCount(); ++column)
+            if (!item->text(column).isEmpty()) columns.append(item->text(column));
+        QMenu menu(tree);
+        menu.addAction("Copy line", [columns] { QGuiApplication::clipboard()->setText(columns.join('\t')); });
+        if (!item->text(1).isEmpty())
+            menu.addAction("Copy rule", [item] { QGuiApplication::clipboard()->setText(item->text(1)); });
+        menu.exec(tree->viewport()->mapToGlobal(position));
+    });
     auto *note = new QLabel("Chat command trust is withdrawn immediately. Codex may keep using a removed lasting rule "
                             "until its App Server restarts. Codex cannot "
                             "withdraw native App Server session approvals; they end when agentin closes. Withdrawing "
@@ -1680,14 +1729,14 @@ void MainWindow::showApprovalsDialog()
             if (const ChatTab *tab = chatTab(tabs_->widget(i))) projects.append(tab->workingDirectory());
         }
         rules = codexRules() + claudeRules(projects);
-        auto *lasting = new QTreeWidgetItem(tree, {"Always allowed"});
+        auto *lasting = new ApprovalGroupItem(tree, "Always allowed", 0);
         for (int i = 0; i < rules.size(); ++i) {
             auto *item = new QTreeWidgetItem(lasting, {rules.at(i).agent, rules.at(i).rule, rules.at(i).where});
             item->setData(0, Qt::UserRole, i);
             item->setToolTip(1, rules.at(i).rule);
             item->setToolTip(2, rules.at(i).file);
         }
-        auto *session = new QTreeWidgetItem(tree, {"Allowed for this session"});
+        auto *session = new ApprovalGroupItem(tree, "Allowed for this session", 1);
         for (int i = 0; i < tabs_->count(); ++i) {
             const ChatTab *tab = chatTab(tabs_->widget(i));
             if (!tab) continue;
