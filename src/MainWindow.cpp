@@ -702,6 +702,20 @@ MainWindow::~MainWindow()
 // Quitting cuts off running turns, so the user confirms it; otherwise the window closes at once.
 void MainWindow::closeEvent(QCloseEvent *event)
 {
+    // The window's close button or Alt+F4 pressed while a changes window is open was likely meant for that
+    // window, so it closes instead; Quit and the quit command still quit.
+    if (event->spontaneous()) {
+        bool closed = false;
+        for (ChangesWindow *window : findChildren<ChangesWindow *>(QString(), Qt::FindDirectChildrenOnly)) {
+            if (!window->isVisible()) continue;
+            window->close();
+            closed = true;
+        }
+        if (closed) {
+            event->ignore();
+            return;
+        }
+    }
     QStringList running;
     QList<AgentBackend *> agents;
     for (int i = 0; i < tabs_->count(); ++i) {

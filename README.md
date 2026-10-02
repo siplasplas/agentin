@@ -196,7 +196,8 @@ responding shows a busy marker, and a background tab that receives output is
 marked until you switch to it. Closing a tab while its agent is responding asks
 first and then stops the response. Quitting the application (the window's close
 button, Alt+F4 or `quit`) while turns are running lists them and asks whether to
-stop them and quit; otherwise it closes at once. Ctrl+Tab switches tabs in most recently used
+stop them and quit; otherwise it closes at once. While a changes window is open, the
+close button and Alt+F4 close the changes windows instead, and `quit` still quits. Ctrl+Tab switches tabs in most recently used
 order.
 
 In a Codex tab, choose the model and reasoning effort in the chat header.
