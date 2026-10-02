@@ -175,7 +175,7 @@ class ClaudeBridgeTest(unittest.IsolatedAsyncioTestCase):
         ]
         with patch.object(sdk, "get_session_messages", return_value=messages, create=True) as reading:
             self.assertEqual(bridge_module.read_session("session-1", "/tmp/project", 2), {
-                "type": "history", "total": 4,
+                "type": "history", "total": 5,
                 "entries": [{"role": "tool", "text": "Read"}, {"role": "assistant", "text": "Done"}],
             })
             reading.assert_called_once_with("session-1", directory="/tmp/project")
