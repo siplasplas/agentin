@@ -43,6 +43,7 @@ signals:
 
 protected:
     void keyPressEvent(QKeyEvent *event) override;
+    void mousePressEvent(QMouseEvent *event) override;
 
 private:
     bool onFirstLine() const;
@@ -61,6 +62,9 @@ private:
     // The user changed the current text with the keyboard; pasting and recalling do not count.
     bool typed_ = false;
     bool typedLineBreak_ = false;
+    // A message recalled from the history that has been neither edited nor entered with the cursor.
+    bool recalledUntouched_ = false;
+    bool recalling_ = false;
     int shortMessageLength_ = 60;
     bool enterSendsNow_ = true;
 };

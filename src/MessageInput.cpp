@@ -15,6 +15,7 @@ MessageInput::MessageInput(QWidget *parent)
     setTabChangesFocus(true);
     setLineWrapMode(QPlainTextEdit::WidgetWidth);
     connect(this, &QPlainTextEdit::textChanged, this, [this] {
+        if (!recalling_) recalledUntouched_ = false;
         if (document()->isEmpty()) typed_ = false;
         if (!toPlainText().contains('\n')) typedLineBreak_ = false;
         fitHeight();
@@ -77,15 +78,19 @@ void MessageInput::keyPressEvent(QKeyEvent *event)
         }
     }
     if (event->modifiers() == Qt::NoModifier || event->modifiers() == Qt::KeypadModifier) {
-        if (event->key() == Qt::Key_PageUp || (event->key() == Qt::Key_Up && onFirstLine())) {
+        // A recalled message nobody has touched is skipped as a whole, not walked line by line.
+        if (event->key() == Qt::Key_PageUp || (event->key() == Qt::Key_Up && (recalledUntouched_ || onFirstLine()))) {
             recall(-1);
             return;
         }
-        if (event->key() == Qt::Key_PageDown || (event->key() == Qt::Key_Down && onLastLine())) {
+        if (event->key() == Qt::Key_PageDown || (event->key() == Qt::Key_Down && (recalledUntouched_ || onLastLine()))) {
             recall(1);
             return;
         }
     }
+    if (event->key() == Qt::Key_Left || event->key() == Qt::Key_Right || event->key() == Qt::Key_Home
+        || event->key() == Qt::Key_End)
+        recalledUntouched_ = false;
     // Any change made from the keyboard counts as typing, except pasting.
     const int revision = document()->revision();
     QPlainTextEdit::keyPressEvent(event);
@@ -160,10 +165,19 @@ void MessageInput::recall(int step)
     if (target < 0 || target > history_.size()) return;
     if (position_ == history_.size()) draft_ = toPlainText();
     position_ = target;
+    recalling_ = true;
     replaceText(position_ == history_.size() ? draft_ : history_.at(position_));
+    recalling_ = false;
+    recalledUntouched_ = position_ < history_.size();
     typed_ = false;
     updateEnterAction();
     moveCursor(step < 0 ? QTextCursor::End : QTextCursor::Start);
+}
+
+void MessageInput::mousePressEvent(QMouseEvent *event)
+{
+    recalledUntouched_ = false;
+    QPlainTextEdit::mousePressEvent(event);
 }
 
 void MessageInput::fitHeight()

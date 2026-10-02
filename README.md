@@ -456,7 +456,9 @@ line; its tooltip names the key for the other action.
 
 Up and Down move between lines and, on the first or last line, recall the
 previous or next message you wrote in the current tab's conversation; Page Up
-and Page Down always recall messages. After the newest message, the text you
+and Page Down always recall messages. A recalled message of several lines that
+you have not edited, clicked or moved through with Left, Right, Home or End is
+skipped as a whole, so Up and Down go straight to the previous or next message. After the newest message, the text you
 typed before browsing comes back. The messages come from the conversation's
 loaded history and from what you sent in the tab, so no separate history is
 stored; older messages become available after **Show earlier messages**. A
