@@ -26,17 +26,90 @@ the other agents (their plan modes) still wait, because only Codex enforces them
 
 ## Files changed by a turn
 
-A window, or a panel beside the chat, listing the files changed since the current turn started, with the
-number of lines added and removed for each:
+A window listing the files changed since the current turn started (or since a chosen point), with the
+lines added and removed for each, a diff of each file, and opening the file in its application.
 
-- **Snapshot:** remember the files of the chat's directory, and the writable directories it holds, when a
-  turn starts (contents, or a cheap fingerprint first and contents only of files that then change), so
-  the comparison does not depend on Git.
-- **Counting:** use the O(NP) diff from libdiffcore (`/home/andrzej/wazne/gitmy/diffmerge/libdiffcore`,
-  `diffcore::DiffEngine` over interned lines). Only its main loop is needed for the counts; the slider
-  heuristics matter only when a diff is shown.
-- **Diff view:** for each file, show the diff computed by the same library, with the slider heuristics.
-- **Opening a file:** clicking a file opens it with the application the system associates with its
-  type (the desktop's default, as `QDesktopServices::openUrl` or `xdg-open` use it), for example
-  JetBrains CLion for `.cpp` or RustRover for `.rs` when those are the defaults, switching to an
-  already running instance when there is one.
+### Baseline: Git plus the start content of files changed before the turn
+
+The content of a file before the turn must be known when the turn starts; after a change it is gone,
+so a fingerprint taken at the start cannot recover it. Git already stores the content of every committed
+file, so only tracked files that differ from Git need their start content kept:
+
+1. **At turn start**, in each directory the turn holds (the chat's directory and its writable
+   directories) that is inside a Git work tree, record the commit of `HEAD`, whose tree is the baseline
+   of every clean tracked file, and for each tracked file that is not clean keep its current content as
+   a blob in Git's object database (`git hash-object -w`, `git_blob_create_from_disk` in libgit2). That
+   changes neither the index, the branches nor the work tree; the loose objects are pruned by `git gc`
+   after their expiry. Keeping `git diff HEAD` for those files and applying it to the `HEAD` blob later
+   is the alternative.
+2. **Skipped:** everything `.gitignore` ignores.
+   **Binary files** tracked by Git are compared by hash only: the blob id in the start commit's tree, or
+   the hash of a kept blob, against the hash of the file now. A changed one is listed with its sizes and
+   no line counts or diff. Large text files are treated the same way above a size limit.
+3. **New files:** a file Git does not track and does not ignore is shown as a whole new file, without a
+   diff. Its size and modification time are noted at the start, so that one existing before the turn is
+   shown only if the turn changed it.
+4. **During and after the turn**, the changed files are the union of the tracked files the status
+   reports as not clean now, the files changed by commits made during the turn (diff of the start
+   commit's tree with the current `HEAD` tree, so that an agent committing its work does not hide it),
+   and the files that were not clean at the start (they may have been restored). The "before" content is
+   the kept blob when there is one, otherwise the blob in the start commit's tree; the "after" content is
+   the file on disk, or nothing when it was deleted. A file whose before and after content are equal is
+   dropped.
+5. **Outside a Git work tree**, changes are not tracked for that directory, and the window says so.
+
+The agents also report files they edit (Codex `fileChange` items, Claude `Edit`/`Write` inputs). They
+can mark files as changed at once during a turn, but shell commands change files unreported, so the
+status scan stays the source of truth.
+
+**Git access:** libgit2 (C, `libgit2-dev`, 1.9 here; the same package exists in the major
+distributions) reads the status, trees and blobs in process, without starting a `git` process for each
+file and without parsing its output. The `git` command line (`rev-parse`, `status --porcelain=v2 -z`,
+`diff-tree`, `cat-file --batch`) is the alternative if a dependency is unwanted; it is slower for many
+files.
+
+**Counting:** the O(NP) diff from libdiffcore (`/home/andrzej/wazne/gitmy/diffmerge/libdiffcore`,
+`diffcore::DiffEngine` over interned lines); its main loop is enough for the counts, and the slider
+heuristics matter only when a diff is shown. Counts are computed in a worker thread and cached by the
+pair of content hashes, so live updates during a turn recompute only files that changed again.
+
+### The window
+
+A non-modal window per chat (or a dock beside the chat), opened from the chat header ("Changes: 7 files,
++120 −34") and from the menu, updated live while the turn runs:
+
+```
+┌ Changes — Codex: "Fix the tree sorting" ─────────────────────────────────────┐
+│ Since: [This turn ▾]  (turn started 14:32)   Files: 7   +120  −34   [⟳]      │
+│ ┌──────────────────────────────────────────────────────────────────────────┐ │
+│ │ St  File                                     +     −   ▕████████▏        │ │
+│ │ m   src/MainWindow.cpp                      +84   −20   ██████░░          │ │
+│ │ m   src/MainWindow.h                         +9    −1   █░░░░░░░          │ │
+│ │ n   src/TailFollower.cpp                   (new, 22 lines)                │ │
+│ │ d   src/old/Legacy.cpp                            −13   █░░░░░░░          │ │
+│ │ r   docs/a.md → docs/b.md                    +3    −0                     │ │
+│ │ b   assets/icon.png                       (binary, 4.1 → 4.3 kB)          │ │
+│ └──────────────────────────────────────────────────────────────────────────┘ │
+│ ┌ src/MainWindow.cpp ─────────────────── [Unified|Side by side] [◀ hunk ▶] ┐ │
+│ │ 1412   1412      refreshConversationTree();                              │ │
+│ │ 1413        -    revealCurrentConversation(false);                       │ │
+│ │        1413 +    if (!match) {                                           │ │
+│ │        1414 +        revealCurrentConversation(false);                   │ │
+│ └──────────────────────────────────────────────────────────────────────────┘ │
+└──────────────────────────────────────────────────────────────────────────────┘
+```
+
+- **Since:** this turn (default), since the chat started (the first turn's baseline is kept), or since
+  `HEAD`, which shows Git's view including changes made before the chat.
+- **List:** status (`m` modified, `n` new and shown without a diff, `d` deleted, `r` renamed, `b` binary
+  and changed, compared by hash), path relative to the chat's directory (other held directories shown
+  with their full path), lines added in green and removed in red, and a bar with their share; sortable
+  by path or by size of change; a total in the header.
+- **Diff pane:** the selected file's diff from libdiffcore with the slider heuristics, unified or side by
+  side, with line numbers and moving between hunks; long unchanged stretches are folded.
+- **Opening:** double-click or Enter opens the file with the application the system associates with its
+  type (`QDesktopServices::openUrl`, as `xdg-open`), for example CLion for `.cpp` or RustRover for `.rs`
+  when those are the defaults, which reuses a running instance as the desktop does. The context menu also
+  offers opening the containing folder and copying the path.
+- **Later:** reverting a file to its baseline, and keeping the baseline of each turn so that earlier
+  turns can be compared too.
