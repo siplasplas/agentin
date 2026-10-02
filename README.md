@@ -281,7 +281,9 @@ lines as added. Directories outside Git are not tracked.
 
 The summary, in the header's second row with added lines in green and removed
 ones in red, is a link; it and **Conversations → Changes of the latest turn…**
-open the chat's changes window, which follows the turn live. With **Group new files**, as JetBrains
+open the chat's changes window, which follows the turn live: the list and the
+diff stay where they are scrolled to, and a file that has just changed lights up
+for a second. With **Group new files**, as JetBrains
 IDEs show them, new files are listed below the changed ones. It lists each file
 with its status (`m` modified, `n` new, `d` deleted, `r` renamed in the index,
 `b` binary) and its added and removed lines, and shows the diff of the selected

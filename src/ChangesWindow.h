@@ -2,6 +2,7 @@
 
 #include "ChangeTracker.h"
 
+#include <QHash>
 #include <QPointer>
 #include <QSet>
 #include <QWidget>
@@ -11,6 +12,7 @@
 
 class QCheckBox;
 class QComboBox;
+class QTimer;
 class QLabel;
 class QPlainTextEdit;
 class QStackedWidget;
@@ -75,6 +77,11 @@ private:
     // The file whose diff is shown or requested, and the state it was requested in.
     QString shownKey_;
     QString shownState_;
+    // The state of each listed file, so that files that changed since the last refresh light up briefly.
+    QHash<QString, QString> listedStates_;
+    int listedSince_ = -1;
+    QSet<QString> flashing_;
+    QTimer *flashEnd_;
     std::optional<FileDiff> diff_;
     QSet<int> openedFolds_;
     // Rows where a run of changes starts, and the one moved to last.

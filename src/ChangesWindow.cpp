@@ -21,8 +21,10 @@
 #include <QStackedWidget>
 #include <QTextBlock>
 #include <QTextCursor>
+#include <QTimer>
 #include <QToolButton>
 #include <QTreeWidget>
+#include <QTreeWidgetItemIterator>
 #include <QUrl>
 #include <QVBoxLayout>
 
@@ -35,6 +37,13 @@ constexpr int kMaximumShownLines = 20000;
 QString key(const FileChange &change)
 {
     return change.root + '\n' + change.file.path;
+}
+
+// What a refresh can change about a listed file.
+QString changeState(const FileChange &change)
+{
+    return QString("%1|%2|%3|%4|%5|%6").arg(int(change.since)).arg(int(change.file.status)).arg(change.file.sizeAfter)
+        .arg(change.lines.added).arg(change.lines.removed).arg(int(change.lines.kind));
 }
 
 QString statusLetter(ChangedFile::Status status)
@@ -160,6 +169,14 @@ ChangesWindow::ChangesWindow(ChangeTracker *tracker, const QString &title, QWidg
     connect(list_, &QTreeWidget::currentItemChanged, this, &ChangesWindow::showSelected);
     connect(list_, &QTreeWidget::itemActivated, this, [this](QTreeWidgetItem *item) { openFile(item); });
     connect(list_, &QTreeWidget::customContextMenuRequested, this, &ChangesWindow::showMenu);
+    flashEnd_ = new QTimer(this);
+    flashEnd_->setSingleShot(true);
+    flashEnd_->setInterval(1000);
+    connect(flashEnd_, &QTimer::timeout, this, [this] {
+        flashing_.clear();
+        for (QTreeWidgetItemIterator it(list_); *it; ++it)
+            for (int column = 0; column < list_->columnCount(); ++column) (*it)->setBackground(column, QBrush());
+    });
     connect(tracker, &ChangeTracker::changesUpdated, this, &ChangesWindow::updateList);
     connect(tracker, &ChangeTracker::diffReady, this, [this](const FileDiff &diff) {
         if (diff.root + '\n' + diff.path != shownKey_) return;
@@ -226,6 +243,20 @@ void ChangesWindow::updateList()
     const QString selected = current ? current->data(1, Qt::UserRole).toString() : QString();
     QSet<QString> roots;
     for (const FileChange &change : changes) roots.insert(change.root);
+    // Files that changed since the previous refresh of the same list light up for a moment.
+    QHash<QString, QString> states;
+    for (const FileChange &change : changes) states.insert(key(change), changeState(change));
+    if (listedSince_ == int(since()) && !listedStates_.isEmpty()) {
+        for (auto it = states.cbegin(); it != states.cend(); ++it)
+            if (listedStates_.value(it.key()) != it.value()) flashing_.insert(it.key());
+        if (!flashing_.isEmpty()) flashEnd_->start();
+    }
+    listedStates_ = states;
+    listedSince_ = int(since());
+    const bool dark = palette().color(QPalette::Base).lightness() < 128;
+    const QBrush flash(dark ? QColor(0x5c, 0x4b, 0x00) : QColor(0xff, 0xf1, 0x76));
+
+    const int scroll = list_->verticalScrollBar()->value();
     const QSignalBlocker blocker(list_);
     list_->clear();
     QTreeWidgetItem *reselect = nullptr;
@@ -288,9 +319,13 @@ void ChangesWindow::updateList()
         item->setTextAlignment(2, Qt::AlignRight | Qt::AlignVCenter);
         item->setTextAlignment(3, Qt::AlignRight | Qt::AlignVCenter);
         if (key(change) == selected) reselect = item;
+        if (flashing_.contains(key(change)))
+            for (int column = 0; column < list_->columnCount(); ++column) item->setBackground(column, flash);
     }
     list_->expandAll();
     if (reselect) list_->setCurrentItem(reselect);
+    // A refresh keeps the place the list was scrolled to.
+    list_->verticalScrollBar()->setValue(scroll);
     showSelected();
 }
 
@@ -305,13 +340,13 @@ void ChangesWindow::showSelected()
         render();
         return;
     }
-    const QString state = QString("%1|%2|%3|%4|%5|%6").arg(int(change->since)).arg(int(change->file.status))
-                              .arg(change->file.sizeAfter).arg(change->lines.added).arg(change->lines.removed)
-                              .arg(int(change->lines.kind));
+    const QString state = changeState(*change);
     if (key(*change) == shownKey_ && state == shownState_) return;
+    // The same file's refreshed diff replaces the shown one where it is scrolled to.
+    if (key(*change) != shownKey_)
+        for (QPlainTextEdit *view : {unified_, before_, after_}) view->setPlainText("Computing the differences…");
     shownKey_ = key(*change);
     shownState_ = state;
-    for (QPlainTextEdit *view : {unified_, before_, after_}) view->setPlainText("Computing the differences…");
     tracker_->requestDiff(*change);
 }
 
@@ -387,7 +422,8 @@ void ChangesWindow::render()
     changeStarts_.clear();
     const bool sideBySide = view_->currentIndex() == 1;
     QPlainTextEdit *main = sideBySide ? before_ : unified_;
-    const int scroll = main->verticalScrollBar()->value();
+    // Side by side, a new file is shown only on the right, so either side may hold the position.
+    const int scroll = qMax(main->verticalScrollBar()->value(), sideBySide ? after_->verticalScrollBar()->value() : 0);
     for (QPlainTextEdit *view : {unified_, before_, after_}) view->clear();
     if (!diff_) {
         const QString text = list_->topLevelItemCount() ? "Select a file to see its differences." : QString();
@@ -408,6 +444,7 @@ void ChangesWindow::render()
         unified_->setPlainText(lines.join('\n'));
         after_->setPlainText(lines.join('\n'));
         before_->setPlainText(QString("New file with %1 %2").arg(diff_->after.size()).arg(diff_->after.size() == 1 ? "line" : "lines"));
+        (sideBySide ? after_ : unified_)->verticalScrollBar()->setValue(scroll);
         previous_->setEnabled(false);
         next_->setEnabled(false);
         return;
