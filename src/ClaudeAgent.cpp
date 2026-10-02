@@ -342,6 +342,7 @@ ClaudeAgent::ClaudeAgent(ClaudeProvider *provider, const QString &workingDirecto
         emit message("[" + name_ + "] " + kind_.toUpper() + " bridge process error: " + process_->errorString()
                      + " (Python: " + process_->program() + ")");
         if (processError != QProcess::FailedToStart) return;
+        if (!steeringText_.isEmpty()) emit steerFailed(std::exchange(steeringText_, {}), "the bridge did not start");
         const bool working = busy_ || !queuedPrompts_.isEmpty();
         ready_ = false;
         busy_ = false;
@@ -353,6 +354,7 @@ ClaudeAgent::ClaudeAgent(ClaudeProvider *provider, const QString &workingDirecto
     connect(process_, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this,
             [this](int code, QProcess::ExitStatus) {
         emit message(QString("[%1] %2 bridge exited with code %3").arg(name_, kind_.toUpper()).arg(code));
+        if (!steeringText_.isEmpty()) emit steerFailed(std::exchange(steeringText_, {}), "the bridge exited");
         const bool working = busy_ || !queuedPrompts_.isEmpty();
         ready_ = false;
         busy_ = false;
@@ -475,6 +477,15 @@ bool ClaudeAgent::prompt(const QString &text)
     queuedPrompts_.append(text);
     if (!ready_) start({});
     sendNextPrompt();
+    return true;
+}
+
+bool ClaudeAgent::steer(const QString &text)
+{
+    if (text.trimmed().isEmpty() || !canSteer() || !isRunning()) return false;
+    steeringText_ = text;
+    send({{"type", "steer"}, {"text", text}});
+    emit stateChanged();
     return true;
 }
 
@@ -709,6 +720,12 @@ void ClaudeAgent::handleLine(const QByteArray &line)
         tokens.total = tokens.input < 0 || tokens.output < 0 ? -1 : tokens.input + tokens.output;
         tokens.costUsd = event.value("costUsd").isDouble() ? event.value("costUsd").toDouble() : -1;
         emit turnUsage(tokens);
+    } else if (type == "steer_accepted" || type == "steer_failed") {
+        const QString text = std::exchange(steeringText_, {});
+        if (type == "steer_accepted") emit steerAccepted(text);
+        else emit steerFailed(text, event.value("message").toString());
+        emit stateChanged();
+        sendNextPrompt();
     } else if (type == "rate_limit") {
         if (provider_) provider_->updateUsage(event);
     } else if (type == "error") {

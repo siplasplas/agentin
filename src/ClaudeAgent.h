@@ -118,6 +118,11 @@ public:
     QString statusText() const override;
     bool isResponding() const override { return busy_; }
     bool canInterrupt() const override { return busy_ && !stopRequested_; }
+    // A message sent during a turn joins it at the model's next step, or is answered right after it.
+    bool supportsSteering() const override { return true; }
+    bool canSteer() const override { return busy_ && !stopRequested_ && steeringText_.isEmpty(); }
+    bool isSteering() const override { return !steeringText_.isEmpty(); }
+    bool steer(const QString &text) override;
     QString model() const override { return model_; }
     QString effort() const override { return effort_; }
     void setModel(const QString &model, const QString &effort) override;
@@ -161,6 +166,8 @@ private:
     bool readOnly_ = false;
     bool appliedReadOnly_ = false;
     QStringList queuedPrompts_;
+    // The steering message the bridge has not confirmed yet.
+    QString steeringText_;
     // The API error the CLI is retrying after, until the turn makes progress or ends.
     QString retry_;
     QHash<int, int> pendingQuestionCounts_;

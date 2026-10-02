@@ -271,6 +271,8 @@ class Bridge:
         self.additional_dirs = []
         # Directories allowed for this CLI session by an approved suggestion; a reconnect forgets them.
         self.session_dirs = []
+        # A steering message was sent during the turn and may start another CLI turn after its result.
+        self.steered = False
         self.connected = False
 
     def settings_directories(self):
@@ -419,6 +421,31 @@ class Bridge:
             if not future.done():
                 future.set_result({"allow": False, "accepted": False})
 
+    async def turn_messages(self):
+        """Yields the messages of a turn, including the CLI turns that steering messages started.
+
+        A steering message that arrives while the model still works joins the running turn. One that arrives
+        after its last step makes the CLI answer it in another turn, announced right after the result with a
+        "requesting" status; that turn belongs to the same turn of the chat."""
+        async for message in self.client.receive_response():
+            yield message
+        while self.steered:
+            self.steered = False
+            stream = self.client.receive_response()
+            try:
+                first = await asyncio.wait_for(anext(stream), timeout=2)
+            except asyncio.TimeoutError:
+                if self.steered:
+                    continue
+                return
+            except StopAsyncIteration:
+                return
+            if self.turn_had_text:
+                send({"type": "delta", "text": "\n\n"})
+            yield first
+            async for message in stream:
+                yield message
+
     async def run_turn(self, text):
         self.stop_requested = False
         self.streamed_text = False
@@ -428,8 +455,9 @@ class Bridge:
         thinking_id = str(uuid.uuid4())
         thinking = {}
         try:
+            self.steered = False
             await self.client.query(text)
-            async for message in self.client.receive_response():
+            async for message in self.turn_messages():
                 if isinstance(message, StreamEvent):
                     event = message.event
                     if event.get("type") == "message_start":
@@ -509,6 +537,15 @@ class Bridge:
             text = command.get("text", "").strip()
             if text:
                 self.turn_task = asyncio.create_task(self.run_turn(text))
+        elif kind == "steer":
+            text = command.get("text")
+            if self.turn_task is None or not isinstance(text, str) or not text.strip():
+                send({"type": "steer_failed", "text": text if isinstance(text, str) else "",
+                      "message": "No turn is running"})
+                return
+            self.steered = True
+            await self.client.query(text)
+            send({"type": "steer_accepted", "text": text})
         elif kind == "stop":
             if self.turn_task is not None:
                 self.stop_requested = True
