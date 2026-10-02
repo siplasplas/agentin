@@ -215,6 +215,7 @@ void ChatTab::finishCompactionClock()
     lastOperationName_ = "Compact";
     compactionClockRunning_ = false;
     emit logMessage("[" + provider_->name() + " compaction duration: " + elapsedTime(lastOperationDurationMs_) + "]");
+    emit compactionChanged(false);
     emit changed();
 }
 
@@ -529,6 +530,7 @@ void ChatTab::setAgent(AgentBackend *agent)
         if (compactionClockRunning_) return;
         compactionClock_.start();
         compactionClockRunning_ = true;
+        emit compactionChanged(true);
         emit changed();
     });
     connect(agent, &AgentBackend::compactionFinished, this, &ChatTab::finishCompactionClock);

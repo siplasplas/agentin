@@ -564,7 +564,7 @@ void MainWindowTest::audioChooserPathsAndLastDirectory()
     QFile settings(directory.filePath("settings.json"));
     QVERIFY(settings.open(QIODevice::WriteOnly));
     settings.write(QJsonDocument(QJsonObject{{"notifications", QJsonObject{
-        {"finishedSound", oldFile}, {"failedSound", oldFile}}}}).toJson());
+        {"finishedSound", oldFile}, {"failedSound", oldFile}, {"waitingSound", QString()}}}}).toJson());
     settings.close();
     const auto choose = [&](MainWindow &window, const QString &key, const QString &expectedDirectory,
                             const QString &typedPath, const QString &expectedFile, bool cancel = false) {

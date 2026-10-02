@@ -1454,11 +1454,23 @@ void MainWindow::showNotificationsDialog()
     minimum->setValue(settings.minimumMinutes);
     minimum->setToolTip("Finished and failed turns notify only when they took at least this long; 0 notifies every turn");
     form->addRow("Notify turns longer than:", minimum);
-    const auto soundRow = [this, &dialog, form](const QString &label, const QString &file, const QString &key) {
+    // Each sound is a built-in one, a file chosen or typed, or none.
+    const auto soundValue = [](const QComboBox *box) {
+        const int index = box->findText(box->currentText());
+        return (index >= 0 ? box->itemData(index).toString() : box->currentText()).trimmed();
+    };
+    const auto soundRow = [this, &dialog, form, soundValue](const QString &label, const QString &file, const QString &key) {
         auto *row = new QHBoxLayout;
-        auto *path = new QLineEdit(file, &dialog);
-        path->setPlaceholderText("No sound");
-        path->setObjectName(key + "Path");
+        auto *path = new QComboBox(&dialog);
+        path->setEditable(true);
+        path->setInsertPolicy(QComboBox::NoInsert);
+        path->addItem(QString(), QString());
+        for (const auto &[name, text] : Notifier::builtInSounds()) path->addItem(text, name);
+        if (path->findData(file) < 0) path->addItem(file, file);
+        path->setCurrentIndex(path->findData(file));
+        path->setToolTip("A built-in sound, or a sound file: choose one with Browse… or type its path");
+        path->lineEdit()->setPlaceholderText("No sound");
+        path->lineEdit()->setObjectName(key + "Path");
         auto *browse = new QPushButton("Browse…", &dialog);
         browse->setObjectName(key + "Browse");
         auto *play = new QPushButton("Play", &dialog);
@@ -1469,7 +1481,7 @@ void MainWindow::showNotificationsDialog()
         connect(browse, &QPushButton::clicked, &dialog, [this, path, &dialog] {
             QString directory = lastAudioDirectory_;
             if (!QDir(directory).exists() || directory.isEmpty()) {
-                const QFileInfo current(path->text().trimmed());
+                const QFileInfo current(path->currentText().trimmed());
                 directory = current.exists() ? (current.isDir() ? current.absoluteFilePath() : current.absolutePath())
                                              : QDir::homePath();
             }
@@ -1478,21 +1490,25 @@ void MainWindow::showNotificationsDialog()
             picker.setDirectory(directory);
             picker.setNameFilter("Sounds (*.wav *.mp3 *.ogg *.oga *.flac)");
             picker.setAudioDurationVisible(true);
-            picker.setFileName(path->text().trimmed());
+            picker.setFileName(path->currentText().trimmed());
             const bool accepted = picker.exec() == QDialog::Accepted;
             lastAudioDirectory_ = picker.directory();
             saveSettings();
-            if (accepted) path->setText(picker.selectedFile());
+            if (!accepted) return;
+            if (path->findData(picker.selectedFile()) < 0) path->addItem(picker.selectedFile(), picker.selectedFile());
+            path->setCurrentIndex(path->findData(picker.selectedFile()));
         });
-        connect(play, &QPushButton::clicked, &dialog, [this, path] {
-            if (!notifier_->playSound(path->text()))
+        connect(play, &QPushButton::clicked, &dialog, [this, path, soundValue] {
+            if (!notifier_->playSound(soundValue(path)))
                 appendLine("[Could not play the sound; install ffplay, mpv, pw-play or paplay, and check the file.]");
         });
         return path;
     };
-    QLineEdit *finished = soundRow("Turn finished:", settings.finishedSound, "finishedSound");
-    QLineEdit *failed = soundRow("Turn failed:", settings.failedSound, "failedSound");
-    QLineEdit *waiting = soundRow("Agent waits for you:", settings.waitingSound, "waitingSound");
+    QComboBox *finished = soundRow("Turn finished:", settings.finishedSound, "finishedSound");
+    QComboBox *failed = soundRow("Turn failed:", settings.failedSound, "failedSound");
+    QComboBox *waiting = soundRow("Agent waits for you:", settings.waitingSound, "waitingSound");
+    QComboBox *compactionStarted = soundRow("Compaction starts:", settings.compactionStartedSound, "compactionStartedSound");
+    QComboBox *compactionFinished = soundRow("Compaction ends:", settings.compactionFinishedSound, "compactionFinishedSound");
     auto *delay = new QSpinBox(&dialog);
     delay->setRange(0, 3600);
     delay->setSuffix(" s");
@@ -1509,10 +1525,14 @@ void MainWindow::showNotificationsDialog()
     approvals->setObjectName("announceApprovals");
     approvals->setChecked(settings.announceApprovals);
     form->addRow(QString(), approvals);
-    auto *voice = new QCheckBox("Announce with a voice instead of the sound files", &dialog);
+    auto *voice = new QCheckBox("Speak finished and failed turns instead of playing their sounds", &dialog);
     voice->setObjectName("announceWithVoice");
     voice->setChecked(settings.voice);
     form->addRow(QString(), voice);
+    auto *voiceWaiting = new QCheckBox("Speak waiting agents instead of playing their sound", &dialog);
+    voiceWaiting->setObjectName("announceWaitingWithVoice");
+    voiceWaiting->setChecked(settings.voiceWaiting);
+    form->addRow(QString(), voiceWaiting);
     auto *voiceRow = new QHBoxLayout;
     auto *voiceChoice = new QComboBox(&dialog);
     voiceChoice->setObjectName("voiceChoice");
@@ -1564,7 +1584,7 @@ void MainWindow::showNotificationsDialog()
             appendLine("[No voice program was found for this choice.]");
     });
     auto *note = new QLabel("A waiting agent is announced regardless of how long the turn has run, because its work "
-                            "stops until you answer. The speaker button turns red during audio playback; click it to stop. "
+                            "stops until you answer. Compaction cues play at every compaction and are never spoken. The speaker button turns red during audio playback; click it to stop. "
                             "When idle, it mutes notification sounds.", &dialog);
     note->setWordWrap(true);
     layout->addWidget(note);
@@ -1580,13 +1600,16 @@ void MainWindow::showNotificationsDialog()
     if (dialog.exec() != QDialog::Accepted) return;
     settings.popups = popups->isChecked();
     settings.minimumMinutes = minimum->value();
-    settings.finishedSound = finished->text().trimmed();
-    settings.failedSound = failed->text().trimmed();
-    settings.waitingSound = waiting->text().trimmed();
+    settings.finishedSound = soundValue(finished);
+    settings.failedSound = soundValue(failed);
+    settings.waitingSound = soundValue(waiting);
+    settings.compactionStartedSound = soundValue(compactionStarted);
+    settings.compactionFinishedSound = soundValue(compactionFinished);
     settings.waitingDelaySeconds = delay->value();
     settings.waitingRepeatMinutes = repeat->value();
     settings.announceApprovals = approvals->isChecked();
     settings.voice = voice->isChecked();
+    settings.voiceWaiting = voiceWaiting->isChecked();
     settings = voiceSettings(settings);
     notifier_->setSettings(settings);
     saveSettings();
@@ -2041,6 +2064,7 @@ QWidget *MainWindow::addChatTab(AgentProvider *selected, const QString &workingD
     connect(tab, &ChatTab::turnEnded, this, [this, tab](bool succeeded, qint64 durationMs) {
         notifier_->turnFinished(tab->provider()->name(), tab->title().left(60), succeeded, durationMs);
     });
+    connect(tab, &ChatTab::compactionChanged, notifier_, &Notifier::compactionChanged);
     connect(tab, &ChatTab::userMessagesChanged, this, [this, page, tab] {
         if (tabs_->currentWidget() == page) input_->setHistory(tab->userMessages());
     });

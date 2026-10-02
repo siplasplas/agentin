@@ -122,6 +122,7 @@ signals:
     void userMessagesChanged();
     // A turn ended on its own, successfully or not; turns the user stopped are not reported.
     void turnEnded(bool succeeded, qint64 durationMs);
+    void compactionChanged(bool started);
     void requestsChanged();
     void steeringFailed(const QString &text);
     // The chat's conversation is open with this ID, started here or resumed.

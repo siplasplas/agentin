@@ -30,14 +30,20 @@ public:
         QString finishedSound;
         QString failedSound;
         QString waitingSound;
+        // Short cues when compaction starts and ends: a built-in sound (see builtInSounds()), a file, or
+        // empty for none. They play whatever the turn's length and are never spoken.
+        QString compactionStartedSound = "rising";
+        QString compactionFinishedSound = "falling";
         // A waiting agent is announced after this delay, so an answer given at once stays quiet.
         int waitingDelaySeconds = 30;
         // Repeats the waiting announcement until answered; 0 announces once.
         int waitingRepeatMinutes = 0;
         // Approval requests can stay quiet while questions and finished turns are still announced.
         bool announceApprovals = true;
-        // Announcements are spoken when a voice program is found; otherwise the sound files play.
+        // Finished turns, and separately waiting agents, are spoken when a voice program is found;
+        // otherwise their sounds play.
         bool voice = true;
+        bool voiceWaiting = true;
         // "piper" or "espeak-ng"; empty picks the first one found.
         QString voiceEngine;
         // Empty paths are found automatically.
@@ -64,8 +70,13 @@ public:
                         const QString &request);
     // Also stops the announcement of that chat's request if it is still being played.
     void waitingEnded(const QString &key);
+    // A cue does not cut off an announcement that is playing.
+    void compactionChanged(bool started);
 
-    // Plays a sound file even when sounds are muted, for trying it out in the settings.
+    // Short sounds generated on demand, as name and label, such as "click" and "Click".
+    static QList<std::pair<QString, QString>> builtInSounds();
+
+    // Plays a sound file or a built-in sound even when sounds are muted, for trying it out in the settings.
     bool playSound(const QString &file);
     bool isPlaying() const { return !playbackProcess_.isNull(); }
     void stopPlayback();
@@ -90,6 +101,8 @@ private:
     QProcess *startPlaybackProcess(const QString &program, const QStringList &arguments,
                                    std::function<void(bool)> completed = {});
     bool playSoundFile(const QString &file, bool temporary);
+    // A file, or a built-in sound written to a temporary file.
+    bool playSoundOrBuiltIn(const QString &sound);
     void updatePlaybackState();
     void removeTemporaryFile(const QString &file);
     void announceWaiting(const QString &key);

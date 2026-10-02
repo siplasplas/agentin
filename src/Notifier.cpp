@@ -9,7 +9,10 @@
 #include <QStandardPaths>
 #include <QStyle>
 #include <QSystemTrayIcon>
+#include <QTemporaryFile>
 #include <QTimer>
+
+#include <cmath>
 
 namespace {
 // Long chat titles are cut at a word so that a spoken announcement stays short.
@@ -23,19 +26,35 @@ QString spokenTitle(const QString &title)
 }
 }
 
+namespace {
+// A sound of the desktop's sound theme where it is installed, as on Ubuntu, otherwise the fallback.
+QString systemSound(const QString &path, const QString &fallback)
+{
+    return QFileInfo(path).isFile() ? path : fallback;
+}
+}
+
+// Unset sounds default to the system's sounds where they exist: a bell when compaction starts, Yaru's
+// "complete" when it ends, and a shutter click, rather than a voice, for an agent that waits.
 Notifier::Settings Notifier::Settings::fromJson(const QJsonObject &object)
 {
     Settings settings;
+    settings.compactionStartedSound = systemSound("/usr/share/sounds/freedesktop/stereo/bell.oga", "rising");
+    settings.compactionFinishedSound = systemSound("/usr/share/sounds/Yaru/stereo/complete.oga", "falling");
+    const QString waitingSound = systemSound("/usr/share/sounds/freedesktop/stereo/screen-capture.oga", QString());
     settings.popups = object.value("popups").toBool(true);
     settings.muted = object.value("muted").toBool(false);
     settings.minimumMinutes = object.value("minimumMinutes").toInt(5);
     settings.finishedSound = object.value("finishedSound").toString();
     settings.failedSound = object.value("failedSound").toString();
-    settings.waitingSound = object.value("waitingSound").toString();
+    settings.waitingSound = object.value("waitingSound").toString(waitingSound);
+    settings.compactionStartedSound = object.value("compactionStartedSound").toString(settings.compactionStartedSound);
+    settings.compactionFinishedSound = object.value("compactionFinishedSound").toString(settings.compactionFinishedSound);
     settings.waitingDelaySeconds = object.value("waitingDelaySeconds").toInt(30);
     settings.waitingRepeatMinutes = object.value("waitingRepeatMinutes").toInt(0);
     settings.announceApprovals = object.value("announceApprovals").toBool(true);
     settings.voice = object.value("voice").toBool(true);
+    settings.voiceWaiting = object.value("voiceWaiting").toBool(waitingSound.isEmpty() && settings.voice);
     settings.voiceEngine = object.value("voiceEngine").toString();
     settings.piperProgram = object.value("piperProgram").toString();
     settings.piperModel = object.value("piperModel").toString();
@@ -47,9 +66,10 @@ QJsonObject Notifier::Settings::toJson() const
 {
     return {{"popups", popups}, {"muted", muted}, {"minimumMinutes", minimumMinutes},
             {"finishedSound", finishedSound}, {"failedSound", failedSound}, {"waitingSound", waitingSound},
+            {"compactionStartedSound", compactionStartedSound}, {"compactionFinishedSound", compactionFinishedSound},
             {"waitingDelaySeconds", waitingDelaySeconds}, {"waitingRepeatMinutes", waitingRepeatMinutes},
             {"announceApprovals", announceApprovals},
-            {"voice", voice}, {"voiceEngine", voiceEngine}, {"piperProgram", piperProgram}, {"piperModel", piperModel},
+            {"voice", voice}, {"voiceWaiting", voiceWaiting}, {"voiceEngine", voiceEngine}, {"piperProgram", piperProgram}, {"piperModel", piperModel},
             {"speechSlowness", speechSlowness}};
 }
 
@@ -111,7 +131,7 @@ void Notifier::announceWaiting(const QString &key)
 // pl_PL-gosia-medium); espeak-ng and other voices speak English.
 void Notifier::announce(Event event, const QString &agent, const QString &chat, const QString &soundFile)
 {
-    if (settings_.voice) {
+    if (event == Event::Waiting ? settings_.voiceWaiting : settings_.voice) {
         const bool polish = voiceEngine(settings_) == "piper" && QFileInfo(findPiperModel(settings_)).fileName().startsWith("pl");
         QString sentence;
         switch (event) {
@@ -280,7 +300,84 @@ bool Notifier::say(const Settings &settings, const QString &text)
 bool Notifier::playSound(const QString &file)
 {
     announcedWaitingKey_.clear();
-    return playSoundFile(file, false);
+    return playSoundOrBuiltIn(file);
+}
+
+void Notifier::compactionChanged(bool started)
+{
+    if (settings_.muted || isPlaying()) return;
+    playSoundOrBuiltIn(started ? settings_.compactionStartedSound : settings_.compactionFinishedSound);
+}
+
+QList<std::pair<QString, QString>> Notifier::builtInSounds()
+{
+    return {{"click", "Click"}, {"double-click", "Double click"}, {"rising", "Rising tone"}, {"falling", "Falling tone"}};
+}
+
+namespace {
+// 16-bit mono PCM samples of a built-in sound, or nothing for an unknown name.
+QList<qint16> builtInSamples(const QString &name, int rate)
+{
+    QList<double> wave;
+    const auto click = [&wave, rate](int at) {
+        // A short 2 kHz ping that dies away within about 20 ms.
+        const int length = rate / 40;
+        if (wave.size() < at + length) wave.resize(at + length);
+        for (int i = 0; i < length; ++i)
+            wave[at + i] += std::sin(2 * M_PI * 2000 * i / rate) * std::exp(-double(i) / (rate / 250.0));
+    };
+    const auto sweep = [&wave, rate](double from, double to) {
+        // A 140 ms glide that fades in and out, so it does not click itself.
+        const int length = rate * 14 / 100;
+        double phase = 0;
+        for (int i = 0; i < length; ++i) {
+            const double t = double(i) / length;
+            phase += 2 * M_PI * (from + (to - from) * t) / rate;
+            wave.append(std::sin(phase) * std::sin(M_PI * t));
+        }
+    };
+    if (name == "click") click(0);
+    else if (name == "double-click") {
+        click(0);
+        click(rate * 9 / 100);
+    } else if (name == "rising") sweep(600, 1200);
+    else if (name == "falling") sweep(1200, 600);
+    QList<qint16> samples;
+    for (double value : wave) samples.append(qint16(qBound(-1.0, value * 0.35, 1.0) * 32767));
+    return samples;
+}
+}
+
+bool Notifier::playSoundOrBuiltIn(const QString &sound)
+{
+    constexpr int rate = 44100;
+    const QList<qint16> samples = builtInSamples(sound, rate);
+    if (samples.isEmpty()) return playSoundFile(sound, false);
+    QTemporaryFile file(QDir(QDir::tempPath()).filePath("agentin-sound-XXXXXX.wav"));
+    file.setAutoRemove(false);
+    if (!file.open()) return false;
+    const auto put32 = [&file](quint32 value) { file.write(reinterpret_cast<const char *>(&value), 4); };
+    const auto put16 = [&file](quint16 value) { file.write(reinterpret_cast<const char *>(&value), 2); };
+    const quint32 bytes = quint32(samples.size() * 2);
+    file.write("RIFF");
+    put32(36 + bytes);
+    file.write("WAVEfmt ");
+    put32(16);
+    put16(1);
+    put16(1);
+    put32(rate);
+    put32(rate * 2);
+    put16(2);
+    put16(16);
+    file.write("data");
+    put32(bytes);
+    for (qint16 sample : samples) put16(quint16(sample));
+    file.close();
+    if (!playSoundFile(file.fileName(), true)) {
+        QFile::remove(file.fileName());
+        return false;
+    }
+    return true;
 }
 
 bool Notifier::playSoundFile(const QString &file, bool temporary)

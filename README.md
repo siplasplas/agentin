@@ -374,7 +374,7 @@ its work stops until then. Approval requests can be left unannounced, while
 finished turns and the agent's questions still are. The speaker button in the status row turns red while a sound or voice is
 playing (including voice preparation); click it to stop the current audio without
 changing the mute setting. When idle, it mutes notification sounds. The
-audio chooser remembers its last browsed directory across all three notification
+audio chooser remembers its last browsed directory across all notification
 sound fields and application restarts, including when the chooser is cancelled.
 When a sound field already contains a file, Browse opens its directory and selects
 and scrolls to that file; an empty field starts in the last browsed directory.
@@ -385,6 +385,17 @@ to its displayed directory. The
 notification settings dialog also has **Stop playback** for cancelling **Play**
 or **Try** previews while the dialog is open. Starting another sound or voice
 replaces the current playback, and closing the application stops it.
+
+Each sound can also be one of the short built-in sounds, generated when played:
+a click, a double click, a rising or a falling tone. A Codex chat's compaction
+plays its own cues when it starts and when it ends, at every compaction and never
+spoken; a cue does not interrupt an
+announcement that is playing, and muting silences it too. Where the desktop's
+sound themes are installed, as on Ubuntu, unset sounds default to them:
+freedesktop's `bell.oga` when compaction starts, Yaru's `complete.oga` when it
+ends, and freedesktop's `screen-capture.oga` for an agent that waits, which then
+plays this sound instead of being spoken, while finished turns are still spoken.
+Elsewhere compaction uses the rising and falling tones.
 
 
 Announcements can be spoken instead, for example "Codex finished: fix the build"
@@ -397,7 +408,9 @@ starts with `pl`, such as `pl_PL-gosia-medium` from
 [piper-voices](https://huggingface.co/rhasspy/piper-voices)) speaks Polish
 sentences; other voices speak English. The voice and its pace are chosen and tried
 in **Settings → Notifications…**; a slowness above 1 (1.3 by default) speaks
-slower and usually clearer. Without a voice program the sound files play. A spoken
+slower and usually clearer. Finished turns and waiting agents are spoken or not
+separately, so for example a finished turn can be spoken while a question plays
+its sound. Without a voice program the sound files play. A spoken
 announcement names the chat by the first words of its title, about 32
 characters. Answering the approval or question it announces, or a new request
 of the same chat, stops it at once.
