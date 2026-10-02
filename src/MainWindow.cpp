@@ -445,8 +445,10 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     auto *inputRow = new QHBoxLayout;
     inputRow->addWidget(input_, 1);
     inputRow->addWidget(suggestButton_);
-    inputRow->addWidget(sendButton_);
+    // During a turn, steering is what a message usually means, so its button comes first; it is disabled
+    // between turns.
     inputRow->addWidget(steerButton_);
+    inputRow->addWidget(sendButton_);
     inputRow->addWidget(stopButton_);
     auto *statusRow = new QHBoxLayout;
     statusRow->addWidget(status_, 1);

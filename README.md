@@ -248,7 +248,7 @@ input, cached and output tokens. For agents other than Codex, the conversation
 figure covers the turns sent from the tab. Antigravity's statistics are read
 where its result event carries them.
 
-During a running Codex, Claude or GLM turn, **Steer** (the orange `!` button) sends the message field's text directly to
+During a running Codex, Claude or GLM turn, **Steer** (the orange `!` button, placed before Send) sends the message field's text directly to
 that turn, while **Send** continues to queue a message for the next turn. Sending
 from the keyboard (Enter, or Ctrl+Enter) steers whenever Steer is available, so
 the Send button is the way to queue; `help`, `stop` and the other commands still
