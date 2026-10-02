@@ -239,7 +239,10 @@ figure covers the turns sent from the tab. Antigravity's statistics are read
 where its result event carries them.
 
 During a running Codex turn, **Steer** sends the message field's text directly to
-that turn, while **Send** continues to queue a message for the next turn. Steer is
+that turn, while **Send** continues to queue a message for the next turn. Sending
+from the keyboard (Enter, or Ctrl+Enter) steers whenever Steer is available, so
+the Send button is the way to queue; `help`, `stop` and the other commands still
+work as commands. Steer is
 available once the turn ID is known, except during manual compaction, stopping,
 or a pending approval/question. Accepted messages appear as `You (steer)` and are
 included in message history. If the turn finishes before the server accepts the
@@ -375,7 +378,10 @@ preserved in the SDK's raw data, when available. This also supports events where
 the top-level percentage is omitted during normal use. The panel uses the last
 reported snapshot and does not promise live quota polling for Claude.
 GLM has the same event handling through its bridge but may report no quota data.
-Gemini and Antigravity currently do not report account limits.
+Gemini and Antigravity currently do not report account limits. Each change of a
+provider's reported limits is also written to the log, for example
+`[Codex limits: Week 13% used, resets Wed 7 Oct 16:57]`, so you can follow how
+fast they are used; Codex reports whole percentages.
 
 Select a chat in the conversation tree to show a read-only preview of its
 latest messages in the preview tab, whose title is shown in italics. Selecting

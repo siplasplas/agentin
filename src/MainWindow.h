@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QHash>
 #include <QJsonObject>
 #include <QList>
 #include <QMainWindow>
@@ -60,6 +61,8 @@ private:
     void saveSession();
     void submitCommand();
     void submitSteer();
+    void submitFromKeyboard();
+    bool canSteerNow() const;
     void updateSteerButton();
     void showHelp();
     void requestStop();
@@ -101,6 +104,7 @@ private:
     void updateOperationTime();
     void updateModelControls();
     void updateUsage();
+    void logUsageLimits(AgentProvider *provider);
     void showEnterAction(bool sends);
     void updateRequestPanel();
     void chooseModel();
@@ -153,6 +157,8 @@ private:
     UsageLimitsPanel *usage_;
     QSplitter *usageSplitter_;
     int usagePanelHeight_ = 0;
+    // The limits last written to the log, by provider.
+    QHash<QString, QString> loggedUsage_;
     QAction *usageVisibleAction_;
     QAction *reasoningVisibleAction_;
     QTreeWidget *conversationTree_;

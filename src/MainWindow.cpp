@@ -243,9 +243,12 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     enterIndicator_->setObjectName("enterIndicator");
     sendButton_ = new QPushButton("Send", central);
     sendButton_->setObjectName("sendButton");
+    sendButton_->setToolTip("Send the message; during a running turn that takes steering, it waits for the next turn, "
+                            "while Enter steers the running one");
     steerButton_ = new QPushButton("Steer", central);
     steerButton_->setObjectName("steerButton");
-    steerButton_->setToolTip("Send this message to the running turn; Send queues it for the next turn");
+    steerButton_->setToolTip("Send this message to the running turn, as Enter does while it runs; "
+                             "Send queues it for the next turn");
     steerButton_->setEnabled(false);
     steerButton_->hide();
     stopButton_ = new QPushButton("Stop", central);
@@ -497,7 +500,7 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     connect(readOnlyInput_, &QCheckBox::clicked, this, [this](bool checked) {
         if (ChatTab *tab = currentTab()) tab->agent()->setReadOnly(checked);
     });
-    connect(input_, &MessageInput::submitted, this, &MainWindow::submitCommand);
+    connect(input_, &MessageInput::submitted, this, &MainWindow::submitFromKeyboard);
     connect(muteSounds_, &QToolButton::clicked, this, [this](bool muted) {
         if (notifier_->isPlaying()) {
             notifier_->stopPlayback();
@@ -539,6 +542,7 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
         connect(listed, &AgentProvider::conversationsChanged, this, &MainWindow::refreshConversationTree);
         connect(listed, &AgentProvider::modelsChanged, this, &MainWindow::updateModelControls);
         connect(listed, &AgentProvider::usageChanged, this, &MainWindow::updateUsage);
+        connect(listed, &AgentProvider::usageChanged, this, [this, listed] { logUsageLimits(listed); });
     }
 
     appendLine("Directory: " + workingDirectory_);
@@ -564,6 +568,8 @@ MainWindow::~MainWindow()
 {
     disconnect(tabs_, nullptr, this, nullptr);
     for (AgentProvider *listed : providers_) disconnect(listed, nullptr, this, nullptr);
+    // A help process still running is killed with the window; its error must not reach the deleted log.
+    for (QProcess *process : findChildren<QProcess *>(Qt::FindDirectChildrenOnly)) disconnect(process, nullptr, this, nullptr);
     chatView_->setDocument(emptyDocument_);
     reasoning_->setDocument(emptyDocument_);
     chatPanel_->setParent(this);
@@ -693,12 +699,28 @@ void MainWindow::submitSteer()
     input_->setFocus();
 }
 
+bool MainWindow::canSteerNow() const
+{
+    const ChatTab *tab = currentTab();
+    return tab && tab->isLive() && !tab->pendingRequest() && tab->agent()->canSteer()
+        && !input_->toPlainText().trimmed().isEmpty();
+}
+
+// While the running turn can take it, a message sent from the keyboard steers that turn; the Send
+// button still queues it for the next turn. Local commands keep their meaning.
+void MainWindow::submitFromKeyboard()
+{
+    static const QStringList commands{"help", "/help", "clear", "/clear", "new", "/new",
+                                      "stop", "/stop", "quit", "/quit", "exit"};
+    if (canSteerNow() && !commands.contains(input_->toPlainText().trimmed().toLower())) submitSteer();
+    else submitCommand();
+}
+
 void MainWindow::updateSteerButton()
 {
     const ChatTab *tab = currentTab();
     steerButton_->setVisible(tab && tab->agent()->supportsSteering());
-    steerButton_->setEnabled(tab && tab->isLive() && !tab->pendingRequest()
-                            && tab->agent()->canSteer() && !input_->toPlainText().trimmed().isEmpty());
+    steerButton_->setEnabled(canSteerNow());
 }
 
 void MainWindow::showHelp()
@@ -710,7 +732,7 @@ void MainWindow::showHelp()
     appendLine("  stop       interrupt the current response");
     appendLine("  quit       close the application");
     appendLine("All other text is sent to the chat in the current tab as a message.");
-    appendLine("During a Codex turn, Steer sends the message to that turn; Send queues it for the next turn.\n");
+    appendLine("During a Codex turn, Enter and Steer send the message to that turn; Send queues it for the next turn.\n");
     const ChatTab *tab = currentTab();
     const AgentHelp help = (tab ? tab->provider() : providers_.first())->help();
     for (const QString &line : help.lines) appendLine(line);
@@ -1970,6 +1992,32 @@ void MainWindow::showEnterAction(bool sends)
     enterIndicator_->setToolTip(sends ? "Enter sends this message; Shift+Enter starts a new line"
                                       : "Enter starts a new line; Ctrl+Enter sends this message");
     enterIndicator_->setAccessibleName(sends ? "Enter sends" : "Enter starts a new line");
+}
+
+// Each change of a provider's reported limits is written to the log, so their pace can be followed.
+void MainWindow::logUsageLimits(AgentProvider *provider)
+{
+    QList<UsageLimit> limits = provider->usageLimits();
+    std::sort(limits.begin(), limits.end(), [](const UsageLimit &a, const UsageLimit &b) {
+        return a.windowMinutes == b.windowMinutes ? a.id < b.id : a.windowMinutes > b.windowMinutes;
+    });
+    QStringList parts;
+    for (const UsageLimit &limit : limits) {
+        QString window = limit.windowMinutes == 7 * 24 * 60 ? QString("Week")
+            : limit.windowMinutes > 0 && limit.windowMinutes % 60 == 0 ? QString("%1 h").arg(limit.windowMinutes / 60)
+            : QString("%1 min").arg(limit.windowMinutes);
+        if (!limit.name.isEmpty()) window = limit.name + " " + window;
+        QString part = window + " " + (limit.usedPercent < 0 ? QString("usage not reported")
+                                                               : QLocale::c().toString(limit.usedPercent, 'g', 4) + "% used");
+        if (limit.resetsAt > 0)
+            part += ", resets " + QDateTime::fromSecsSinceEpoch(limit.resetsAt).toString("ddd d MMM HH:mm");
+        if (!limit.status.isEmpty() && limit.status != "allowed") part += " (" + limit.status + ")";
+        parts.append(part);
+    }
+    const QString summary = parts.join("; ");
+    if (summary.isEmpty() || loggedUsage_.value(provider->name()) == summary) return;
+    loggedUsage_.insert(provider->name(), summary);
+    appendLine("[" + provider->name() + " limits: " + summary + "]");
 }
 
 // Account snapshots follow the selected provider; only that provider is asked for fresh limits.
