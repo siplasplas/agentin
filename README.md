@@ -193,10 +193,12 @@ directory is given with `-C`, its new chat opens next to the reopened tabs.
 Chats in different tabs run independently, also several chats with the same
 agent. All Codex chats share one App Server process. A tab whose agent is
 responding shows a busy marker, and a background tab that receives output is
-marked until you switch to it. Closing a tab while its agent is responding asks
-first and then stops the response. Quitting the application (the window's close
-button, Alt+F4 or `quit`) while turns are running lists them and asks whether to
-stop them and quit; otherwise it closes at once. While a changes window is open, the
+marked until you switch to it. Closing a tab while its turn runs names the chat
+and asks whether to stop the turn and close the tab. Quitting the application
+(the window's close button, Alt+F4 or `quit`) while turns are running says how
+many run, lists them and asks whether to stop them and quit; otherwise it closes
+at once. In both questions Cancel is the default, so Enter keeps everything
+running. While a changes window is open, the
 close button and Alt+F4 close the changes windows instead, and `quit` still quits. Ctrl+Tab switches tabs in most recently used
 order.
 
@@ -678,3 +680,10 @@ The Codex client uses JSONL over stdin/stdout (`codex app-server --stdio`). See 
 for the protocol. The Claude bridge also uses JSONL over stdin/stdout and calls
 [`ClaudeSDKClient`](https://code.claude.com/docs/en/agent-sdk/python) in the
 Python SDK.
+
+## Working on agentin with coding agents
+
+The project's rules for coding assistants are in `AGENTS.md`; there is no
+`CLAUDE.md`. Codex reads `AGENTS.md`, and so does a current Claude Code. An older
+Claude Code that reads only `CLAUDE.md` needs to be updated, or given a local
+`CLAUDE.md` containing the line `@AGENTS.md`.

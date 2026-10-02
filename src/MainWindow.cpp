@@ -589,11 +589,16 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     connect(tabs_, &MruTabWidget::tabAboutToClose, this, [this](QWidget *page, bool, bool &allow) {
         ChatTab *tab = chatTab(page);
         if (!allow || !tab || !tab->agent()->isResponding()) return;
-        const auto answer = QMessageBox::question(this, "Close chat",
-                                                   tab->provider()->name() + " is still responding in this chat. "
-                                                   "Stop the response and close the tab?",
-                                                   QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
-        if (answer == QMessageBox::Yes) tab->agent()->interrupt();
+        // Like quitting: closing cuts off the turn, so the user confirms it, and Cancel is the default.
+        QMessageBox box(QMessageBox::Question, "Close chat",
+                        "A turn is still running in this chat:\n\n\u2022 " + tab->provider()->name() + ": "
+                            + tab->title().left(60) + "\n\nStop it and close the tab?",
+                        QMessageBox::NoButton, this);
+        QPushButton *stop = box.addButton("Stop and close", QMessageBox::AcceptRole);
+        box.addButton(QMessageBox::Cancel);
+        box.setDefaultButton(QMessageBox::Cancel);
+        box.exec();
+        if (box.clickedButton() == stop) tab->agent()->interrupt();
         else allow = false;
     }, Qt::DirectConnection);
     // The shared chat view must leave a page before the page and its document are deleted.
@@ -729,7 +734,8 @@ void MainWindow::closeEvent(QCloseEvent *event)
     }
     if (!running.isEmpty()) {
         QMessageBox box(QMessageBox::Question, "Quit agentin",
-                        (running.size() == 1 ? QString("A turn is still running:") : QString("Turns are still running:"))
+                        (running.size() == 1 ? QString("A turn is still running:")
+                                             : QString("%1 turns are still running:").arg(running.size()))
                             + "\n\n" + running.join('\n') + "\n\nStop " + (running.size() == 1 ? "it" : "them") + " and quit?",
                         QMessageBox::NoButton, this);
         QPushButton *stop = box.addButton("Stop and quit", QMessageBox::AcceptRole);
