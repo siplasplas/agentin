@@ -49,6 +49,8 @@ public:
     // Claude and GLM run their bridge in a virtual environment in the application data directory,
     // created with claude-agent-sdk when one of them is first used.
     void useManagedClaudeEnvironment();
+    // GLM, Gemini and Antigravity are offered only when experimental agents are enabled in the options.
+    void setExperimentalAgentsEnabled(bool enabled);
 
 protected:
     void closeEvent(QCloseEvent *event) override;
@@ -61,6 +63,7 @@ private:
     void showHelp();
     void requestStop();
     AgentProvider *provider(const QString &name) const;
+    QList<AgentProvider *> visibleProviders() const;
     void loadSettings();
     void saveSettings();
     void showOptionsDialog();
@@ -146,6 +149,7 @@ private:
     QStringList recentDirectories_;
     // Ctrl+Z in the message field can bring back the message just sent.
     bool undoAfterSend_ = true;
+    bool experimentalAgents_ = false;
     bool sessionEnabled_ = false;
     // Restored Codex chats that continue once the App Server is connected.
     QList<QPointer<QWidget>> continueWhenConnected_;

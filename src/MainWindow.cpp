@@ -555,7 +555,7 @@ void MainWindow::restoreSession(bool keepStartChat)
         const QJsonObject entry = saved.at(i).toObject();
         AgentProvider *selected = provider(entry.value("provider").toString());
         const QString directory = entry.value("directory").toString();
-        if (!selected || !QFileInfo(directory).isDir()) continue;
+        if (!selected || !visibleProviders().contains(selected) || !QFileInfo(directory).isDir()) continue;
         QWidget *page = addChatTab(selected, directory);
         ChatTab *tab = chatTab(page);
         AgentBackend *agent = tab->agent();
@@ -688,6 +688,19 @@ AgentProvider *MainWindow::provider(const QString &name) const
     return nullptr;
 }
 
+QList<AgentProvider *> MainWindow::visibleProviders() const
+{
+    if (experimentalAgents_) return providers_;
+    return {codex_, claude_};
+}
+
+void MainWindow::setExperimentalAgentsEnabled(bool enabled)
+{
+    if (experimentalAgents_ == enabled) return;
+    experimentalAgents_ = enabled;
+    refreshConversationTree();
+}
+
 // settings.json keeps each agent's default model and effort for new chats. The effort defaults to
 // medium; agents without an effort setting ignore it.
 void MainWindow::loadSettings()
@@ -707,6 +720,7 @@ void MainWindow::loadSettings()
     const QString enterKey = settings.value("enterKey").toString();
     input_->setShortMessageLength(settings.value("enterSendsUpTo").toInt(60));
     undoAfterSend_ = settings.value("undoAfterSend").toBool(true);
+    experimentalAgents_ = settings.value("experimentalAgents").toBool(false);
     notifier_->setSettings(Notifier::Settings::fromJson(settings.value("notifications").toObject()));
     lastAudioDirectory_ = settings.value("lastAudioDirectory").toString();
     {
@@ -769,6 +783,7 @@ void MainWindow::saveSettings()
         || file.write(QJsonDocument(QJsonObject{{"version", 1}, {"enterKey", enterKey},
                                                          {"enterSendsUpTo", input_->shortMessageLength()},
                                                          {"undoAfterSend", undoAfterSend_},
+                                                         {"experimentalAgents", experimentalAgents_},
                                                          {"chatFont", chatView_->font().toString()},
                                                          {"notifications", notifier_->settings().toJson()},
                                                          {"lastAudioDirectory", lastAudioDirectory_},
@@ -811,6 +826,12 @@ void MainWindow::showOptionsDialog()
     undoAfterSend->setObjectName("undoAfterSend");
     undoAfterSend->setChecked(undoAfterSend_);
     enterForm->addRow(QString(), undoAfterSend);
+    auto *experimental = new QCheckBox("Show experimental agents: GLM, Gemini and Antigravity", &dialog);
+    experimental->setObjectName("experimentalAgents");
+    experimental->setChecked(experimentalAgents_);
+    experimental->setToolTip("Offers these agents in the conversation tree and for new chats. Their default "
+                             "models are listed here the next time the options are opened.");
+    enterForm->addRow(QString(), experimental);
     const auto updateShortLength = [enterInput, shortLength] {
         shortLength->setEnabled(enterInput->currentData().toInt() == int(MessageInput::EnterPolicy::Smart));
     };
@@ -828,7 +849,7 @@ void MainWindow::showOptionsDialog()
         QComboBox *effort;
     };
     QList<Row> rows;
-    for (AgentProvider *listed : providers_) {
+    for (AgentProvider *listed : visibleProviders()) {
         const QList<AgentModel> choices = modelChoices(listed->models());
         if (listed->models().isEmpty() && listed != codex_) continue;
         auto *model = new QComboBox(&dialog);
@@ -879,6 +900,7 @@ void MainWindow::showOptionsDialog()
     input_->setEnterPolicy(MessageInput::EnterPolicy(enterInput->currentData().toInt()));
     input_->setShortMessageLength(shortLength->value());
     undoAfterSend_ = undoAfterSend->isChecked();
+    setExperimentalAgentsEnabled(experimental->isChecked());
     for (const Row &row : rows) {
         QString model = row.model->currentData().toString();
         if (row.model->isEditable()) {
@@ -1199,7 +1221,8 @@ void MainWindow::showNewConversationDialog()
     layout->addWidget(new QLabel("Agent:", &dialog));
     auto *providerInput = new QComboBox(&dialog);
     providerInput->setObjectName("newConversationProvider");
-    for (const AgentProvider *listed : providers_) providerInput->addItem(listed->name());
+    const QList<AgentProvider *> offered = visibleProviders();
+    for (const AgentProvider *listed : offered) providerInput->addItem(listed->name());
     if (tab) providerInput->setCurrentText(tab->provider()->name());
     layout->addWidget(providerInput);
     layout->addWidget(new QLabel("Working directory:", &dialog));
@@ -1233,7 +1256,7 @@ void MainWindow::showNewConversationDialog()
     if (dialog.exec() == QDialog::Accepted) {
         const QString path = QDir::cleanPath(pathInput->text().trimmed());
         rememberRecentDirectory(path);
-        newConversation(providers_.value(providerInput->currentIndex()), path);
+        newConversation(offered.value(providerInput->currentIndex()), path);
     }
 }
 
@@ -1258,7 +1281,7 @@ void MainWindow::refreshConversationTree()
 {
     const QSignalBlocker blocker(conversationTree_);
     conversationTree_->clear();
-    for (AgentProvider *listed : providers_) {
+    for (AgentProvider *listed : visibleProviders()) {
         const QString name = listed->name();
         auto *root = new QTreeWidgetItem(conversationTree_, {name});
         root->setData(0, Qt::UserRole, "provider");

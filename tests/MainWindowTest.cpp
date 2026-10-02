@@ -949,7 +949,8 @@ static void startChat(MainWindow &window, const QString &provider, const QString
         auto *pathInput = dialog->findChild<QLineEdit *>("newConversationPath");
         auto *buttons = dialog->findChild<QDialogButtonBox *>();
         QVERIFY(providerInput && pathInput && buttons);
-        QCOMPARE(providerInput->count(), 5);
+        if (providerInput->findText(provider) < 0) dialog->reject();
+        QVERIFY(providerInput->findText(provider) >= 0);
         providerInput->setCurrentText(provider);
         pathInput->setText(path);
         buttons->button(QDialogButtonBox::Ok)->click();
@@ -1206,6 +1207,7 @@ for line in sys.stdin:
 )PY");
     script.close();
     MainWindow window("/nonexistent/codex", directory.path(), python, fakeBridge);
+    window.setExperimentalAgentsEnabled(true);
     window.show();
     auto *input = window.findChild<QPlainTextEdit *>("commandInput");
     auto *output = window.findChild<QPlainTextEdit *>("log");
@@ -1254,6 +1256,7 @@ print(json.dumps({"event": "result", "result": {
 
     const QString indexPath = directory.filePath("codex-conversations.json");
     MainWindow window("/nonexistent/codex", directory.path(), {}, {}, "gemini", nullptr, indexPath, fakeAgy);
+    window.setExperimentalAgentsEnabled(true);
     auto *input = window.findChild<QPlainTextEdit *>("commandInput");
     auto *output = window.findChild<QPlainTextEdit *>("log");
     auto *chat = window.findChild<QPlainTextEdit *>("chatView");
@@ -1310,6 +1313,7 @@ else:
     script.close();
     QVERIFY(script.setPermissions(QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner));
     MainWindow window("/nonexistent/codex", directory.path(), {}, {}, fakeGemini);
+    window.setExperimentalAgentsEnabled(true);
     window.show();
     auto *input = window.findChild<QPlainTextEdit *>("commandInput");
     auto *output = window.findChild<QPlainTextEdit *>("log");
@@ -1423,16 +1427,16 @@ for line in sys.stdin:
         auto *output = window.findChild<QPlainTextEdit *>("log");
         QVERIFY(tree);
         QVERIFY(output);
-        QCOMPARE(tree->topLevelItemCount(), 5);
+        // GLM, Gemini and Antigravity stay hidden until experimental agents are enabled.
+        QCOMPARE(tree->topLevelItemCount(), 2);
         QCOMPARE(tree->topLevelItem(0)->text(0), QString("Codex"));
+        QCOMPARE(tree->topLevelItem(1)->text(0), QString("Claude"));
         for (int i = 0; i < tree->topLevelItemCount(); ++i) {
             QCOMPARE(tree->topLevelItem(i)->childIndicatorPolicy(), QTreeWidgetItem::ShowIndicator);
         }
         QCOMPARE(tree->topLevelItem(0)->childCount(), 0);
         tree->topLevelItem(1)->setExpanded(true);
         QCOMPARE(tree->topLevelItem(1)->childCount(), 0);
-        tree->topLevelItem(3)->setExpanded(true);
-        QCOMPARE(tree->topLevelItem(3)->childCount(), 0);
         tree->topLevelItem(0)->setExpanded(true);
         QTRY_VERIFY(output->toPlainText().contains("[Codex conversations: 6 total, 6 new; fetched 4 pages]"));
         QCOMPARE(tree->topLevelItem(0)->childCount(), 1);
@@ -1624,6 +1628,7 @@ void MainWindowTest::missingGeminiCliReportsOneDiscoveryError()
 
     const auto verifyOneError = [&](const QString &program, const QString &prefix) {
         MainWindow window("/bin/true", directory.path(), {}, {}, program, nullptr, index.fileName());
+        window.setExperimentalAgentsEnabled(true);
         window.show();
         auto *tree = window.findChild<QTreeWidget *>("conversationTree");
         auto *output = window.findChild<QPlainTextEdit *>("log");
@@ -1652,6 +1657,7 @@ with Path(__file__).with_name("gemini-scans.log").open("a") as log:
     QVERIFY(scanner.setPermissions(QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner));
     {
         MainWindow window("/bin/true", directory.path(), {}, {}, scanner.fileName(), nullptr, index.fileName());
+        window.setExperimentalAgentsEnabled(true);
         window.show();
         auto *tree = window.findChild<QTreeWidget *>("conversationTree");
         auto *output = window.findChild<QPlainTextEdit *>("log");
@@ -1698,6 +1704,7 @@ void MainWindowTest::geminiListsSessionsFromAllProjects()
 
     MainWindow window("/bin/true", projectA, {}, {}, directory.filePath("missing-gemini"), nullptr,
                       directory.filePath("codex-conversations.json"), "agy", geminiData);
+    window.setExperimentalAgentsEnabled(true);
     auto *tree = window.findChild<QTreeWidget *>("conversationTree");
     auto *output = window.findChild<QPlainTextEdit *>("log");
     QVERIFY(tree && output);
@@ -1737,6 +1744,7 @@ void MainWindowTest::geminiListsSessionsFromAllProjects()
 
     MainWindow reopened("/bin/true", projectA, {}, {}, directory.filePath("missing-gemini"), nullptr,
                         directory.filePath("codex-conversations.json"), "agy", directory.filePath("empty-data"));
+    reopened.setExperimentalAgentsEnabled(true);
     auto *reopenedTree = reopened.findChild<QTreeWidget *>("conversationTree");
     QVERIFY(reopenedTree);
     reopenedTree->topLevelItem(2)->setExpanded(true);
@@ -1876,6 +1884,7 @@ void MainWindowTest::geminiAttachRespectsExternalLock()
 
     MainWindow window("/bin/true", project, {}, {}, directory.filePath("missing-gemini"), nullptr,
                       directory.filePath("codex-conversations.json"), "agy", geminiData);
+    window.setExperimentalAgentsEnabled(true);
     window.show();
     auto *tree = window.findChild<QTreeWidget *>("conversationTree");
     auto *header = window.findChild<QLabel *>("chatHeader");

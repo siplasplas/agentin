@@ -6,6 +6,12 @@ pane; application messages appear in the log pane at the bottom. Codex uses the 
 configuration. Claude and GLM run through a Python JSONL bridge to the Claude
 Agent SDK. Gemini and Antigravity run through their respective CLIs in headless mode.
 
+Codex and Claude are always available. GLM, Gemini and Antigravity are
+experimental and hidden by default: they appear in the conversation tree, the
+new chat dialog and the default model options only after **Show experimental
+agents** is checked in **Settings → Options…**. While they are hidden, their
+saved tabs are not reopened at startup.
+
 ## Build and run
 
 Requires Qt 6 Widgets, CMake, a C++17 compiler, the `qt-extra` library version 2.1 or newer
