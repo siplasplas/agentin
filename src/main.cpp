@@ -17,7 +17,7 @@ int main(int argc, char *argv[])
 {
     QApplication app(argc, argv);
     QCoreApplication::setApplicationName("agentin");
-    QCoreApplication::setApplicationVersion("0.1.0");
+    QCoreApplication::setApplicationVersion(AGENTIN_VERSION);
     // On Wayland the desktop shows the icon of agentin.desktop, which this name points to.
     QGuiApplication::setDesktopFileName("agentin");
     QApplication::setWindowIcon(QIcon(":/icons/agentin.svg"));

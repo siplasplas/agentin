@@ -4,6 +4,7 @@
 
 #include <QDateTime>
 #include <QElapsedTimer>
+#include <QCoreApplication>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -35,7 +36,7 @@ CodexConnection::CodexConnection(const QString &program, const QString &workingD
 {
     connect(server_, &QProcess::started, this, [this] {
         request("initialize", {{"clientInfo", QJsonObject{
-                    {"name", "agentin"}, {"title", "agentin Qt"}, {"version", "0.1.0"}}},
+                    {"name", "agentin"}, {"title", "agentin Qt"}, {"version", QCoreApplication::applicationVersion()}}},
                 {"capabilities", QJsonObject{{"experimentalApi", true}}}},
                 this, [this](const QJsonObject &, const QString &error) {
             if (!error.isEmpty()) return;

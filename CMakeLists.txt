@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(agentin VERSION 0.1.0 LANGUAGES CXX)
+project(agentin VERSION 1.0.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -89,6 +89,8 @@ target_link_libraries(agentin PRIVATE Qt6::Widgets qt-extra Backward::Object dif
 # The window icon; Qt draws it with its SVG image format plugin.
 qt_add_resources(agentin icons PREFIX "/" FILES icons/agentin.svg)
 target_include_directories(agentin PRIVATE src)
+# The version shown by --version and sent to the Codex App Server comes from project().
+target_compile_definitions(agentin PRIVATE AGENTIN_VERSION="${PROJECT_VERSION}")
 # Keeps the information backward-cpp needs for files and line numbers, also in optimized builds.
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
     target_compile_options(agentin PRIVATE -g -fno-omit-frame-pointer)
