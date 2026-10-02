@@ -33,7 +33,8 @@ void ensureLibrary()
 
 QByteArray idText(const git_oid &id)
 {
-    char text[GIT_OID_HEXSZ + 1] = {};
+    // Sized for the longest ID the library supports, SHA-256 when it is built with it.
+    char text[GIT_OID_MAX_HEXSIZE + 1] = {};
     git_oid_tostr(text, sizeof text, &id);
     return QByteArray(text);
 }
