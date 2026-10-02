@@ -254,6 +254,14 @@ the last step is answered right after the turn, as part of the same turn in the
 chat. Claude Code does not report whether a message was used, so `You (steer)`
 means that it was passed to the session.
 
+When the chat's directory is in a Git work tree, the chat header also sums up the
+files the latest turn changed, for example `Changes: 7 files, +120 −34`, counting
+added and removed lines. It is compared with the state when the turn started,
+updated every few seconds while the turn runs and at its end, and kept until the
+next turn starts. Changes committed during the turn count too; files ignored by
+Git and untracked files the turn did not touch do not, and a new file counts its
+lines as added. Directories outside Git are not tracked.
+
 The chat header shows elapsed operation time as `mm:ss`: **Task** while an agent
 works and **Compact** during manual or automatic Codex compaction. The counter
 stops at the final duration when the operation ends and follows the selected tab.

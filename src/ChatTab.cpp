@@ -1,5 +1,6 @@
 #include "ChatTab.h"
 #include "ChatView.h"
+#include "ChangeTracker.h"
 
 #include "TurnLocks.h"
 
@@ -77,6 +78,15 @@ bool ChatTab::dispatch()
     inTurn_ = true;
     turnStartedAt_ = QDateTime::currentMSecsSinceEpoch();
     turnUsage_ = {};
+    if (!changeTracker_) {
+        changeTracker_ = new ChangeTracker(this);
+        connect(changeTracker_, &ChangeTracker::changesUpdated, this, &ChatTab::changed);
+        changeRefresh_ = new QTimer(this);
+        changeRefresh_->setInterval(4000);
+        connect(changeRefresh_, &QTimer::timeout, changeTracker_, &ChangeTracker::refresh);
+    }
+    changeTracker_->turnStarted(QStringList{path_} + agent_->writableDirectories());
+    changeRefresh_->start();
     if (!agent_->prompt(outgoing_.takeFirst())) {
         inTurn_ = false;
         releaseDirectory();
@@ -172,6 +182,7 @@ QString ChatTab::headerText() const
     if (isWaiting()) parts.append("waiting: the directory is used by " + waitingFor_);
     if (!lockNotice_.isEmpty()) parts.append("locked: " + lockNotice_);
     else if (!live_) parts.append("read-only preview");
+    if (changeTracker_ && !changeTracker_->summary().isEmpty()) parts.append("Changes: " + changeTracker_->summary());
     return parts.join("  •  ");
 }
 
@@ -428,6 +439,10 @@ void ChatTab::setAgent(AgentBackend *agent)
         inTurn_ = false;
         releaseDirectory();
         if (!id_.isEmpty()) provider_->recordActivity(id_);
+        if (changeTracker_) {
+            changeRefresh_->stop();
+            changeTracker_->refresh();
+        }
         QTimer::singleShot(0, this, &ChatTab::dispatch);
         if (status != "completed")
             emit logMessage("[" + name + " response: " + status + (details.isEmpty() ? "" : ": " + details) + "]");

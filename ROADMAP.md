@@ -34,8 +34,10 @@ memory linear and stops at an edit distance bound, a deadline or a cancellation 
 (`DiffEngine::countChanges`), and `countLineChanges` (`src/LineChanges.h`) applies the limits below.
 Done: `GitBaseline` (`src/GitBaseline.h`, libgit2) captures the start of a turn and lists the changed
 files as described below, keeping the start content of tracked files that already differed from Git in
-memory rather than as blobs, so nothing is written to the repository. Next: the changes model in the
-chat tab with counting in a worker thread, then the window.
+memory rather than as blobs, so nothing is written to the repository.
+Done: `ChangeTracker` (`src/ChangeTracker.h`) captures the baselines when a chat's turn starts, counts in a
+worker thread with a cache by file size and modification time, refreshes every 4 seconds during the turn
+and at its end, and the chat header shows `Changes: 7 files, +120 −34`. Next: the window.
 
 ### Baseline: Git plus the start content of files changed before the turn
 

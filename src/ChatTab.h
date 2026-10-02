@@ -8,6 +8,7 @@
 
 class QTextDocument;
 class QTimer;
+class ChangeTracker;
 class TurnLocks;
 
 // An approval or a set of questions from the agent, waiting for the user in the tab.
@@ -54,6 +55,8 @@ public:
     QString title() const { return title_; }
     QString workingDirectory() const { return path_; }
     QString headerText() const;
+    // Null until the chat's first turn.
+    ChangeTracker *changeTracker() const { return changeTracker_; }
     QString operationTimeText() const;
     bool isLive() const { return live_; }
     bool hasMoreHistory() const { return hasMore_; }
@@ -154,6 +157,9 @@ private:
     bool conversationUsageFromAgent_ = false;
     TurnLocks *locks_ = nullptr;
     QTimer *retry_;
+    // The files the latest turn changed; created with the first turn.
+    ChangeTracker *changeTracker_ = nullptr;
+    QTimer *changeRefresh_ = nullptr;
     QStringList outgoing_;
     QString waitingFor_;
     bool inTurn_ = false;
