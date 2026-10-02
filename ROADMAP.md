@@ -45,7 +45,7 @@ file, so only tracked files that differ from Git need their start content kept:
 2. **Skipped:** everything `.gitignore` ignores.
    **Binary files** tracked by Git are compared by hash only: the blob id in the start commit's tree, or
    the hash of a kept blob, against the hash of the file now. A changed one is listed with its sizes and
-   no line counts or diff. Large text files are treated the same way above a size limit.
+   no line counts or diff. Text files above the size limit below are treated the same way.
 3. **New files:** a file Git does not track and does not ignore is shown as a whole new file, without a
    diff. Its size and modification time are noted at the start, so that one existing before the turn is
    shown only if the turn changed it.
@@ -72,6 +72,17 @@ files.
 `diffcore::DiffEngine` over interned lines); its main loop is enough for the counts, and the slider
 heuristics matter only when a diff is shown. Counts are computed in a worker thread and cached by the
 pair of content hashes, so live updates during a turn recompute only files that changed again.
+
+**Limits:** the O(NP) diff costs about (N + M) · P for N and M lines and P differences, so size alone
+is rarely the problem; a large file rewritten completely is. Three guards keep it bounded, as constants
+to tune after measuring real files:
+
+- text files up to **64 MB** (about one or two million lines) get counts and a diff; larger ones are
+  compared by hash only and listed with their sizes, as binary files are;
+- the main loop stops once P exceeds **100 000** differences, and the file is listed as rewritten, with
+  its line counts before and after instead of exact added and removed lines;
+- the work runs in the worker thread, so a slow file never blocks the window, which shows "counting…"
+  for it until the result arrives.
 
 ### The window
 
