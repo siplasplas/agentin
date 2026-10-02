@@ -58,6 +58,12 @@ separate processes and conversations.
 ZAI_API_KEY=your-zai-key ./build/agentin -C /path/to/project
 ```
 
+When a Claude or GLM request fails, Claude Code retries it up to ten times with
+growing delays, which can take several minutes. Each retry is written to the log
+and shown in the chat header, for example `GLM: API error 429 (rate_limit),
+retry 3 of 10 in 2.0 s`; the server's own message appears in the chat when the
+retries are used up. A GLM Coding Plan that has expired is reported as 429.
+
 For Gemini, install and authenticate [Gemini CLI](https://geminicli.com/docs/get-started/).
 The application starts `gemini --output-format stream-json --prompt ...` for
 each turn and uses the session ID returned by Gemini CLI to resume the next

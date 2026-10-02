@@ -55,7 +55,8 @@ class FakeClient:
         self.interrupted = True
 
 
-for name in ("AssistantMessage", "ResultMessage", "TextBlock", "ThinkingBlock", "ToolUseBlock", "RateLimitEvent"):
+for name in ("AssistantMessage", "ResultMessage", "TextBlock", "ThinkingBlock", "ToolUseBlock", "RateLimitEvent",
+             "SystemMessage"):
     setattr(sdk, name, type(name, (Message,), {}))
 sdk.StreamEvent = type("StreamEvent", (Message,), {})
 sdk_types.StreamEvent = sdk.StreamEvent

@@ -160,6 +160,8 @@ private:
     bool readOnly_ = false;
     bool appliedReadOnly_ = false;
     QStringList queuedPrompts_;
+    // The API error the CLI is retrying after, until the turn makes progress or ends.
+    QString retry_;
     QHash<int, int> pendingQuestionCounts_;
     HistoryPages history_;
     quint64 historyGeneration_ = 0;

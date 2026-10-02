@@ -20,6 +20,7 @@ try:
         ClaudeAgentOptions,
         ClaudeSDKClient,
         ResultMessage,
+        SystemMessage,
         TextBlock,
         ThinkingBlock,
         ToolUseBlock,
@@ -253,6 +254,12 @@ class Bridge:
                     self.streamed_text = False
                     thinking_id = str(uuid.uuid4())
                     thinking = {}
+                elif isinstance(message, SystemMessage) and message.subtype == "api_retry":
+                    # The CLI retries failed API requests silently for minutes; the server's message is not included.
+                    data = message.data or {}
+                    send({"type": "retry", "attempt": data.get("attempt"), "maxRetries": data.get("max_retries"),
+                          "delayMs": data.get("retry_delay_ms"), "status": data.get("error_status"),
+                          "error": data.get("error")})
                 elif RateLimitEvent is not None and isinstance(message, RateLimitEvent):
                     for update in rate_limit_updates(message.rate_limit_info):
                         send(update)

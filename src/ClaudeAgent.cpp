@@ -375,7 +375,7 @@ ClaudeAgent::~ClaudeAgent()
 
 QString ClaudeAgent::statusText() const
 {
-    if (busy_) return name_ + " is responding…";
+    if (busy_) return retry_.isEmpty() ? name_ + " is responding…" : name_ + ": " + retry_;
     if (ready_) return name_ + " ready";
     if (preparing_) return "Preparing the Claude Agent SDK environment…";
     if (isRunning()) return kind_ == "glm" ? "Connecting to GLM via Claude Agent SDK…" : "Connecting to Claude Agent SDK…";
@@ -596,6 +596,7 @@ void ClaudeAgent::sendNextPrompt()
     busy_ = true;
     stopRequested_ = false;
     textStarted_ = false;
+    retry_.clear();
     send({{"type", "prompt"}, {"text", queuedPrompts_.takeFirst()}});
     emit stateChanged();
 }
@@ -616,7 +617,19 @@ void ClaudeAgent::handleLine(const QByteArray &line)
     }
     const QJsonObject event = document.object();
     const QString type = event.value("type").toString();
-    if (type == "ready") {
+    if (!retry_.isEmpty() && (type == "delta" || type == "reasoning" || type == "tool" || type == "complete")) {
+        retry_.clear();
+        emit stateChanged();
+    }
+    if (type == "retry") {
+        const QJsonValue status = event.value("status");
+        QString cause = status.isDouble() ? QString("API error %1").arg(status.toInt()) : QString("API connection error");
+        if (!event.value("error").toString().isEmpty()) cause += " (" + event.value("error").toString() + ")";
+        retry_ = QString("%1, retry %2 of %3 in %4 s").arg(cause).arg(event.value("attempt").toInt())
+                     .arg(event.value("maxRetries").toInt()).arg(event.value("delayMs").toDouble() / 1000, 0, 'f', 1);
+        emit message("[" + name_ + "] " + retry_);
+        emit stateChanged();
+    } else if (type == "ready") {
         if (!pendingResumeId_.isEmpty()) {
             const QString id = pendingResumeId_;
             pendingResumeId_.clear();
