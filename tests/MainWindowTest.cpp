@@ -1140,7 +1140,7 @@ for line in sys.stdin:
     QVERIFY(sendButton);
     startChat(window, "Claude", directory.path());
     QTRY_VERIFY(output->toPlainText().contains("[Connected to Claude Agent SDK]"));
-    QCOMPARE(sendButton->text(), QString("Send to Claude"));
+    QCOMPARE(sendButton->accessibleName(), QString("Send to Claude"));
 
     const QByteArray previousPath = qgetenv("PATH");
     qputenv("PATH", directory.path().toLocal8Bit());

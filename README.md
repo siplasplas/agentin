@@ -240,7 +240,7 @@ input, cached and output tokens. For agents other than Codex, the conversation
 figure covers the turns sent from the tab. Antigravity's statistics are read
 where its result event carries them.
 
-During a running Codex, Claude or GLM turn, **Steer** sends the message field's text directly to
+During a running Codex, Claude or GLM turn, **Steer** (the orange `!` button) sends the message field's text directly to
 that turn, while **Send** continues to queue a message for the next turn. Sending
 from the keyboard (Enter, or Ctrl+Enter) steers whenever Steer is available, so
 the Send button is the way to queue; `help`, `stop` and the other commands still
@@ -256,7 +256,7 @@ the last step is answered right after the turn, as part of the same turn in the
 chat. Claude Code does not report whether a message was used, so `You (steer)`
 means that it was passed to the session.
 
-In a Codex, Claude or GLM chat, **Suggest** (Ctrl+Space) asks for up to three short ideas
+In a Codex, Claude or GLM chat, **Suggest** (the light bulb, Ctrl+Space) asks for up to three short ideas
 for your next message, based on the latest exchange: your last message and the
 agent's text answer, without tool output. They are asked outside the conversation,
 in the language you write in, from the cheapest model: Haiku for Claude,
@@ -507,9 +507,10 @@ short message (0 never sends typed text with Enter) or makes Enter always send
 or always start a new line; the choices are saved as `enterKey` and
 `enterSendsUpTo` in `settings.json`. Undo and redo work in the field, also for a
 recalled message; after sending, Ctrl+Z brings the sent message back for
-editing, unless **Settings → Options…** turns that off (`undoAfterSend`). A badge next to **Send** shows what Enter
+editing, unless **Settings → Options…** turns that off (`undoAfterSend`). The **Send** button's icon shows what Enter
 does now: a green arrow when it sends and a gray return sign when it starts a new
-line; its tooltip names the key for the other action.
+line; its tooltip names the key for the other action. **Stop** is the red square
+beside it.
 
 Up and Down move between lines and, on the first or last line, recall the
 previous or next message you wrote in the current tab's conversation; Page Up

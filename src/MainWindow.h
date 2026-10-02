@@ -159,8 +159,11 @@ private:
     QString modelControlsState_;
     bool chatRefreshPending_ = false;
     MessageInput *input_;
-    QLabel *enterIndicator_;
     QPushButton *sendButton_;
+    // Whom Send sends to and what Enter does now; both are shown in Send's tooltip.
+    QString sendTarget_;
+    bool enterSends_ = true;
+    void updateSendToolTip();
     QPushButton *steerButton_;
     QPushButton *suggestButton_;
     QPushButton *stopButton_;

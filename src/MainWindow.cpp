@@ -110,6 +110,70 @@ QString codexIndexFile(const QString &path)
 }
 }
 
+namespace {
+QPixmap iconCanvas(int size, qreal ratio)
+{
+    QPixmap pixmap(QSize(size, size) * ratio);
+    pixmap.setDevicePixelRatio(ratio);
+    pixmap.fill(Qt::transparent);
+    return pixmap;
+}
+
+// A white symbol on a rounded square of the given color.
+QIcon paintedIcon(int size, qreal ratio, const QColor &color, const QString &symbol)
+{
+    QPixmap pixmap = iconCanvas(size, ratio);
+    QPainter painter(&pixmap);
+    painter.setRenderHint(QPainter::Antialiasing);
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(color);
+    painter.drawRoundedRect(QRectF(0, 0, size, size), 4, 4);
+    painter.setPen(Qt::white);
+    QFont font = painter.font();
+    font.setBold(true);
+    font.setPixelSize(size * 2 / 3);
+    painter.setFont(font);
+    painter.drawText(QRectF(0, 0, size, size), Qt::AlignCenter, symbol);
+    return QIcon(pixmap);
+}
+
+// A yellow light bulb.
+QIcon bulbIcon(int size, qreal ratio)
+{
+    QPixmap pixmap = iconCanvas(size, ratio);
+    QPainter painter(&pixmap);
+    painter.setRenderHint(QPainter::Antialiasing);
+    const qreal unit = size / 16.0;
+    painter.setPen(QPen(QColor(0xb2, 0x8b, 0x00), unit));
+    painter.setBrush(QColor(0xff, 0xd6, 0x00));
+    painter.drawEllipse(QRectF(3 * unit, 1 * unit, 10 * unit, 10 * unit));
+    painter.setPen(Qt::NoPen);
+    painter.setBrush(QColor(0x75, 0x75, 0x75));
+    painter.drawRoundedRect(QRectF(5.5 * unit, 11 * unit, 5 * unit, 2 * unit), unit / 2, unit / 2);
+    painter.drawRoundedRect(QRectF(6 * unit, 13.5 * unit, 4 * unit, 1.5 * unit), unit / 2, unit / 2);
+    return QIcon(pixmap);
+}
+
+// A red square, as debuggers show for stopping a program; grey when disabled.
+QIcon stopIcon(int size, qreal ratio)
+{
+    QIcon icon;
+    for (const auto &[mode, color] : {std::pair{QIcon::Normal, QColor(0xd3, 0x2f, 0x2f)},
+                                      std::pair{QIcon::Disabled, QColor(0x9e, 0x9e, 0x9e)}}) {
+        QPixmap pixmap = iconCanvas(size, ratio);
+        QPainter painter(&pixmap);
+        painter.setRenderHint(QPainter::Antialiasing);
+        painter.setPen(Qt::NoPen);
+        painter.setBrush(color);
+        const qreal margin = size * 0.2;
+        painter.drawRoundedRect(QRectF(margin, margin, size - 2 * margin, size - 2 * margin), 2, 2);
+        painter.end();
+        icon.addPixmap(pixmap, mode);
+    }
+    return icon;
+}
+}
+
 MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirectory,
                        const QString &claudePython, const QString &claudeScript,
                        const QString &geminiProgram, QWidget *parent, const QString &codexIndexPath,
@@ -255,26 +319,33 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     }
     input_ = new MessageInput(central);
     input_->setObjectName("commandInput");
-    enterIndicator_ = new QLabel(central);
-    enterIndicator_->setObjectName("enterIndicator");
-    sendButton_ = new QPushButton("Send", central);
+    // The buttons beside the message field are icons; their tooltips say what they do.
+    const int iconSize = fontMetrics().height() + 8;
+    sendButton_ = new QPushButton(central);
     sendButton_->setObjectName("sendButton");
-    sendButton_->setToolTip("Send the message; during a running turn that takes steering, it waits for the next turn, "
-                            "while Enter steers the running one");
-    steerButton_ = new QPushButton("Steer", central);
+    sendButton_->setIconSize(QSize(iconSize, iconSize));
+    steerButton_ = new QPushButton(paintedIcon(iconSize, devicePixelRatioF(), QColor(0xef, 0x6c, 0x00), "!"), {}, central);
     steerButton_->setObjectName("steerButton");
-    steerButton_->setToolTip("Send this message to the running turn, as Enter does while it runs; "
+    steerButton_->setIconSize(QSize(iconSize, iconSize));
+    steerButton_->setAccessibleName("Steer");
+    steerButton_->setToolTip("Steer: send this message to the running turn, as Enter does while it runs; "
                              "Send queues it for the next turn");
     steerButton_->setEnabled(false);
     steerButton_->hide();
-    suggestButton_ = new QPushButton("Suggest", central);
+    suggestButton_ = new QPushButton(bulbIcon(iconSize, devicePixelRatioF()), {}, central);
     suggestButton_->setObjectName("suggestButton");
+    suggestButton_->setIconSize(QSize(iconSize, iconSize));
+    suggestButton_->setAccessibleName("Suggest");
     suggestButton_->setShortcut(QKeySequence("Ctrl+Space"));
-    suggestButton_->setToolTip("Ideas for your next message from the agent's cheapest model, based on the latest "
-                               "exchange (Ctrl+Space). They are asked once per exchange and shown again from memory.");
+    suggestButton_->setToolTip("Suggest (Ctrl+Space): ideas for your next message from the agent's cheapest model, "
+                               "based on the latest exchange. They are asked once per exchange and shown again from "
+                               "memory.");
     suggestButton_->setEnabled(false);
-    stopButton_ = new QPushButton("Stop", central);
+    stopButton_ = new QPushButton(stopIcon(iconSize, devicePixelRatioF()), {}, central);
     stopButton_->setObjectName("stopButton");
+    stopButton_->setIconSize(QSize(iconSize, iconSize));
+    stopButton_->setAccessibleName("Stop");
+    stopButton_->setToolTip("Stop the running turn");
     stopButton_->setEnabled(false);
 
     chatPanel_ = new QWidget(this);
@@ -368,7 +439,6 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
 
     auto *inputRow = new QHBoxLayout;
     inputRow->addWidget(input_, 1);
-    inputRow->addWidget(enterIndicator_);
     inputRow->addWidget(suggestButton_);
     inputRow->addWidget(sendButton_);
     inputRow->addWidget(steerButton_);
@@ -2105,7 +2175,8 @@ void MainWindow::updateStatus()
         compactButton_->setEnabled(false);
         contextTokens_->clear();
         loadEarlierButton_->setVisible(false);
-        sendButton_->setText("Send");
+        sendTarget_.clear();
+        updateSendToolTip();
         sendButton_->setEnabled(false);
         stopButton_->setEnabled(false);
         input_->setPlaceholderText("Type help or new, then press Ctrl+Enter");
@@ -2157,7 +2228,10 @@ void MainWindow::updateStatus()
     // Reloading a longer tail while a live response streams would drop the partial answer.
     loadEarlierButton_->setEnabled(!(tab->isLive() && agent->isResponding()));
     stopButton_->setEnabled(agent->canInterrupt() || tab->isWaiting());
-    sendButton_->setText("Send to " + tab->provider()->name());
+    if (sendTarget_ != tab->provider()->name()) {
+        sendTarget_ = tab->provider()->name();
+        updateSendToolTip();
+    }
     sendButton_->setEnabled(tab->isLive() && !agent->isCompacting());
     const PendingRequest *request = tab->pendingRequest();
     if (request && !request->approval)
@@ -2286,27 +2360,22 @@ void MainWindow::updateRequestPanel()
 // A colored badge next to Send tells what Enter does now; the tooltip names the key for the other action.
 void MainWindow::showEnterAction(bool sends)
 {
+    enterSends_ = sends;
     const int size = fontMetrics().height() + 8;
-    const qreal ratio = devicePixelRatioF();
-    QPixmap badge(QSize(size, size) * ratio);
-    badge.setDevicePixelRatio(ratio);
-    badge.fill(Qt::transparent);
-    QPainter painter(&badge);
-    painter.setRenderHint(QPainter::Antialiasing);
-    painter.setPen(Qt::NoPen);
-    painter.setBrush(sends ? QColor(0x2e, 0x7d, 0x32) : QColor(0x54, 0x6e, 0x7a));
-    painter.drawRoundedRect(QRectF(0, 0, size, size), 4, 4);
-    painter.setPen(Qt::white);
-    QFont font = painter.font();
-    font.setBold(true);
-    font.setPixelSize(size * 2 / 3);
-    painter.setFont(font);
-    painter.drawText(QRectF(0, 0, size, size), Qt::AlignCenter, sends ? QString(QChar(0x27A4)) : QString(QChar(0x21B5)));
-    painter.end();
-    enterIndicator_->setPixmap(badge);
-    enterIndicator_->setToolTip(sends ? "Enter sends this message; Shift+Enter starts a new line"
-                                      : "Enter starts a new line; Ctrl+Enter sends this message");
-    enterIndicator_->setAccessibleName(sends ? "Enter sends" : "Enter starts a new line");
+    sendButton_->setIcon(paintedIcon(size, devicePixelRatioF(),
+                                     sends ? QColor(0x2e, 0x7d, 0x32) : QColor(0x54, 0x6e, 0x7a),
+                                     sends ? QString(QChar(0x27A4)) : QString(QChar(0x21B5))));
+    updateSendToolTip();
+}
+
+void MainWindow::updateSendToolTip()
+{
+    const QString send = sendTarget_.isEmpty() ? QString("Send") : "Send to " + sendTarget_;
+    sendButton_->setAccessibleName(send);
+    sendButton_->setToolTip(send + ". During a running turn that takes steering, Send waits for the next turn, "
+                            "while Enter steers the running one.\n"
+                            + (enterSends_ ? "Enter sends this message; Shift+Enter starts a new line."
+                                           : "Enter starts a new line; Ctrl+Enter sends this message."));
 }
 
 // Each change of a provider's reported limits is written to the log, so their pace can be followed.
