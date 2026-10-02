@@ -316,7 +316,10 @@ starts with `pl`, such as `pl_PL-gosia-medium` from
 [piper-voices](https://huggingface.co/rhasspy/piper-voices)) speaks Polish
 sentences; other voices speak English. The voice and its pace are chosen and tried
 in **Settings → Notifications…**; a slowness above 1 (1.3 by default) speaks
-slower and usually clearer. Without a voice program the sound files play.
+slower and usually clearer. Without a voice program the sound files play. A spoken
+announcement names the chat by the first words of its title, about 32
+characters. Answering the approval or question it announces, or a new request
+of the same chat, stops it at once.
 
 Incoming Codex messages are processed in short batches, and streamed chat view
 updates are coalesced, allowing the interface to handle input between batches
@@ -486,6 +489,19 @@ The mode is reapplied after every connection, including resumed conversations;
 **Read-only** uses `plan`, and switching it off restores `default`. Tool approval
 suggestions cannot change the permission mode to `auto`, `acceptEdits`, or
 `bypassPermissions`. Existing allow rules still apply in `default` mode.
+
+Claude and GLM run with Claude Code's own system prompt, with the added advice
+to change files with its editing tools. Their edits (Edit, MultiEdit, Write and
+NotebookEdit) of files in the chat's directory, in a directory allowed for the
+session, in a directory listed in `permissions.additionalDirectories` of the
+Claude Code settings the session reads, or in the temporary directory (`/tmp`,
+or `TMPDIR`) are approved without asking. So are
+shell commands that only write such files and whose effect their words fully
+show: `cat`, `echo` or `printf` with `>`/`>>`, `tee`, `touch`, `mkdir`, `cp`
+(its destination), `mv` and `sed -i`, which runs with `--sandbox` so that it
+cannot read, write or run other files. Anything the shell would expand or
+chain, unquoted here-documents, relative paths going up with `..`, scripts and
+all other commands still ask.
 
 For Codex command approval requests, **Trust git add for this chat** and
 **Trust git commit for this chat** remember the command family in agentin's

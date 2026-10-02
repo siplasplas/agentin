@@ -5,7 +5,9 @@ import asyncio
 import dataclasses
 import json
 import os
+import re
 import sys
+import tempfile
 import uuid
 
 
@@ -34,6 +36,154 @@ try:
     from claude_agent_sdk import RateLimitEvent
 except ImportError:  # SDKs without rate limit events
     RateLimitEvent = None
+
+
+# File editing tools and the input field with the edited file.
+EDIT_TOOLS = {"Edit": "file_path", "MultiEdit": "file_path", "Write": "file_path", "NotebookEdit": "notebook_path"}
+
+# Appended to Claude Code's system prompt: edits made with these tools can be approved by their path.
+EDIT_GUIDANCE = ("Change files with the Edit, MultiEdit and Write tools, not with shell commands such as scripts, "
+                 "sed or output redirection. Edits of files in the working directory and the allowed directories "
+                 "are approved automatically; shell commands that change files usually need the user's approval.")
+
+
+def shell_words(line):
+    """Splits a simple command line into words and ">"/">>" operators (as tuples).
+
+    Returns None for anything the shell would expand or treat as another operator, so that the words are
+    exactly what the command receives."""
+    words, current, quote, started = [], [], None, False
+    index = 0
+    while index < len(line):
+        char = line[index]
+        if quote == "'":
+            if char == "'":
+                quote = None
+            else:
+                current.append(char)
+        elif quote == '"':
+            if char == '"':
+                quote = None
+            elif char in "$`\\!":
+                return None
+            else:
+                current.append(char)
+        elif char in "'\"":
+            quote, started = char, True
+        elif char.isspace():
+            if started:
+                words.append("".join(current))
+                current, started = [], False
+        elif char == ">":
+            if started:
+                return None
+            operator = ">>" if line[index + 1:index + 2] == ">" else ">"
+            words.append((operator,))
+            index += len(operator)
+            continue
+        elif char in "$`\\;&|<>(){}[]*?~#!=":
+            return None
+        else:
+            current.append(char)
+            started = True
+        index += 1
+    if quote:
+        return None
+    if started:
+        words.append("".join(current))
+    return words
+
+
+def split_heredoc(command):
+    """Returns the command line without a quoted here-document, or None for any other multi-line shape.
+
+    A quoted delimiter keeps the shell from expanding the document, so it is plain data for the command."""
+    first, newline, body = command.partition("\n")
+    if not newline:
+        return first
+    match = re.search(r"<<-?\s*(['\"])([A-Za-z_][A-Za-z0-9_]*)\1", first)
+    if not match:
+        return None
+    lines = body.split("\n")
+    while lines and not lines[-1].strip():
+        lines.pop()
+    if not lines or lines[-1].strip() != match.group(2) or any(line.strip() == match.group(2) for line in lines[:-1]):
+        return None
+    return first[:match.start()] + first[match.end():]
+
+
+def file_command_targets(command):
+    """Returns the paths a simple file command writes, or None when the command is not one of them.
+
+    Only commands whose effect is fully given by their words count: cat, echo and printf writing through
+    output redirection, tee, touch, mkdir, cp (the destination), mv (every path) and sed -i."""
+    line = split_heredoc(command) if isinstance(command, str) else None
+    words = shell_words(line) if line is not None else None
+    if not words or not isinstance(words[0], str):
+        return None
+    targets, args = [], []
+    index = 1
+    while index < len(words):
+        word = words[index]
+        if isinstance(word, tuple):
+            if index + 1 >= len(words) or not isinstance(words[index + 1], str):
+                return None
+            targets.append(words[index + 1])
+            index += 2
+            continue
+        args.append(word)
+        index += 1
+    program = words[0]
+    options = [arg for arg in args if arg.startswith("-")]
+    operands = [arg for arg in args if not arg.startswith("-")]
+    if program == "cat":
+        if args:
+            return None
+    elif program in ("echo", "printf"):
+        pass
+    elif program == "tee":
+        if any(option not in ("-a", "--append") for option in options):
+            return None
+        targets += operands
+    elif program == "touch":
+        if options or not operands:
+            return None
+        targets += operands
+    elif program == "mkdir":
+        if any(option not in ("-p", "-v", "--parents") for option in options) or not operands:
+            return None
+        targets += operands
+    elif program in ("cp", "mv"):
+        allowed = r"-[rRafpvnu]+" if program == "cp" else r"-[fvnu]+"
+        if any(not re.fullmatch(allowed, option) for option in options) or len(operands) < 2:
+            return None
+        targets += operands[-1:] if program == "cp" else operands
+    elif program == "sed":
+        in_place, script, files = False, False, []
+        index = 0
+        while index < len(args):
+            arg = args[index]
+            if arg == "-e" and index + 1 < len(args):
+                script = True
+                index += 2
+                continue
+            if arg == "--in-place" or re.fullmatch(r"-[Ernsz]*i(\.[A-Za-z0-9_]+)?", arg):
+                in_place = True
+            elif re.fullmatch(r"-[Ernsz]+|--regexp-extended|--null-data|--separate", arg):
+                pass
+            elif arg.startswith("-"):
+                return None
+            elif not script:
+                script = True
+            else:
+                files.append(arg)
+            index += 1
+        if not in_place or not files:
+            return None
+        targets += files
+    else:
+        return None
+    return targets or None
 
 
 def describe_permission_updates(updates):
@@ -119,9 +269,63 @@ class Bridge:
         self.turn_had_text = False
         self.session_id = None
         self.additional_dirs = []
+        # Directories allowed for this CLI session by an approved suggestion; a reconnect forgets them.
+        self.session_dirs = []
         self.connected = False
 
+    def settings_directories(self):
+        """Returns the additionalDirectories saved in the Claude Code settings this session reads."""
+        files = [os.path.join(self.cwd, ".claude", "settings.json"), os.path.join(self.cwd, ".claude", "settings.local.json")]
+        if self.provider == "claude":
+            config = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude")
+            files.append(os.path.join(config, "settings.json"))
+        directories = []
+        for path in files:
+            try:
+                with open(path, encoding="utf-8") as file:
+                    data = json.load(file)
+            except (OSError, ValueError):
+                continue
+            permissions = data.get("permissions") if isinstance(data, dict) else None
+            entries = permissions.get("additionalDirectories") if isinstance(permissions, dict) else None
+            directories.extend(entry for entry in entries or [] if isinstance(entry, str) and entry)
+        return directories
+
+    def path_is_allowed(self, path):
+        """Whether path is in the chat's directory, a directory allowed for the session or in settings, or the
+        temporary directory, which agents use for scratch files as Codex does."""
+        target = os.path.realpath(os.path.join(self.cwd, os.path.expanduser(path)))
+        roots = [self.cwd] + self.additional_dirs + self.session_dirs + self.settings_directories()
+        for root in roots + ["/tmp", tempfile.gettempdir()]:
+            root = os.path.realpath(os.path.join(self.cwd, os.path.expanduser(root)))
+            if os.path.commonpath([target, root]) == root:
+                return True
+        return False
+
+    def edit_is_allowed(self, tool_name, input_data):
+        """Edits in the allowed directories need no question."""
+        key = EDIT_TOOLS.get(tool_name)
+        target = input_data.get(key) if key and isinstance(input_data, dict) else None
+        return not self.read_only and isinstance(target, str) and bool(target) and self.path_is_allowed(target)
+
+    def allowed_file_command(self, input_data):
+        """Returns the command to run for a simple file command writing only in the allowed directories, else None.
+
+        The Bash tool may run in a subdirectory of the chat's directory, so relative paths must not go up.
+        sed gets --sandbox, which rejects its commands that would read, write or run other files."""
+        command = input_data.get("command") if isinstance(input_data, dict) else None
+        targets = None if self.read_only else file_command_targets(command)
+        if not targets:
+            return None
+        for target in targets:
+            if not os.path.isabs(target) and ".." in target.split("/"):
+                return None
+            if not self.path_is_allowed(target):
+                return None
+        return re.sub(r"^\s*sed\b", "sed --sandbox", command, count=1)
+
     async def connect(self, resume=False):
+        self.session_dirs = []
         settings = {
             "cwd": self.cwd,
             "add_dirs": self.additional_dirs,
@@ -129,6 +333,7 @@ class Bridge:
             "include_partial_messages": True,
             "can_use_tool": self.can_use_tool,
             "permission_mode": "plan" if self.read_only else "default",
+            "system_prompt": {"type": "preset", "preset": "claude_code", "append": EDIT_GUIDANCE},
         }
         if self.provider == "claude":
             if self.model:
@@ -163,6 +368,12 @@ class Bridge:
         send({"type": "ready"})
 
     async def can_use_tool(self, tool_name, input_data, context):
+        if self.edit_is_allowed(tool_name, input_data):
+            return PermissionResultAllow(updated_input=input_data)
+        if tool_name == "Bash":
+            command = self.allowed_file_command(input_data)
+            if command is not None:
+                return PermissionResultAllow(updated_input={**input_data, "command": command})
         request_id = self.next_id
         self.next_id += 1
         future = asyncio.get_running_loop().create_future()
@@ -197,6 +408,9 @@ class Bridge:
                 updates = [dataclasses.replace(update, destination="session") for update in suggestions]
             elif decision == "acceptAlways" and suggestions:
                 updates = suggestions
+            for update in updates or []:
+                if update.type == "addDirectories":
+                    self.session_dirs.extend(update.directories or [])
             return PermissionResultAllow(updated_input=input_data, updated_permissions=updates)
         return PermissionResultDeny(message="User declined this action", interrupt=decision == "cancel")
 

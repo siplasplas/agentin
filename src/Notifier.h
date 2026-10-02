@@ -56,8 +56,11 @@ public:
     void setMuted(bool muted) { settings_.muted = muted; }
 
     void turnFinished(const QString &agent, const QString &chat, bool succeeded, qint64 durationMs);
-    // key identifies the waiting chat; calling it again while it waits changes nothing.
-    void waitingStarted(const QString &key, const QString &agent, const QString &chat, const QString &request);
+    // key identifies the waiting chat and requestId its request; calling it again for the same request
+    // changes nothing, while another request of the chat replaces the answered one.
+    void waitingStarted(const QString &key, int requestId, const QString &agent, const QString &chat,
+                        const QString &request);
+    // Also stops the announcement of that chat's request if it is still being played.
     void waitingEnded(const QString &key);
 
     // Plays a sound file even when sounds are muted, for trying it out in the settings.
@@ -103,7 +106,10 @@ private:
         QString agent;
         QString chat;
         QString request;
+        int requestId = -1;
         QTimer *timer = nullptr;
     };
     QHash<QString, Waiting> waiting_;
+    // The waiting chat whose announcement the current playback is.
+    QString announcedWaitingKey_;
 };

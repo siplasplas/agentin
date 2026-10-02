@@ -11,6 +11,18 @@
 #include <QSystemTrayIcon>
 #include <QTimer>
 
+namespace {
+// Long chat titles are cut at a word so that a spoken announcement stays short.
+QString spokenTitle(const QString &title)
+{
+    constexpr int limit = 32;
+    const QString text = title.simplified();
+    if (text.size() <= limit) return text;
+    const int space = text.lastIndexOf(' ', limit);
+    return text.left(space > limit / 2 ? space : limit);
+}
+}
+
 Notifier::Settings Notifier::Settings::fromJson(const QJsonObject &object)
 {
     Settings settings;
@@ -57,13 +69,16 @@ void Notifier::turnFinished(const QString &agent, const QString &chat, bool succ
                  succeeded ? settings_.finishedSound : settings_.failedSound);
 }
 
-void Notifier::waitingStarted(const QString &key, const QString &agent, const QString &chat, const QString &request)
+void Notifier::waitingStarted(const QString &key, int requestId, const QString &agent, const QString &chat,
+                              const QString &request)
 {
-    if (waiting_.contains(key)) return;
+    const auto found = waiting_.constFind(key);
+    if (found != waiting_.constEnd() && found->requestId == requestId) return;
+    waitingEnded(key);
     auto *timer = new QTimer(this);
     timer->setSingleShot(true);
     connect(timer, &QTimer::timeout, this, [this, key] { announceWaiting(key); });
-    waiting_.insert(key, {agent, chat, request, timer});
+    waiting_.insert(key, {agent, chat, request, requestId, timer});
     timer->start(qMax(0, settings_.waitingDelaySeconds) * 1000);
 }
 
@@ -71,6 +86,10 @@ void Notifier::waitingEnded(const QString &key)
 {
     const Waiting waiting = waiting_.take(key);
     if (waiting.timer) waiting.timer->deleteLater();
+    if (!key.isEmpty() && key == announcedWaitingKey_) {
+        announcedWaitingKey_.clear();
+        stopPlayback();
+    }
 }
 
 // Work stops while an agent waits, so this sound has no minimum turn length.
@@ -79,7 +98,10 @@ void Notifier::announceWaiting(const QString &key)
     const auto found = waiting_.constFind(key);
     if (found == waiting_.constEnd()) return;
     if (settings_.popups) popup(found->agent + " is waiting for you", "\"" + found->chat + "\": " + found->request);
-    if (!settings_.muted) announce(Event::Waiting, found->agent, found->chat, settings_.waitingSound);
+    if (!settings_.muted) {
+        announce(Event::Waiting, found->agent, found->chat, settings_.waitingSound);
+        if (isPlaying()) announcedWaitingKey_ = key;
+    }
     if (settings_.waitingRepeatMinutes > 0) found->timer->start(settings_.waitingRepeatMinutes * 60 * 1000);
 }
 
@@ -95,7 +117,7 @@ void Notifier::announce(Event event, const QString &agent, const QString &chat, 
         case Event::Failed: sentence = polish ? "%1 zakończył się błędem: %2" : "%1 stopped with an error: %2"; break;
         case Event::Waiting: sentence = polish ? "%1 czeka na ciebie: %2" : "%1 is waiting for you: %2"; break;
         }
-        if (say(settings_, sentence.arg(agent, chat))) return;
+        if (say(settings_, sentence.arg(agent, spokenTitle(chat)))) return;
     }
     playSound(soundFile);
 }
@@ -230,6 +252,7 @@ void Notifier::removeTemporaryFile(const QString &file)
 // Piper writes the speech to a temporary WAV file, which a sound player then plays.
 bool Notifier::say(const Settings &settings, const QString &text)
 {
+    announcedWaitingKey_.clear();
     const QString engine = voiceEngine(settings);
     // espeak-ng speaks 175 words per minute by default; the slowness lowers that the same way.
     if (engine == "espeak-ng") {
@@ -254,6 +277,7 @@ bool Notifier::say(const Settings &settings, const QString &text)
 
 bool Notifier::playSound(const QString &file)
 {
+    announcedWaitingKey_.clear();
     return playSoundFile(file, false);
 }
 

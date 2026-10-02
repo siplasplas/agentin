@@ -1679,7 +1679,7 @@ QWidget *MainWindow::addChatTab(AgentProvider *selected, const QString &workingD
         }
         const QString what = request->approval ? request->description.section('\n', 0, 0).trimmed()
                                                : request->questions.value(request->current).text;
-        notifier_->waitingStarted(key, tab->provider()->name(), tab->title().left(60), what);
+        notifier_->waitingStarted(key, request->id, tab->provider()->name(), tab->title().left(60), what);
     });
     connect(tab, &ChatTab::turnEnded, this, [this, tab](bool succeeded, qint64 durationMs) {
         notifier_->turnFinished(tab->provider()->name(), tab->title().left(60), succeeded, durationMs);
