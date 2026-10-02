@@ -3,6 +3,7 @@
 #include "ProcessLocks.h"
 
 #include <QFileInfo>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QProcess>
@@ -287,6 +288,17 @@ void AntigravityAgent::handleLine(const QByteArray &line)
         if (!textSeen_ && !result.value("response").toString().isEmpty()) text(result.value("response").toString());
         if (result.value("status").toString() != "SUCCESS") {
             errorDetails_ = result.value("error").toString(result.value("status").toString("Unknown error"));
+        }
+        // Headless mode cannot ask for permission, so the CLI denies such actions and ends the turn.
+        QStringList denied;
+        for (const QJsonValue &value : result.value("denied_actions").toArray()) {
+            const QJsonObject action = value.toObject();
+            denied.append(action.value("display_name").toString(action.value("action").toString()));
+        }
+        if (!denied.isEmpty() && errorDetails_.isEmpty()) {
+            errorDetails_ = "Antigravity CLI denied " + denied.join(", ") + ", because it cannot ask for permission "
+                            "in headless mode. Allow such actions under permissions.allow in "
+                            "~/.gemini/antigravity-cli/settings.json, for example command(<target>).";
         }
     }
 }

@@ -416,6 +416,7 @@ void ChatTab::setAgent(AgentBackend *agent)
         QTimer::singleShot(0, this, &ChatTab::dispatch);
         if (status != "completed")
             emit logMessage("[" + name + " response: " + status + (details.isEmpty() ? "" : ": " + details) + "]");
+        if (status == "failed" && !details.isEmpty()) appendText("[" + name + " failed: " + details + "]\n");
         if (status != "interrupted" && turnStartedAt_ > 0)
             emit turnEnded(status == "completed", QDateTime::currentMSecsSinceEpoch() - turnStartedAt_);
         turnStartedAt_ = 0;

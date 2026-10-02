@@ -373,7 +373,11 @@ they are not shown as Qt approval dialogs.
 
 In an Antigravity tab, `help` shows `agy --help`. The selected working
 directory is passed as the CLI process directory. Headless mode uses the CLI's cached authentication and its configured permission
-policy; approval prompts are not shown as Qt dialogs.
+policy; approval prompts are not shown as Qt dialogs. The CLI cannot ask for
+permission in this mode, so it denies actions that need one, such as running a
+shell command, and ends the turn without an answer. The chat then reports the
+turn as failed and names the denied actions; allow them under
+`permissions.allow` in `~/.gemini/antigravity-cli/settings.json`.
 
 The client also supports `new`, `clear` (clears the log), `stop`, and `quit`.
 
