@@ -6,6 +6,8 @@
 #include <QElapsedTimer>
 #include <QObject>
 
+#include <functional>
+
 class QTextDocument;
 class QTimer;
 class ChangeTracker;
@@ -137,6 +139,15 @@ private:
     void appendToolText(const QString &text);
     int toolGroup_ = 0;
     int nextToolGroup_ = 0;
+    // A tool that runs in parallel may report while the agent writes a message; its lines wait until the
+    // message ends, so that they never split it, and the message stays outside the tool's folding.
+    bool messageOpen_ = false;
+    int toolGroupBeforeMessage_ = 0;
+    QList<std::function<void()>> toolEventsDuringMessage_;
+    void runToolEvent(const std::function<void()> &event);
+    void startTool(const QString &name, const QString &tool, const QString &details);
+    void finishTool(const QString &tool, const QString &status);
+    void finishMessage();
     void showHistory(const QList<ChatEntry> &entries, bool hasMore, const QString &notice);
     void finishQuestions();
     // Hands the next message to the agent once the previous turn has ended and the directory is free.

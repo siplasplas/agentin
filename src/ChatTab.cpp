@@ -239,6 +239,8 @@ bool ChatTab::startNew(const QString &workingDirectory)
     historyRefreshCutoff_ = 0;
     historyRefreshQueuedText_.clear();
     toolGroup_ = 0;
+    messageOpen_ = false;
+    toolEventsDuringMessage_.clear();
     turnUsage_ = {};
     conversationUsage_ = {};
     conversationUsageFromAgent_ = false;
@@ -272,6 +274,8 @@ void ChatTab::showPreview(AgentProvider *provider, const QString &id, const QStr
     historyRefreshCutoff_ = 0;
     historyRefreshQueuedText_.clear();
     toolGroup_ = 0;
+    messageOpen_ = false;
+    toolEventsDuringMessage_.clear();
     turnUsage_ = {};
     conversationUsage_ = {};
     conversationUsageFromAgent_ = false;
@@ -400,40 +404,32 @@ void ChatTab::setAgent(AgentBackend *agent)
     });
     connect(agent, &AgentBackend::messageStarted, this, [this, name] {
         if (!exchanges_.isEmpty() && !exchanges_.last().answer.isEmpty()) exchanges_.last().answer += "\n\n";
+        if (!messageOpen_) {
+            messageOpen_ = true;
+            toolGroupBeforeMessage_ = toolGroup_;
+            toolGroup_ = 0;
+        }
         appendText("\n" + name + ": ");
+        document_->lastBlock().setUserData(nullptr);
     });
     connect(agent, &AgentBackend::messageDelta, this, [this](const QString &text) {
         if (!exchanges_.isEmpty()) exchanges_.last().answer += text;
         appendText(text);
     });
     connect(agent, &AgentBackend::reasoningUpdated, this, &ChatTab::updateReasoning);
-    connect(agent, &AgentBackend::messageFinished, this, [this] { appendText("\n"); });
+    connect(agent, &AgentBackend::messageFinished, this, &ChatTab::finishMessage);
     connect(agent, &AgentBackend::toolStarted, this, [this, name](const QString &tool, const QString &details) {
-        toolGroup_ = 0;
-        appendText("\n[" + name + " tool: " + tool + "] " + details.simplified().left(120) + '\n');
-        toolGroup_ = ++nextToolGroup_;
-        QTextBlock header = document_->lastBlock().previous();
-        auto *data = new ToolBlockData;
-        data->group = toolGroup_;
-        data->header = true;
-        header.setUserData(data);
-        if (details != details.simplified().left(120)) appendToolText(details + '\n');
-        else emit textAppended();
+        runToolEvent([this, name, tool, details] { startTool(name, tool, details); });
     });
-    connect(agent, &AgentBackend::toolOutput, this, &ChatTab::appendToolText);
+    connect(agent, &AgentBackend::toolOutput, this, [this](const QString &text) {
+        runToolEvent([this, text] { appendToolText(text); });
+    });
     connect(agent, &AgentBackend::toolFinished, this, [this](const QString &tool, const QString &status) {
-        // Keep the final status visible even while the output is folded; it is hidden with the tools.
-        appendToolText("\n");
-        const int group = toolGroup_;
-        toolGroup_ = 0;
-        document_->lastBlock().setUserData(nullptr);
-        appendText("[" + tool + ": " + status + "]\n");
-        auto *data = new ToolBlockData;
-        data->group = group;
-        data->status = true;
-        document_->lastBlock().previous().setUserData(data);
+        runToolEvent([this, tool, status] { finishTool(tool, status); });
     });
     connect(agent, &AgentBackend::turnCompleted, this, [this, name](const QString &status, const QString &details) {
+        // A message the agent left unfinished releases the tool lines that waited for it.
+        if (messageOpen_) finishMessage();
         updateTaskClock();
         // Nonblocking questions stay answerable until the server resolves them.
         const auto firstRemoved = std::remove_if(requests_.begin(), requests_.end(), [](const PendingRequest &request) {
@@ -562,6 +558,50 @@ void ChatTab::setAgent(AgentBackend *agent)
 }
 
 // Live output is kept separately so the transcript survives when older history is prepended.
+void ChatTab::startTool(const QString &name, const QString &tool, const QString &details)
+{
+    toolGroup_ = 0;
+    appendText("\n[" + name + " tool: " + tool + "] " + details.simplified().left(120) + '\n');
+    toolGroup_ = ++nextToolGroup_;
+    QTextBlock header = document_->lastBlock().previous();
+    auto *data = new ToolBlockData;
+    data->group = toolGroup_;
+    data->header = true;
+    header.setUserData(data);
+    if (details != details.simplified().left(120)) appendToolText(details + '\n');
+    else emit textAppended();
+}
+
+void ChatTab::finishTool(const QString &tool, const QString &status)
+{
+    // Keep the final status visible even while the output is folded; it is hidden with the tools.
+    appendToolText("\n");
+    const int group = toolGroup_;
+    toolGroup_ = 0;
+    document_->lastBlock().setUserData(nullptr);
+    appendText("[" + tool + ": " + status + "]\n");
+    auto *data = new ToolBlockData;
+    data->group = group;
+    data->status = true;
+    document_->lastBlock().previous().setUserData(data);
+}
+
+void ChatTab::runToolEvent(const std::function<void()> &event)
+{
+    if (messageOpen_) toolEventsDuringMessage_.append(event);
+    else event();
+}
+
+void ChatTab::finishMessage()
+{
+    appendText("\n");
+    if (!messageOpen_) return;
+    messageOpen_ = false;
+    toolGroup_ = toolGroupBeforeMessage_;
+    const QList<std::function<void()>> events = std::exchange(toolEventsDuringMessage_, {});
+    for (const auto &event : events) event();
+}
+
 void ChatTab::appendText(const QString &text)
 {
     if (!live_) return;
