@@ -1572,6 +1572,16 @@ void MainWindow::showNotificationsDialog()
                                              Event::CompactionFinished);
     form->addRow("Speech language:", language);
     form->addRow("Speech slowness:", slowness);
+    // Shows the lead-in for the output as it is now, and then the one each sound played with.
+    auto *leadIn = new QLabel(Notifier::leadIn().describe(), &dialog);
+    leadIn->setObjectName("leadIn");
+    leadIn->setWordWrap(true);
+    leadIn->setToolTip("Inaudible noise before every sound and speech while the audio output wakes up: 1.5 s when the "
+                       "default output is suspended, 0.4 s when it is awake");
+    form->addRow("Lead-in before sounds:", leadIn);
+    connect(notifier_, &Notifier::leadInChosen, leadIn, [leadIn](const Notifier::LeadIn &chosen) {
+        leadIn->setText(chosen.describe());
+    });
     connect(language, QOverload<int>::of(&QComboBox::currentIndexChanged), &dialog, [&soundBoxes, fillSpeech, soundValue] {
         for (const auto &[box, event] : soundBoxes) fillSpeech(box, event, soundValue(box));
     });

@@ -26,7 +26,9 @@ constexpr int kSuspendedLeadInMs = 1500;
 // About -74 dB below full scale.
 constexpr int kLeadInNoise = 6;
 
-int leadInMs()
+}
+
+Notifier::LeadIn Notifier::leadIn()
 {
     const auto run = [](const QStringList &arguments) {
         QProcess pactl;
@@ -38,16 +40,34 @@ int leadInMs()
         }
         return QString::fromUtf8(pactl.readAllStandardOutput());
     };
-    if (QStandardPaths::findExecutable("pactl").isEmpty()) return kLeadInMs;
+    if (QStandardPaths::findExecutable("pactl").isEmpty()) return {kLeadInMs, {}, {}};
     const QString sink = run({"get-default-sink"}).trimmed();
     // Lines are: index, name, driver, sample format, state.
     for (const QString &line : run({"list", "sinks", "short"}).split('\n')) {
         const QStringList fields = line.split('\t');
-        if (fields.size() >= 5 && fields.at(1) == sink)
-            return fields.at(4).trimmed() == "SUSPENDED" ? kSuspendedLeadInMs : kLeadInMs;
+        if (fields.size() >= 5 && fields.at(1) == sink) {
+            const QString state = fields.at(4).trimmed();
+            return {state == "SUSPENDED" ? kSuspendedLeadInMs : kLeadInMs, sink, state};
+        }
     }
-    return kLeadInMs;
+    return {kLeadInMs, sink, {}};
 }
+
+int Notifier::chooseLeadIn()
+{
+    const LeadIn chosen = leadIn();
+    emit leadInChosen(chosen);
+    return chosen.milliseconds;
+}
+
+QString Notifier::LeadIn::describe() const
+{
+    const QString length = QString::number(milliseconds / 1000.0, 'f', 1) + " s";
+    if (output.isEmpty()) return length + " (the audio output's state is unknown)";
+    return length + " (the output " + output + " is " + (state == "SUSPENDED" ? "suspended" : "awake") + ")";
+}
+
+namespace {
 
 QList<qint16> leadInSamples(qsizetype count)
 {
@@ -383,7 +403,7 @@ bool Notifier::say(const Settings &settings, const Voice &voice, const QString &
     // The speech is written to a WAV file and played with a short silence before it: an audio output that
     // was idle wakes up during its first moments, which would cut off the agent's name.
     const auto play = [this, output](bool success) {
-        if (success) addLeadIn(output, leadInMs());
+        if (success) addLeadIn(output, chooseLeadIn());
         if (!success || !playSoundFile(output, true)) removeTemporaryFile(output);
     };
     if (espeak) {
@@ -504,7 +524,7 @@ bool Notifier::playSoundOrBuiltIn(const QString &sound)
     if (samples.isEmpty()) return playSoundFile(sound, false);
     const QString file = writeTemporaryWav(samples);
     if (file.isEmpty()) return false;
-    addLeadIn(file, leadInMs());
+    addLeadIn(file, chooseLeadIn());
     if (!playSoundFile(file, true)) {
         QFile::remove(file);
         return false;
@@ -554,7 +574,7 @@ bool Notifier::playSoundFile(const QString &file, bool temporary)
         const QString program = QStandardPaths::findExecutable(player.first());
         if (program.isEmpty()) continue;
         const QStringList options = player.mid(1);
-        const QString leadIn = temporary ? QString() : writeTemporaryWav(leadInSamples(qsizetype(kSampleRate) * leadInMs() / 1000));
+        const QString leadIn = temporary ? QString() : writeTemporaryWav(leadInSamples(qsizetype(kSampleRate) * chooseLeadIn() / 1000));
         if (leadIn.isEmpty()) {
             startPlaybackProcess(program, options + QStringList{file}, [this, file, temporary](bool) {
                 if (temporary) removeTemporaryFile(file);

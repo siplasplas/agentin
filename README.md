@@ -421,7 +421,8 @@ TVs keep their speakers muted until the signal is more than digital silence.
 Built-in sounds and speech begin with it, and a sound file plays after a separate
 lead-in, with any player and in any format. It lasts 0.4 s, or 1.5 s when `pactl`
 reports the default output as suspended, since an idle output, HDMI above all,
-can take over a second to wake up.
+can take over a second to wake up. **Settings → Notifications…** shows the lead-in
+for the output as it is when the dialog opens, and then the one each **Play** used.
 
 When short sounds are still cut off, or the delay is unwelcome, it can be worth
 keeping the output awake. With PipeWire, a WirePlumber rule does that, for example

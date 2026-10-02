@@ -103,11 +103,24 @@ public:
     static std::optional<Voice> voice(const Settings &settings, const QString &language, const QString &name);
     // What is said for the event; without a chat only its beginning, such as "Codex finished".
     static QString spokenText(Event event, const QString &language, const QString &agent, const QString &chat);
+    // The lead-in before sounds and speech: longer when the default audio output is suspended.
+    struct LeadIn
+    {
+        int milliseconds = 0;
+        QString output;
+        // As pactl reports it, such as "SUSPENDED" or "RUNNING"; empty when unknown.
+        QString state;
+        // Such as "1.5 s (the output … is suspended)".
+        QString describe() const;
+    };
+    static LeadIn leadIn();
     // Says text with the voice; returns false when its program is not installed.
     bool say(const Settings &settings, const Voice &voice, const QString &text);
 
 signals:
     void playbackChanged(bool playing);
+    // The lead-in chosen for a sound that is about to play.
+    void leadInChosen(const Notifier::LeadIn &leadIn);
     void playbackFailed(const QString &reason);
 
 private:
@@ -116,6 +129,7 @@ private:
     bool playSoundFile(const QString &file, bool temporary);
     // Inserts the lead-in at the start of the samples of a PCM WAV file; false when the file is not one.
     static bool addLeadIn(const QString &file, int milliseconds);
+    int chooseLeadIn();
     static QString writeTemporaryWav(const QList<qint16> &samples);
     // A file, or a built-in sound written to a temporary file.
     bool playSoundOrBuiltIn(const QString &sound);
