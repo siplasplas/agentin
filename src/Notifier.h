@@ -34,6 +34,8 @@ public:
         int waitingDelaySeconds = 30;
         // Repeats the waiting announcement until answered; 0 announces once.
         int waitingRepeatMinutes = 0;
+        // Approval requests can stay quiet while questions and finished turns are still announced.
+        bool announceApprovals = true;
         // Announcements are spoken when a voice program is found; otherwise the sound files play.
         bool voice = true;
         // "piper" or "espeak-ng"; empty picks the first one found.

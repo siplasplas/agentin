@@ -161,6 +161,7 @@ private:
     QHash<QString, QString> loggedUsage_;
     QAction *usageVisibleAction_;
     QAction *reasoningVisibleAction_;
+    QAction *toolsVisibleAction_;
     QTreeWidget *conversationTree_;
     QSet<QString> expandedProviders_;
     // The tree groups chats by agent and then directory, or by directory with the agent in each chat row.

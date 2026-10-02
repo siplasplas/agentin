@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QPlainTextEdit>
+#include <QSet>
 #include <QSyntaxHighlighter>
 #include <QTextBlock>
 
@@ -12,6 +13,8 @@ struct ToolBlockData : QTextBlockUserData
     int group = 0;
     bool header = false;
     bool collapsed = true;
+    // The tool's final status line, shown while its output is folded.
+    bool status = false;
 };
 
 // Marks the blocks of the user's messages for ChatView: a message starts with a "You: " or "You (…): "
@@ -37,6 +40,8 @@ class ChatView : public QPlainTextEdit
 public:
     explicit ChatView(QWidget *parent = nullptr);
     void refreshTools();
+    // Hidden tool calls leave only the user's messages and the answers, with a thin line where they were.
+    void setToolsShown(bool shown);
 
 protected:
     void paintEvent(QPaintEvent *event) override;
@@ -46,6 +51,9 @@ protected:
 
 private:
     QWidget *foldMargin_;
+    bool toolsShown_ = true;
+    // Visible blocks followed by hidden tool calls.
+    QSet<int> separators_;
     bool toggleTool(const QTextBlock &block);
     bool hasToolContent(const QTextBlock &header) const;
 };

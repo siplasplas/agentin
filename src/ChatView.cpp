@@ -4,6 +4,7 @@
 #include <QPaintEvent>
 #include <QPainter>
 #include <QResizeEvent>
+#include <QSet>
 #include <QPlainTextDocumentLayout>
 #include <QRegularExpression>
 #include <QTextDocument>
@@ -44,13 +45,23 @@ void ChatView::refreshTools()
     QHash<int, bool> collapsed;
     QList<QTextEdit::ExtraSelection> selections;
     bool changed = false;
+    separators_.clear();
+    // While tools are hidden, the blank lines after them go too, and a line marks where they were.
+    bool afterTool = false;
+    int lastVisible = -1;
+    bool hiddenRun = false;
     for (QTextBlock block = document()->begin(); block.isValid(); block = block.next()) {
         auto *data = dynamic_cast<ToolBlockData *>(block.userData());
         bool visible = true;
-        if (data) {
+        if (!toolsShown_ && (data || (afterTool && block.text().trimmed().isEmpty()))) {
+            visible = false;
+            afterTool = true;
+            hiddenRun = true;
+        } else if (data) {
+            afterTool = false;
             if (data->header) collapsed.insert(data->group, data->collapsed);
-            else visible = !collapsed.value(data->group, true);
-            if (visible) {
+            else if (!data->status) visible = !collapsed.value(data->group, true);
+            if (visible && !data->status) {
                 QTextEdit::ExtraSelection selection;
                 selection.cursor = QTextCursor(block);
                 selection.cursor.select(QTextCursor::BlockUnderCursor);
@@ -58,6 +69,13 @@ void ChatView::refreshTools()
                 if (data->header) selection.format.setFontWeight(QFont::Bold);
                 selections.append(selection);
             }
+        }
+        if (!data && toolsShown_) afterTool = false;
+        if (visible) {
+            if (hiddenRun && lastVisible >= 0) separators_.insert(lastVisible);
+            hiddenRun = false;
+            if (!data) afterTool = false;
+            lastVisible = block.blockNumber();
         }
         if (block.isVisible() != visible) {
             block.setVisible(visible);
@@ -100,9 +118,22 @@ void ChatView::paintEvent(QPaintEvent *event)
                     && next.userState() == UserMessageHighlighter::Message
                     && !UserMessageHighlighter::startsMessage(next.text()));
             if (inside) painter.fillRect(QRectF(0, rect.top(), viewport()->width(), rect.height()), band);
+            if (separators_.contains(block.blockNumber())) {
+                // On a blank line the separator runs through its middle, otherwise below the text.
+                const qreal y = block.text().trimmed().isEmpty() ? rect.center().y() : rect.bottom() - 1;
+                painter.setPen(QPen(palette().color(QPalette::Mid), 1, Qt::DashLine));
+                painter.drawLine(QPointF(4, y), QPointF(viewport()->width() - 4, y));
+            }
         }
     }
     QPlainTextEdit::paintEvent(event);
+}
+
+void ChatView::setToolsShown(bool shown)
+{
+    if (toolsShown_ == shown) return;
+    toolsShown_ = shown;
+    refreshTools();
 }
 
 void ChatView::mouseReleaseEvent(QMouseEvent *event)
@@ -133,7 +164,7 @@ bool ChatView::hasToolContent(const QTextBlock &header) const
     for (QTextBlock block = header.next(); block.isValid(); block = block.next()) {
         const auto *data = dynamic_cast<ToolBlockData *>(block.userData());
         if (data && data->header) break;
-        if (data && data->group == heading->group && !block.text().trimmed().isEmpty()) return true;
+        if (data && !data->status && data->group == heading->group && !block.text().trimmed().isEmpty()) return true;
     }
     return false;
 }

@@ -294,6 +294,10 @@ the full text in the conversation and also applies to multiline tool entries
 in loaded history.
 The scroll range follows the visible lines when tool output is folded, expanded,
 or streamed, including wrapped headings and output.
+**View → Tool calls** hides the tools altogether: their headings, output, final
+status lines such as `[shell: completed]` and the blank lines after them, so the
+chat shows only your messages and the answers. A thin dashed line marks where
+tool calls were. The choice is saved in the settings.
 
 **Settings → Notifications…** sets desktop notifications and sounds (WAV, MP3 or
 OGG files, played with ffplay, mpv, pw-play or paplay, whichever is installed).
@@ -301,7 +305,8 @@ A finished or failed turn notifies only when it took at least a set time (5
 minutes by default). An agent that waits for an approval or an answer is always
 announced, after a short delay (30 seconds by default) so that answering at once
 stays quiet, and optionally again every few minutes until it is answered, since
-its work stops until then. The speaker button in the status row turns red while a sound or voice is
+its work stops until then. Approval requests can be left unannounced, while
+finished turns and the agent's questions still are. The speaker button in the status row turns red while a sound or voice is
 playing (including voice preparation); click it to stop the current audio without
 changing the mute setting. When idle, it mutes notification sounds. The
 audio chooser remembers its last browsed directory across all three notification

@@ -398,11 +398,16 @@ void ChatTab::setAgent(AgentBackend *agent)
     });
     connect(agent, &AgentBackend::toolOutput, this, &ChatTab::appendToolText);
     connect(agent, &AgentBackend::toolFinished, this, [this](const QString &tool, const QString &status) {
-        // Keep the final status visible even while the output is folded.
+        // Keep the final status visible even while the output is folded; it is hidden with the tools.
         appendToolText("\n");
+        const int group = toolGroup_;
         toolGroup_ = 0;
         document_->lastBlock().setUserData(nullptr);
         appendText("[" + tool + ": " + status + "]\n");
+        auto *data = new ToolBlockData;
+        data->group = group;
+        data->status = true;
+        document_->lastBlock().previous().setUserData(data);
     });
     connect(agent, &AgentBackend::turnCompleted, this, [this, name](const QString &status, const QString &details) {
         updateTaskClock();
@@ -560,14 +565,14 @@ void ChatTab::appendToolText(const QString &text)
 
 void ChatTab::showHistory(const QList<ChatEntry> &entries, bool hasMore, const QString &notice)
 {
-    struct SavedToolBlock { int offset; int group; bool header; bool collapsed; };
+    struct SavedToolBlock { int offset; int group; bool header; bool collapsed; bool status; };
     QList<SavedToolBlock> saved;
     const int oldPrefix = document_->characterCount() - 1 - liveTranscript_.size();
     if (live_) {
         for (QTextBlock block = document_->begin(); block.isValid(); block = block.next()) {
             auto *data = dynamic_cast<ToolBlockData *>(block.userData());
             if (data && block.position() >= oldPrefix)
-                saved.append({block.position() - oldPrefix, data->group, data->header, data->collapsed});
+                saved.append({block.position() - oldPrefix, data->group, data->header, data->collapsed, data->status});
         }
     }
     const QString name = provider_->name();
@@ -628,6 +633,7 @@ void ChatTab::showHistory(const QList<ChatEntry> &entries, bool hasMore, const Q
         data->group = item.group;
         data->header = item.header;
         data->collapsed = item.collapsed;
+        data->status = item.status;
         block.setUserData(data);
     }
     hasMore_ = hasMore;

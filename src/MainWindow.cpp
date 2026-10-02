@@ -173,6 +173,11 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     reasoningVisibleAction_ = viewMenu->addAction("Reasoning");
     reasoningVisibleAction_->setObjectName("showReasoning");
     reasoningVisibleAction_->setCheckable(true);
+    toolsVisibleAction_ = viewMenu->addAction("Tool calls");
+    toolsVisibleAction_->setObjectName("showTools");
+    toolsVisibleAction_->setCheckable(true);
+    toolsVisibleAction_->setChecked(true);
+    toolsVisibleAction_->setToolTip("Unchecked, the chat shows only your messages and the answers");
     // The same menus open from the buttons above the conversation tree.
     auto *treeMenu = viewMenu->addMenu("Conversation tree");
     const auto choice = [this](QMenu *menu, QActionGroup *group, const QString &text, const QString &name) {
@@ -420,6 +425,10 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     leftSplitter->setStretchFactor(1, 1);
     leftSplitter->setSizes({300, 300});
     reasoning_->hide();
+    connect(toolsVisibleAction_, &QAction::toggled, this, [this](bool visible) {
+        chatView_->setToolsShown(visible);
+        saveSettings();
+    });
     connect(reasoningVisibleAction_, &QAction::toggled, this, [this, leftSplitter](bool visible) {
         reasoning_->setVisible(visible);
         if (visible && !leftSplitter->property("reasoningShown").toBool()) {
@@ -897,6 +906,12 @@ void MainWindow::loadSettings()
         usage_->setVisible(visible);
     }
     {
+        const QSignalBlocker blocker(toolsVisibleAction_);
+        const bool visible = settings.value("showTools").toBool(true);
+        toolsVisibleAction_->setChecked(visible);
+        chatView_->setToolsShown(visible);
+    }
+    {
         const QSignalBlocker blocker(reasoningVisibleAction_);
         const bool visible = settings.value("showReasoning").toBool(false);
         reasoningVisibleAction_->setChecked(visible);
@@ -960,6 +975,7 @@ void MainWindow::saveSettings()
                                                          {"lastAudioDirectory", lastAudioDirectory_},
                                                          {"showUsageLimits", usageVisibleAction_->isChecked()},
                                                          {"showReasoning", reasoningVisibleAction_->isChecked()},
+                                                         {"showTools", toolsVisibleAction_->isChecked()},
                                                          {"usagePanelHeight", usagePanelHeight_},
                                                          {"glmModels", QJsonArray::fromStringList(glm_->extraModels())},
                                                          {"agents", agents}})
@@ -1169,6 +1185,10 @@ void MainWindow::showNotificationsDialog()
     repeat->setSpecialValueText("Never");
     repeat->setValue(settings.waitingRepeatMinutes);
     form->addRow("Repeat while it waits, every:", repeat);
+    auto *approvals = new QCheckBox("Announce approval requests (questions are always announced)", &dialog);
+    approvals->setObjectName("announceApprovals");
+    approvals->setChecked(settings.announceApprovals);
+    form->addRow(QString(), approvals);
     auto *voice = new QCheckBox("Announce with a voice instead of the sound files", &dialog);
     voice->setObjectName("announceWithVoice");
     voice->setChecked(settings.voice);
@@ -1245,6 +1265,7 @@ void MainWindow::showNotificationsDialog()
     settings.waitingSound = waiting->text().trimmed();
     settings.waitingDelaySeconds = delay->value();
     settings.waitingRepeatMinutes = repeat->value();
+    settings.announceApprovals = approvals->isChecked();
     settings.voice = voice->isChecked();
     settings = voiceSettings(settings);
     notifier_->setSettings(settings);
@@ -1695,7 +1716,7 @@ QWidget *MainWindow::addChatTab(AgentProvider *selected, const QString &workingD
         // An agent waiting for an answer is announced even at the current tab: the user may be away.
         const QString key = QString::number(quintptr(page));
         const PendingRequest *request = tab->pendingRequest();
-        if (!request) {
+        if (!request || (request->approval && !notifier_->settings().announceApprovals)) {
             notifier_->waitingEnded(key);
             return;
         }

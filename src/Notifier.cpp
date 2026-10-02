@@ -34,6 +34,7 @@ Notifier::Settings Notifier::Settings::fromJson(const QJsonObject &object)
     settings.waitingSound = object.value("waitingSound").toString();
     settings.waitingDelaySeconds = object.value("waitingDelaySeconds").toInt(30);
     settings.waitingRepeatMinutes = object.value("waitingRepeatMinutes").toInt(0);
+    settings.announceApprovals = object.value("announceApprovals").toBool(true);
     settings.voice = object.value("voice").toBool(true);
     settings.voiceEngine = object.value("voiceEngine").toString();
     settings.piperProgram = object.value("piperProgram").toString();
@@ -47,6 +48,7 @@ QJsonObject Notifier::Settings::toJson() const
     return {{"popups", popups}, {"muted", muted}, {"minimumMinutes", minimumMinutes},
             {"finishedSound", finishedSound}, {"failedSound", failedSound}, {"waitingSound", waitingSound},
             {"waitingDelaySeconds", waitingDelaySeconds}, {"waitingRepeatMinutes", waitingRepeatMinutes},
+            {"announceApprovals", announceApprovals},
             {"voice", voice}, {"voiceEngine", voiceEngine}, {"piperProgram", piperProgram}, {"piperModel", piperModel},
             {"speechSlowness", speechSlowness}};
 }
