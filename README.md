@@ -389,8 +389,9 @@ replaces the current playback, and closing the application stops it.
 Each sound can also be one of the short built-in sounds, generated when played
 (a click, a double click, a rising or a falling tone), or speech. A Codex chat's
 compaction plays its own sounds when it starts and when it ends, at every
-compaction; they do not interrupt an announcement that is playing, and muting
-silences them too. Where the desktop's sound themes are installed, as on Ubuntu,
+compaction, automatic or started with **Compact**; they do not interrupt an
+announcement that is playing, and muting silences them too. Claude and GLM do not
+report their compaction to agentin, so their chats play no compaction sounds. Where the desktop's sound themes are installed, as on Ubuntu,
 unset sounds default to them: freedesktop's `bell.oga` when compaction starts,
 Yaru's `complete.oga` when it ends, and freedesktop's `screen-capture.oga` for an
 agent that waits. Elsewhere compaction uses the rising and falling tones.
@@ -410,7 +411,8 @@ gives the language and the voice's name). espeak-ng's mechanical voice is offere
 only for a language without a Piper voice. Polish is spoken in Polish sentences,
 other languages in English ones. The speech is generated when needed, so the
 repository contains no audio files; when no voice can speak, a double click plays
-instead. A spoken announcement names the chat by the first words of its title,
+instead. Speech starts after 0.4 s of silence, so that an audio output waking up
+from idle does not cut off the agent's name. A spoken announcement names the chat by the first words of its title,
 about 32 characters. Answering the approval or question it announces, or a new
 request of the same chat, stops it at once.
 

@@ -333,26 +333,66 @@ void Notifier::removeTemporaryFile(const QString &file)
 bool Notifier::say(const Settings &settings, const Voice &voice, const QString &text)
 {
     announcedWaitingKey_.clear();
-    // espeak-ng speaks 175 words per minute by default; the slowness lowers that the same way.
-    if (voice.engine == "espeak-ng") {
-        if (findEspeak().isEmpty()) return false;
-        startPlaybackProcess(findEspeak(), {"-v", voice.model, "-s", QString::number(qRound(175 / qMax(0.5, settings.speechSlowness))), text});
-        return true;
-    }
-    if (voice.engine != "piper" || findPiper(settings).isEmpty()) return false;
+    const bool espeak = voice.engine == "espeak-ng";
+    if (espeak ? findEspeak().isEmpty() : voice.engine != "piper" || findPiper(settings).isEmpty()) return false;
     static int counter = 0;
     const QString output = QDir(QDir::tempPath()).filePath(QString("agentin-voice-%1-%2.wav")
                                                                  .arg(QCoreApplication::applicationPid()).arg(++counter));
     temporaryFiles_.append(output);
+    // The speech is written to a WAV file and played with a short silence before it: an audio output that
+    // was idle wakes up during its first moments, which would cut off the agent's name.
+    const auto play = [this, output](bool success) {
+        if (success) addLeadingSilence(output, 400);
+        if (!success || !playSoundFile(output, true)) removeTemporaryFile(output);
+    };
+    if (espeak) {
+        // espeak-ng speaks 175 words per minute by default; the slowness lowers that the same way.
+        startPlaybackProcess(findEspeak(), {"-v", voice.model, "-s", QString::number(qRound(175 / qMax(0.5, settings.speechSlowness))),
+                                            "-w", output, text}, play);
+        return true;
+    }
     QProcess *piper = startPlaybackProcess(findPiper(settings),
         {"--model", voice.model, "--length_scale", QString::number(settings.speechSlowness),
-         "--sentence_silence", "0.3", "--output_file", output},
-        [this, output](bool success) {
-            if (!success || !playSoundFile(output, true)) removeTemporaryFile(output);
-        });
+         "--sentence_silence", "0.3", "--output_file", output}, play);
     piper->write(text.toUtf8() + '\n');
     piper->closeWriteChannel();
     return true;
+}
+
+// Inserts silence at the start of the samples of a PCM WAV file; returns false when the file is not one.
+bool Notifier::addLeadingSilence(const QString &file, int milliseconds)
+{
+    QFile wav(file);
+    if (!wav.open(QIODevice::ReadWrite)) return false;
+    QByteArray bytes = wav.readAll();
+    const auto read32 = [&bytes](qsizetype at) {
+        quint32 value = 0;
+        for (int i = 3; i >= 0; --i) value = (value << 8) | quint8(bytes.at(at + i));
+        return value;
+    };
+    const auto write32 = [&bytes](qsizetype at, quint32 value) {
+        for (int i = 0; i < 4; ++i) bytes[at + i] = char((value >> (8 * i)) & 0xff);
+    };
+    if (bytes.size() < 12 || !bytes.startsWith("RIFF") || bytes.mid(8, 4) != "WAVE") return false;
+    quint32 blockAlign = 0;
+    quint32 byteRate = 0;
+    for (qsizetype at = 12; at + 8 <= bytes.size();) {
+        const QByteArray id = bytes.mid(at, 4);
+        const quint32 size = read32(at + 4);
+        if (id == "fmt " && at + 24 <= bytes.size()) {
+            byteRate = read32(at + 16);
+            blockAlign = quint8(bytes.at(at + 20)) | quint8(bytes.at(at + 21)) << 8;
+        } else if (id == "data") {
+            if (!blockAlign || !byteRate) return false;
+            const quint32 silence = quint32(qint64(byteRate) * milliseconds / 1000) / blockAlign * blockAlign;
+            bytes.insert(at + 8, QByteArray(silence, '\0'));
+            write32(at + 4, size + silence);
+            write32(4, read32(4) + silence);
+            return wav.seek(0) && wav.write(bytes) == bytes.size();
+        }
+        at += 8 + size + (size & 1);
+    }
+    return false;
 }
 
 bool Notifier::playSound(const QString &file)

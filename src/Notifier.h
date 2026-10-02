@@ -114,6 +114,7 @@ private:
     QProcess *startPlaybackProcess(const QString &program, const QStringList &arguments,
                                    std::function<void(bool)> completed = {});
     bool playSoundFile(const QString &file, bool temporary);
+    static bool addLeadingSilence(const QString &file, int milliseconds);
     // A file, or a built-in sound written to a temporary file.
     bool playSoundOrBuiltIn(const QString &sound);
     void updatePlaybackState();
