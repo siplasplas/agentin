@@ -271,6 +271,10 @@ with higher limit usage, where supported. It applies from the next turn and is
 kept separately for each open chat. It is always off after restarting agentin,
 including restored conversations; the setting is not saved in Codex configuration.
 
+Your messages in the chat (from a line starting with `You: ` or `You (…): `, up to
+the agent's answer or the next bracketed entry) have a yellow background across
+the view, darker on a dark color scheme, so they stand out from the answers.
+
 The chat, message field and log use a 10-point monospace font by default.
 **Settings → Chat font…** changes the font and size and saves the choice.
 **Settings → Chat font size…** also accepts fractional sizes, such as 10.5 points,

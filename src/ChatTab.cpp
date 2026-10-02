@@ -20,6 +20,7 @@ ChatTab::ChatTab(AgentProvider *provider, const QString &workingDirectory, QObje
       path_(workingDirectory), title_("New chat")
 {
     document_->setDocumentLayout(new QPlainTextDocumentLayout(document_));
+    new UserMessageHighlighter(document_, [this] { return provider_->name(); });
     reasoningDocument_->setDocumentLayout(new QPlainTextDocumentLayout(reasoningDocument_));
     // Other windows and outside tools do not announce a free directory, so waiting chats also retry.
     retry_ = new QTimer(this);

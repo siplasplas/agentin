@@ -1,11 +1,34 @@
 #include "ChatView.h"
 
 #include <QMouseEvent>
+#include <QPaintEvent>
 #include <QPainter>
 #include <QResizeEvent>
 #include <QPlainTextDocumentLayout>
+#include <QRegularExpression>
 #include <QTextDocument>
 #include <QTextLayout>
+
+UserMessageHighlighter::UserMessageHighlighter(QTextDocument *document, std::function<QString()> agentName)
+    : QSyntaxHighlighter(document), agentName_(std::move(agentName))
+{
+}
+
+bool UserMessageHighlighter::startsMessage(const QString &text)
+{
+    static const QRegularExpression start("^You( \\([^)\n]*\\))?: ");
+    return start.match(text).hasMatch();
+}
+
+void UserMessageHighlighter::highlightBlock(const QString &text)
+{
+    const bool inMessage = previousBlockState() == Message || previousBlockState() == MessageGap;
+    if (startsMessage(text)) setCurrentBlockState(Message);
+    else if (text.startsWith('[') || text.startsWith(agentName_() + ": ")) setCurrentBlockState(Other);
+    // Blank lines are left unmarked so that no band separates a message from the answer below it.
+    else if (inMessage) setCurrentBlockState(text.trimmed().isEmpty() ? MessageGap : Message);
+    else setCurrentBlockState(Other);
+}
 
 ChatView::ChatView(QWidget *parent) : QPlainTextEdit(parent), foldMargin_(new QWidget(this))
 {
@@ -57,6 +80,29 @@ void ChatView::refreshTools()
     }
     viewport()->update();
     foldMargin_->update();
+}
+
+// The user's messages get a yellow band across the view, darker on a dark background.
+void ChatView::paintEvent(QPaintEvent *event)
+{
+    {
+        QPainter painter(viewport());
+        const QColor band = palette().color(QPalette::Base).lightness() < 128 ? QColor(84, 74, 18) : QColor(255, 243, 176);
+        const QPointF offset = contentOffset();
+        for (QTextBlock block = firstVisibleBlock(); block.isValid(); block = block.next()) {
+            if (!block.isVisible()) continue;
+            const QRectF rect = blockBoundingGeometry(block).translated(offset);
+            if (rect.top() > event->rect().bottom()) break;
+            // A blank line inside a message joins its paragraphs; one after the message separates it.
+            const QTextBlock next = block.next();
+            const bool inside = block.userState() == UserMessageHighlighter::Message
+                || (block.userState() == UserMessageHighlighter::MessageGap && next.isValid()
+                    && next.userState() == UserMessageHighlighter::Message
+                    && !UserMessageHighlighter::startsMessage(next.text()));
+            if (inside) painter.fillRect(QRectF(0, rect.top(), viewport()->width(), rect.height()), band);
+        }
+    }
+    QPlainTextEdit::paintEvent(event);
 }
 
 void ChatView::mouseReleaseEvent(QMouseEvent *event)
