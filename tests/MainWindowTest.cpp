@@ -749,11 +749,10 @@ sys.stdin.read()
     qputenv("PATH", directory.path().toUtf8());
     Notifier notifier;
     Notifier::Settings settings;
-    settings.voiceEngine = "piper";
     settings.piperProgram = piper.fileName();
-    settings.piperModel = model.fileName();
+    const Notifier::Voice voice{"piper", model.fileName(), "voice"};
     QSignalSpy failures(&notifier, &Notifier::playbackFailed);
-    QVERIFY(notifier.say(settings, "cancel this speech"));
+    QVERIFY(notifier.say(settings, voice, "cancel this speech"));
     QTRY_VERIFY(QFileInfo::exists(piper.fileName() + ".output"));
     QFile outputLog(piper.fileName() + ".output");
     QVERIFY(outputLog.open(QIODevice::ReadOnly));
@@ -767,7 +766,7 @@ sys.stdin.read()
     QCOMPARE(failures.size(), 0);
 
     // After successful synthesis, Stop must kill the player and remove its temporary WAV.
-    QVERIFY(notifier.say(settings, "finish synthesizing"));
+    QVERIFY(notifier.say(settings, voice, "finish synthesizing"));
     QTRY_VERIFY(QFileInfo::exists(player.fileName() + ".started"));
     QFile playerLog(player.fileName() + ".started");
     QVERIFY(playerLog.open(QIODevice::ReadOnly));

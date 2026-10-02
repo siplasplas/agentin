@@ -383,37 +383,36 @@ a checkbox. Image metadata is not enabled in this audio
 chooser. Pasted absolute or relative paths are handled by QxFileDialog, relative
 to its displayed directory. The
 notification settings dialog also has **Stop playback** for cancelling **Play**
-or **Try** previews while the dialog is open. Starting another sound or voice
+previews while the dialog is open. Starting another sound or voice
 replaces the current playback, and closing the application stops it.
 
-Each sound can also be one of the short built-in sounds, generated when played:
-a click, a double click, a rising or a falling tone. A Codex chat's compaction
-plays its own cues when it starts and when it ends, at every compaction and never
-spoken; a cue does not interrupt an
-announcement that is playing, and muting silences it too. Where the desktop's
-sound themes are installed, as on Ubuntu, unset sounds default to them:
-freedesktop's `bell.oga` when compaction starts, Yaru's `complete.oga` when it
-ends, and freedesktop's `screen-capture.oga` for an agent that waits, which then
-plays this sound instead of being spoken, while finished turns are still spoken.
-Elsewhere compaction uses the rising and falling tones.
+Each sound can also be one of the short built-in sounds, generated when played
+(a click, a double click, a rising or a falling tone), or speech. A Codex chat's
+compaction plays its own sounds when it starts and when it ends, at every
+compaction; they do not interrupt an announcement that is playing, and muting
+silences them too. Where the desktop's sound themes are installed, as on Ubuntu,
+unset sounds default to them: freedesktop's `bell.oga` when compaction starts,
+Yaru's `complete.oga` when it ends, and freedesktop's `screen-capture.oga` for an
+agent that waits. Elsewhere compaction uses the rising and falling tones.
 
-
-Announcements can be spoken instead, for example "Codex finished: fix the build"
+Speech names the agent and the chat, for example "Codex finished: fix the build"
 or "Claude is waiting for you: …", so it is clear which chat needs attention.
-agentin looks for Piper (on `PATH`, in `~/.venvs/piper/bin` or `~/.local/bin`)
-with a voice (a `.onnx` model with its `.onnx.json`, for example in `~/piper` or
-`~/.local/share/piper`), or for espeak-ng. The speech is generated when needed,
-so the repository contains no audio files. A Polish Piper voice (its file name
-starts with `pl`, such as `pl_PL-gosia-medium` from
-[piper-voices](https://huggingface.co/rhasspy/piper-voices)) speaks Polish
-sentences; other voices speak English. The voice and its pace are chosen and tried
-in **Settings → Notifications…**; a slowness above 1 (1.3 by default) speaks
-slower and usually clearer. Finished turns and waiting agents are spoken or not
-separately, so for example a finished turn can be spoken while a question plays
-its sound. Without a voice program the sound files play. A spoken
-announcement names the chat by the first words of its title, about 32
-characters. Answering the approval or question it announces, or a new request
-of the same chat, stops it at once.
+Each sound list offers speech by every Piper voice of the chosen language, such
+as "Speech, gosia", with the sentence of that event as an example: for the
+current chat, or only its beginning when no chat is open; **Play** says it. Finished
+and failed turns are spoken by default. The speech language and pace are set
+once, below the sounds; a slowness above 1 (1.3 by default) speaks slower and
+usually clearer. agentin looks for Piper (on `PATH`, in `~/.venvs/piper/bin` or
+`~/.local/bin`) with its voices (a `.onnx` model with its `.onnx.json`, for example
+in `~/piper` or `~/.local/share/piper`; the file name, such as
+`pl_PL-gosia-medium` from [piper-voices](https://huggingface.co/rhasspy/piper-voices),
+gives the language and the voice's name). espeak-ng's mechanical voice is offered
+only for a language without a Piper voice. Polish is spoken in Polish sentences,
+other languages in English ones. The speech is generated when needed, so the
+repository contains no audio files; when no voice can speak, a double click plays
+instead. A spoken announcement names the chat by the first words of its title,
+about 32 characters. Answering the approval or question it announces, or a new
+request of the same chat, stops it at once.
 
 Incoming Codex messages are processed in short batches, and streamed chat view
 updates are coalesced, allowing the interface to handle input between batches

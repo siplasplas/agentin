@@ -5,6 +5,7 @@
 #include <QObject>
 #include <QPointer>
 #include <functional>
+#include <optional>
 #include <QString>
 #include <QStringList>
 
@@ -14,13 +15,16 @@ class QTimer;
 
 // Desktop notifications and sounds for long turns and for agents that wait for the user. Sounds are
 // played by an external player (ffplay, mpv, pw-play or paplay), so WAV, MP3 and OGG work without Qt
-// Multimedia. An installed text-to-speech program can say what happened instead, such as "Codex
-// finished: fix the build"; the speech is generated when needed, so no audio files are shipped.
+// Multimedia. Instead of a sound, an event can be spoken by an installed Piper voice, or by espeak-ng
+// where no Piper voice speaks the language, such as "Codex finished: fix the build"; the speech is generated when needed,
+// so no audio files are shipped.
 class Notifier : public QObject
 {
     Q_OBJECT
 
 public:
+    enum class Event { Finished, Failed, Waiting, CompactionStarted, CompactionFinished };
+
     struct Settings
     {
         bool popups = true;
@@ -30,8 +34,7 @@ public:
         QString finishedSound;
         QString failedSound;
         QString waitingSound;
-        // Short cues when compaction starts and ends: a built-in sound (see builtInSounds()), a file, or
-        // empty for none. They play whatever the turn's length and are never spoken.
+        // Short cues when compaction starts and ends. They play whatever the turn's length.
         QString compactionStartedSound = "rising";
         QString compactionFinishedSound = "falling";
         // A waiting agent is announced after this delay, so an answer given at once stays quiet.
@@ -40,15 +43,12 @@ public:
         int waitingRepeatMinutes = 0;
         // Approval requests can stay quiet while questions and finished turns are still announced.
         bool announceApprovals = true;
-        // Finished turns, and separately waiting agents, are spoken when a voice program is found;
-        // otherwise their sounds play.
-        bool voice = true;
-        bool voiceWaiting = true;
-        // "piper" or "espeak-ng"; empty picks the first one found.
-        QString voiceEngine;
-        // Empty paths are found automatically.
+        // Each sound above is a built-in sound (see builtInSounds()), a file, speech by a voice of
+        // voiceLanguage ("speech:" and the voice's name, such as "speech:gosia"), or empty for none.
+        // A language is a code such as "pl".
+        QString voiceLanguage;
+        // Empty finds Piper automatically.
         QString piperProgram;
-        QString piperModel;
         // Piper's length scale: above 1 speaks slower, which is usually clearer.
         double speechSlowness = 1.3;
 
@@ -71,27 +71,40 @@ public:
     // Also stops the announcement of that chat's request if it is still being played.
     void waitingEnded(const QString &key);
     // A cue does not cut off an announcement that is playing.
-    void compactionChanged(bool started);
+    void compactionChanged(const QString &agent, const QString &chat, bool started);
 
     // Short sounds generated on demand, as name and label, such as "click" and "Click".
     static QList<std::pair<QString, QString>> builtInSounds();
 
     // Plays a sound file or a built-in sound even when sounds are muted, for trying it out in the settings.
     bool playSound(const QString &file);
+    // Plays a sound or speaks the event as the settings would, even when muted, for trying it out.
+    bool preview(const Settings &settings, Event event, const QString &agent, const QString &chat, const QString &sound);
     bool isPlaying() const { return !playbackProcess_.isNull(); }
     void stopPlayback();
-    // The voice program and model the settings lead to, or empty strings when none is installed.
+    // A voice of one language: a Piper model, or espeak-ng with the language as its voice.
+    struct Voice
+    {
+        QString engine;
+        QString model;
+        // The Piper speaker, such as "gosia", or "espeak-ng".
+        QString name;
+    };
     static QString findPiper(const Settings &settings);
-    static QString findPiperModel(const Settings &settings);
-    // All installed Piper voices, for choosing one.
+    // All installed Piper voices.
     static QStringList piperModels();
-    // A readable name for a Piper voice, such as "Polish — gosia (Piper, medium)" for pl_PL-gosia-medium.
-    static QString voiceLabel(const QString &modelPath);
     static QString findEspeak();
-    // "piper" or "espeak-ng" when the settings can speak, otherwise an empty string.
-    static QString voiceEngine(const Settings &settings);
-    // Says text with the settings' voice; returns false when no voice program is available.
-    bool say(const Settings &settings, const QString &text);
+    // Languages that some installed voice speaks, as codes such as "pl", and their own names.
+    static QStringList voiceLanguages(const Settings &settings);
+    static QString languageName(const QString &language);
+    // The language's Piper voices, or espeak-ng alone where it has none.
+    static QList<Voice> voices(const Settings &settings, const QString &language);
+    // The named voice of the language, or another one of it when that is not installed.
+    static std::optional<Voice> voice(const Settings &settings, const QString &language, const QString &name);
+    // What is said for the event; without a chat only its beginning, such as "Codex finished".
+    static QString spokenText(Event event, const QString &language, const QString &agent, const QString &chat);
+    // Says text with the voice; returns false when its program is not installed.
+    bool say(const Settings &settings, const Voice &voice, const QString &text);
 
 signals:
     void playbackChanged(bool playing);
@@ -106,9 +119,9 @@ private:
     void updatePlaybackState();
     void removeTemporaryFile(const QString &file);
     void announceWaiting(const QString &key);
-    enum class Event { Finished, Failed, Waiting };
-    // Speaks the event in the voice's language when a voice is set up, otherwise plays the sound file.
-    void announce(Event event, const QString &agent, const QString &chat, const QString &soundFile);
+    // Plays the event's sound or speaks it, as its setting says.
+    bool announce(const Settings &settings, Event event, const QString &agent, const QString &chat,
+                  const QString &sound);
     void popup(const QString &title, const QString &text);
 
     QPointer<QProcess> playbackProcess_;

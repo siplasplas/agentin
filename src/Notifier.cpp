@@ -12,6 +12,7 @@
 #include <QTemporaryFile>
 #include <QTimer>
 
+#include <algorithm>
 #include <cmath>
 
 namespace {
@@ -32,10 +33,23 @@ QString systemSound(const QString &path, const QString &fallback)
 {
     return QFileInfo(path).isFile() ? path : fallback;
 }
+
+// Piper voices are named <language>_<region>-<speaker>-<quality>, as pl_PL-gosia-medium.
+QString piperLanguage(const QString &model)
+{
+    return QFileInfo(model).completeBaseName().section('_', 0, 0);
+}
+
+QString piperSpeaker(const QString &model)
+{
+    return QFileInfo(model).completeBaseName().section('-', 1, 1);
+}
 }
 
 // Unset sounds default to the system's sounds where they exist: a bell when compaction starts, Yaru's
-// "complete" when it ends, and a shutter click, rather than a voice, for an agent that waits.
+// "complete" when it ends, and a shutter click for an agent that waits; finished turns are spoken.
+// Settings from before speech was chosen per sound keep what they did: "voice" spoke the turns' and
+// waiting agents' announcements with the chosen Piper model or espeak-ng.
 Notifier::Settings Notifier::Settings::fromJson(const QJsonObject &object)
 {
     Settings settings;
@@ -53,12 +67,26 @@ Notifier::Settings Notifier::Settings::fromJson(const QJsonObject &object)
     settings.waitingDelaySeconds = object.value("waitingDelaySeconds").toInt(30);
     settings.waitingRepeatMinutes = object.value("waitingRepeatMinutes").toInt(0);
     settings.announceApprovals = object.value("announceApprovals").toBool(true);
-    settings.voice = object.value("voice").toBool(true);
-    settings.voiceWaiting = object.value("voiceWaiting").toBool(waitingSound.isEmpty() && settings.voice);
-    settings.voiceEngine = object.value("voiceEngine").toString();
     settings.piperProgram = object.value("piperProgram").toString();
-    settings.piperModel = object.value("piperModel").toString();
     settings.speechSlowness = object.value("speechSlowness").toDouble(1.3);
+    settings.voiceLanguage = object.value("voiceLanguage").toString();
+    if (!object.contains("voiceLanguage")) {
+        const QString model = object.value("piperModel").toString();
+        const bool espeak = object.value("voiceEngine").toString() == "espeak-ng";
+        const QStringList languages = voiceLanguages(settings);
+        const QString system = QLocale::system().name().section('_', 0, 0);
+        settings.voiceLanguage = espeak ? QString("en")
+            : !model.isEmpty() ? piperLanguage(model)
+            : languages.contains(system) ? system : languages.value(0, "en");
+        if (object.value("voice").toBool(false)) {
+            const QString speech = "speech:" + (espeak ? QString("espeak-ng") : model.isEmpty() ? QString() : piperSpeaker(model));
+            settings.finishedSound = settings.failedSound = speech;
+            if (object.value("voiceWaiting").toBool(waitingSound.isEmpty())) settings.waitingSound = speech;
+        }
+    }
+    // Finished turns are spoken by the language's first voice unless a sound was chosen.
+    if (!object.contains("finishedSound") && !object.contains("voice")) settings.finishedSound = "speech:";
+    if (!object.contains("failedSound") && !object.contains("voice")) settings.failedSound = "speech:";
     return settings;
 }
 
@@ -68,9 +96,8 @@ QJsonObject Notifier::Settings::toJson() const
             {"finishedSound", finishedSound}, {"failedSound", failedSound}, {"waitingSound", waitingSound},
             {"compactionStartedSound", compactionStartedSound}, {"compactionFinishedSound", compactionFinishedSound},
             {"waitingDelaySeconds", waitingDelaySeconds}, {"waitingRepeatMinutes", waitingRepeatMinutes},
-            {"announceApprovals", announceApprovals},
-            {"voice", voice}, {"voiceWaiting", voiceWaiting}, {"voiceEngine", voiceEngine}, {"piperProgram", piperProgram}, {"piperModel", piperModel},
-            {"speechSlowness", speechSlowness}};
+            {"announceApprovals", announceApprovals}, {"voiceLanguage", voiceLanguage},
+            {"piperProgram", piperProgram}, {"speechSlowness", speechSlowness}};
 }
 
 Notifier::Notifier(QObject *parent)
@@ -87,7 +114,7 @@ void Notifier::turnFinished(const QString &agent, const QString &chat, bool succ
         popup(agent + (succeeded ? " finished" : " stopped with an error"), "\"" + chat + "\" after " + length);
     }
     if (!settings_.muted)
-        announce(succeeded ? Event::Finished : Event::Failed, agent, chat,
+        announce(settings_, succeeded ? Event::Finished : Event::Failed, agent, chat,
                  succeeded ? settings_.finishedSound : settings_.failedSound);
 }
 
@@ -121,27 +148,85 @@ void Notifier::announceWaiting(const QString &key)
     if (found == waiting_.constEnd()) return;
     if (settings_.popups) popup(found->agent + " is waiting for you", "\"" + found->chat + "\": " + found->request);
     if (!settings_.muted) {
-        announce(Event::Waiting, found->agent, found->chat, settings_.waitingSound);
+        announce(settings_, Event::Waiting, found->agent, found->chat, settings_.waitingSound);
         if (isPlaying()) announcedWaitingKey_ = key;
     }
     if (settings_.waitingRepeatMinutes > 0) found->timer->start(settings_.waitingRepeatMinutes * 60 * 1000);
 }
 
-// The sentence follows the language of the Piper voice (its file name starts with it, as in
-// pl_PL-gosia-medium); espeak-ng and other voices speak English.
-void Notifier::announce(Event event, const QString &agent, const QString &chat, const QString &soundFile)
+// Speech that cannot be produced, because no voice is installed, falls back to a double click.
+bool Notifier::announce(const Settings &settings, Event event, const QString &agent, const QString &chat,
+                        const QString &sound)
 {
-    if (event == Event::Waiting ? settings_.voiceWaiting : settings_.voice) {
-        const bool polish = voiceEngine(settings_) == "piper" && QFileInfo(findPiperModel(settings_)).fileName().startsWith("pl");
-        QString sentence;
-        switch (event) {
-        case Event::Finished: sentence = polish ? "%1 skończył: %2" : "%1 finished: %2"; break;
-        case Event::Failed: sentence = polish ? "%1 zakończył się błędem: %2" : "%1 stopped with an error: %2"; break;
-        case Event::Waiting: sentence = polish ? "%1 czeka na ciebie: %2" : "%1 is waiting for you: %2"; break;
-        }
-        if (say(settings_, sentence.arg(agent, spokenTitle(chat)))) return;
+    if (!sound.startsWith("speech:")) return playSound(sound);
+    const std::optional<Voice> chosen = voice(settings, settings.voiceLanguage, sound.mid(7));
+    if (chosen && say(settings, *chosen, spokenText(event, settings.voiceLanguage, agent, chat))) return true;
+    return playSound("double-click");
+}
+
+bool Notifier::preview(const Settings &settings, Event event, const QString &agent, const QString &chat,
+                       const QString &sound)
+{
+    announcedWaitingKey_.clear();
+    return announce(settings, event, agent, chat, sound);
+}
+
+// Polish voices speak Polish sentences; the others speak English ones.
+QString Notifier::spokenText(Event event, const QString &language, const QString &agent, const QString &chat)
+{
+    const bool polish = language == "pl";
+    QString sentence;
+    switch (event) {
+    case Event::Finished: sentence = polish ? "%1 skończył" : "%1 finished"; break;
+    case Event::Failed: sentence = polish ? "%1 zakończył się błędem" : "%1 stopped with an error"; break;
+    case Event::Waiting: sentence = polish ? "%1 czeka na ciebie" : "%1 is waiting for you"; break;
+    case Event::CompactionStarted: sentence = polish ? "%1 kompaktuje" : "%1 is compacting"; break;
+    case Event::CompactionFinished: sentence = polish ? "%1 skończył kompaktowanie" : "%1 finished compacting"; break;
     }
-    playSound(soundFile);
+    sentence = sentence.arg(agent);
+    return chat.trimmed().isEmpty() ? sentence : sentence + ": " + spokenTitle(chat);
+}
+
+QStringList Notifier::voiceLanguages(const Settings &settings)
+{
+    QStringList languages;
+    if (!findPiper(settings).isEmpty())
+        for (const QString &model : piperModels()) languages.append(piperLanguage(model));
+    // espeak-ng speaks many languages; these are the ones the announcements are written in.
+    if (!findEspeak().isEmpty()) languages << "en" << "pl";
+    languages.removeDuplicates();
+    languages.sort();
+    return languages;
+}
+
+QString Notifier::languageName(const QString &language)
+{
+    const QLocale locale(language);
+    return locale.language() == QLocale::C ? language : QLocale::languageToString(locale.language());
+}
+
+QList<Notifier::Voice> Notifier::voices(const Settings &settings, const QString &language)
+{
+    QList<Voice> result;
+    if (!findPiper(settings).isEmpty()) {
+        for (const QString &model : piperModels()) {
+            const QString speaker = piperSpeaker(model);
+            if (piperLanguage(model) != language || speaker.isEmpty()) continue;
+            if (std::none_of(result.cbegin(), result.cend(), [&speaker](const Voice &voice) { return voice.name == speaker; }))
+                result.append({"piper", model, speaker});
+        }
+    }
+    if (result.isEmpty() && !findEspeak().isEmpty()) result.append({"espeak-ng", language, "espeak-ng"});
+    return result;
+}
+
+std::optional<Notifier::Voice> Notifier::voice(const Settings &settings, const QString &language, const QString &name)
+{
+    const QList<Voice> available = voices(settings, language);
+    for (const Voice &candidate : available)
+        if (candidate.name == name) return candidate;
+    if (available.isEmpty()) return std::nullopt;
+    return available.first();
 }
 
 QString Notifier::findPiper(const Settings &settings)
@@ -152,12 +237,6 @@ QString Notifier::findPiper(const Settings &settings)
     // pip installs Piper into a virtual environment, which is often not on PATH.
     return QStandardPaths::findExecutable("piper", {QDir::home().filePath(".venvs/piper/bin"), QDir::home().filePath(".local/bin"),
                                                      QDir::home().filePath("piper"), QDir::home().filePath(".local/share/piper/bin")});
-}
-
-QString Notifier::findPiperModel(const Settings &settings)
-{
-    if (!settings.piperModel.isEmpty()) return QFileInfo(settings.piperModel).isFile() ? settings.piperModel : QString();
-    return piperModels().value(0);
 }
 
 // A Piper voice is a model.onnx file with its model.onnx.json next to it.
@@ -177,31 +256,10 @@ QStringList Notifier::piperModels()
     return models;
 }
 
-// Piper voices are named <language>_<region>-<speaker>-<quality>.
-QString Notifier::voiceLabel(const QString &modelPath)
-{
-    const QString name = QFileInfo(modelPath).completeBaseName();
-    const QStringList parts = name.split('-');
-    const QLocale locale(parts.value(0));
-    if (parts.size() < 2 || locale.language() == QLocale::C) return "Piper: " + name;
-    QStringList details{"Piper"};
-    if (parts.size() > 2) details.append(parts.mid(2).join('-'));
-    return QLocale::languageToString(locale.language()) + " — " + parts.at(1) + " (" + details.join(", ") + ")";
-}
-
 QString Notifier::findEspeak()
 {
     const QString espeakNg = QStandardPaths::findExecutable("espeak-ng");
     return espeakNg.isEmpty() ? QStandardPaths::findExecutable("espeak") : espeakNg;
-}
-
-QString Notifier::voiceEngine(const Settings &settings)
-{
-    const bool piper = !findPiper(settings).isEmpty() && !findPiperModel(settings).isEmpty();
-    const bool espeak = !findEspeak().isEmpty();
-    if (settings.voiceEngine == "piper") return piper ? "piper" : QString();
-    if (settings.voiceEngine == "espeak-ng") return espeak ? "espeak-ng" : QString();
-    return piper ? "piper" : (espeak ? "espeak-ng" : QString());
 }
 
 Notifier::~Notifier()
@@ -272,22 +330,22 @@ void Notifier::removeTemporaryFile(const QString &file)
 }
 
 // Piper writes the speech to a temporary WAV file, which a sound player then plays.
-bool Notifier::say(const Settings &settings, const QString &text)
+bool Notifier::say(const Settings &settings, const Voice &voice, const QString &text)
 {
     announcedWaitingKey_.clear();
-    const QString engine = voiceEngine(settings);
     // espeak-ng speaks 175 words per minute by default; the slowness lowers that the same way.
-    if (engine == "espeak-ng") {
-        startPlaybackProcess(findEspeak(), {"-s", QString::number(qRound(175 / qMax(0.5, settings.speechSlowness))), text});
+    if (voice.engine == "espeak-ng") {
+        if (findEspeak().isEmpty()) return false;
+        startPlaybackProcess(findEspeak(), {"-v", voice.model, "-s", QString::number(qRound(175 / qMax(0.5, settings.speechSlowness))), text});
         return true;
     }
-    if (engine != "piper") return false;
+    if (voice.engine != "piper" || findPiper(settings).isEmpty()) return false;
     static int counter = 0;
     const QString output = QDir(QDir::tempPath()).filePath(QString("agentin-voice-%1-%2.wav")
                                                                  .arg(QCoreApplication::applicationPid()).arg(++counter));
     temporaryFiles_.append(output);
     QProcess *piper = startPlaybackProcess(findPiper(settings),
-        {"--model", findPiperModel(settings), "--length_scale", QString::number(settings.speechSlowness),
+        {"--model", voice.model, "--length_scale", QString::number(settings.speechSlowness),
          "--sentence_silence", "0.3", "--output_file", output},
         [this, output](bool success) {
             if (!success || !playSoundFile(output, true)) removeTemporaryFile(output);
@@ -303,10 +361,11 @@ bool Notifier::playSound(const QString &file)
     return playSoundOrBuiltIn(file);
 }
 
-void Notifier::compactionChanged(bool started)
+void Notifier::compactionChanged(const QString &agent, const QString &chat, bool started)
 {
     if (settings_.muted || isPlaying()) return;
-    playSoundOrBuiltIn(started ? settings_.compactionStartedSound : settings_.compactionFinishedSound);
+    announce(settings_, started ? Event::CompactionStarted : Event::CompactionFinished, agent, chat,
+             started ? settings_.compactionStartedSound : settings_.compactionFinishedSound);
 }
 
 QList<std::pair<QString, QString>> Notifier::builtInSounds()
