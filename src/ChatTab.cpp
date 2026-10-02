@@ -496,6 +496,7 @@ void ChatTab::setAgent(AgentBackend *agent)
         } else if (!resumed && live_) {
             id_ = id;
         }
+        if (id == id_ && !id_.isEmpty()) emit conversationOpened(id_);
         emit changed();
     });
     connect(agent, &AgentBackend::conversationOpenFailed, this, [this](const QString &id, const QString &reason) {

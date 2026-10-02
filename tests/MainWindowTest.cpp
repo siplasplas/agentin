@@ -222,11 +222,12 @@ for line in sys.stdin:
     auto *tab = tabs->currentWidget()->findChild<ChatTab *>();
     QVERIFY(fast && tab);
     QTRY_VERIFY(tab->isLive());
-    QVERIFY(!fast->isChecked());
+    // The chat had Fast on when the window closed, and keeps it.
+    QTRY_VERIFY(fast->isChecked());
     QSignalSpy finished(tab->agent(), &AgentBackend::turnCompleted);
-    QVERIFY(tab->send("Restored standard speed"));
+    QVERIFY(tab->send("Restored fast speed"));
     QTRY_COMPARE(finished.size(), 1);
-    QCOMPARE(readTier(), QString("default"));
+    QCOMPARE(readTier(), QString("fast"));
 }
 
 void MainWindowTest::codexReasoningAndQuestions()

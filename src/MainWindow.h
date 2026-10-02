@@ -105,6 +105,7 @@ private:
     void updateStatus();
     void showChangesWindow();
     void showOpenWithDialog();
+    void rememberFast(const QString &conversationId, bool fast);
     void updateOperationTime();
     void updateModelControls();
     void updateUsage();
@@ -193,6 +194,8 @@ private:
     bool experimentalAgents_ = false;
     // Which program opens changed files, by file name pattern.
     QList<OpenRule> openRules_;
+    // Conversations whose Fast mode was last switched on, so that it is on again when they reopen.
+    QStringList fastChats_;
     bool sessionEnabled_ = false;
     // Restored Codex chats that continue once the App Server is connected.
     QList<QPointer<QWidget>> continueWhenConnected_;

@@ -246,7 +246,7 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     fastInput_ = new QCheckBox("Fast", this);
     fastInput_->setObjectName("fastToggle");
     fastInput_->setToolTip("Faster model responses with higher usage of limits, where supported. "
-                           "Applies from the next turn; always off after restarting the application.");
+                           "Applies from the next turn; each chat remembers it, also after a restart.");
     readOnlyInput_ = new QCheckBox("Read-only", this);
     readOnlyInput_->setObjectName("readOnlyToggle");
     for (QComboBox *combo : {modelInput_, effortInput_}) {
@@ -528,7 +528,11 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     connect(modelInput_, QOverload<int>::of(&QComboBox::activated), this, &MainWindow::chooseModel);
     connect(effortInput_, QOverload<int>::of(&QComboBox::activated), this, &MainWindow::chooseModel);
     connect(fastInput_, &QCheckBox::toggled, this, [this](bool checked) {
-        if (ChatTab *tab = currentTab()) tab->agent()->setFastMode(checked);
+        ChatTab *tab = currentTab();
+        if (!tab) return;
+        tab->agent()->setFastMode(checked);
+        // A new chat has no ID yet; its choice is remembered once its conversation opens.
+        if (!tab->conversationId().isEmpty()) rememberFast(tab->conversationId(), checked);
     });
     connect(readOnlyInput_, &QCheckBox::clicked, this, [this](bool checked) {
         if (ChatTab *tab = currentTab()) tab->agent()->setReadOnly(checked);
@@ -942,6 +946,9 @@ void MainWindow::loadSettings()
     undoAfterSend_ = settings.value("undoAfterSend").toBool(true);
     experimentalAgents_ = settings.value("experimentalAgents").toBool(false);
     openRules_ = FileOpener::rulesFromJson(settings.value("openWith").toArray());
+    fastChats_.clear();
+    for (const QJsonValue &value : settings.value("fastChats").toArray())
+        if (!value.toString().isEmpty()) fastChats_.append(value.toString());
     const QJsonObject tree = settings.value("conversationTree").toObject();
     treeByDirectory_ = tree.value("groupBy").toString() == "directory";
     chatsByModified_ = tree.value("chatOrder").toString() != "created";
@@ -1017,6 +1024,7 @@ void MainWindow::saveSettings()
                                                          {"undoAfterSend", undoAfterSend_},
                                                          {"experimentalAgents", experimentalAgents_},
                                                          {"openWith", FileOpener::rulesToJson(openRules_)},
+                                                         {"fastChats", QJsonArray::fromStringList(fastChats_)},
                                                          {"conversationTree", QJsonObject{
                                                              {"groupBy", treeByDirectory_ ? "directory" : "agent"},
                                                              {"chatOrder", chatsByModified_ ? "modified" : "created"},
@@ -1729,6 +1737,13 @@ QWidget *MainWindow::addChatTab(AgentProvider *selected, const QString &workingD
     tab->setTurnLocks(turnLocks_);
     tab->document()->setDefaultFont(chatView_->font());
     tab->reasoningDocument()->setDefaultFont(chatView_->font());
+    connect(tab, &ChatTab::conversationOpened, this, [this, tab](const QString &id) {
+        AgentBackend *agent = tab->agent();
+        if (!agent->supportsFastMode()) return;
+        if (fastChats_.contains(id)) agent->setFastMode(true);
+        else if (agent->isFastMode()) rememberFast(id, true);
+        if (currentTab() == tab) updateModelControls();
+    });
     connect(tab, &ChatTab::logMessage, this, &MainWindow::appendLine);
     connect(tab, &ChatTab::steeringFailed, this, [this, tab](const QString &text) {
         if (currentTab() == tab && input_->toPlainText().isEmpty()) input_->replaceText(text);
@@ -1923,6 +1938,16 @@ void MainWindow::showOpenWithDialog()
         rules.append({patterns, chosen ? choice->currentData().toString() : choice->currentText().trimmed()});
     }
     openRules_ = rules.isEmpty() ? FileOpener::defaultRules() : rules;
+    saveSettings();
+}
+
+// The list keeps the latest choices and is bounded, so it cannot grow without end.
+void MainWindow::rememberFast(const QString &conversationId, bool fast)
+{
+    if (fastChats_.contains(conversationId) == fast) return;
+    fastChats_.removeAll(conversationId);
+    if (fast) fastChats_.append(conversationId);
+    while (fastChats_.size() > 500) fastChats_.removeFirst();
     saveSettings();
 }
 

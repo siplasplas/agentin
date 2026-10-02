@@ -310,8 +310,9 @@ without being appended a second time. Older messages remain available through
 
 In a Codex chat, **Fast** after the **Compact** token counter requests faster model responses
 with higher limit usage, where supported. It applies from the next turn and is
-kept separately for each open chat. It is always off after restarting agentin,
-including restored conversations; the setting is not saved in Codex configuration.
+kept separately for each chat. Each conversation remembers its latest choice,
+also after restarting agentin, for restored tabs and chats continued from the
+tree; it is saved in agentin's settings, not in Codex configuration.
 
 Your messages in the chat (from a line starting with `You: ` or `You (…): `, up to
 the agent's answer or the next bracketed entry) have a yellow background across

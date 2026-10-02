@@ -108,6 +108,8 @@ signals:
     void turnEnded(bool succeeded, qint64 durationMs);
     void requestsChanged();
     void steeringFailed(const QString &text);
+    // The chat's conversation is open with this ID, started here or resumed.
+    void conversationOpened(const QString &id);
 
 private:
     void setAgent(AgentBackend *agent);
