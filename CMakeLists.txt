@@ -72,6 +72,8 @@ add_executable(agentin
     src/ChangeTracker.h
     src/ChangesWindow.cpp
     src/ChangesWindow.h
+    src/FileOpener.cpp
+    src/FileOpener.h
 )
 target_link_libraries(agentin PRIVATE Qt6::Widgets qt-extra Backward::Object diffcore::diffcore PkgConfig::LIBGIT2)
 target_include_directories(agentin PRIVATE src)
@@ -137,6 +139,8 @@ if(BUILD_TESTING)
         src/ChangeTracker.h
         src/ChangesWindow.cpp
         src/ChangesWindow.h
+        src/FileOpener.cpp
+        src/FileOpener.h
     )
     target_link_libraries(agentin_test PRIVATE Qt6::Widgets Qt6::Test qt-extra diffcore::diffcore PkgConfig::LIBGIT2)
     target_include_directories(agentin_test PRIVATE src)

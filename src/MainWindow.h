@@ -1,5 +1,7 @@
 #pragma once
 
+#include "FileOpener.h"
+
 #include <QHash>
 #include <QJsonObject>
 #include <QList>
@@ -102,6 +104,7 @@ private:
     void appendLine(const QString &text);
     void updateStatus();
     void showChangesWindow();
+    void showOpenWithDialog();
     void updateOperationTime();
     void updateModelControls();
     void updateUsage();
@@ -188,6 +191,8 @@ private:
     // Ctrl+Z in the message field can bring back the message just sent.
     bool undoAfterSend_ = true;
     bool experimentalAgents_ = false;
+    // Which program opens changed files, by file name pattern.
+    QList<OpenRule> openRules_;
     bool sessionEnabled_ = false;
     // Restored Codex chats that continue once the App Server is connected.
     QList<QPointer<QWidget>> continueWhenConnected_;

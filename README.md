@@ -272,8 +272,17 @@ the arrow buttons (or Alt+Up and Alt+Down) move between changes. The list starts
 from the latest turn; it can also show the changes since the chat's first turn,
 or against `HEAD` as Git sees them, including changes made before the chat. New,
 binary, too large and largely rewritten files get a note instead of a diff. Double-click or
-Enter opens a file with the application the system associates with its type;
-the context menu also opens its folder or copies its path.
+Enter opens a file; the context menu also opens its folder or copies its path.
+
+**Settings → Open files with…** decides which program opens a changed file, by
+file name pattern; the first matching rule wins. The rules start with the
+system's choice for each group of file types (C and C++ with CMake, Rust with
+`Cargo.toml`, Python, Markdown, configuration files, and everything else), and
+the dialog lists the IDEs and editors found on the computer: IDEs installed by
+JetBrains Toolbox and JetBrains IDEs, VS Code, Kate, KWrite and gedit in `PATH`.
+Any of them can be chosen for a rule, or a command typed, using `%f` for the file
+and `%l` for its first changed line. A JetBrains IDE opens the file at that line
+in the instance that is already running instead of starting another.
 
 The chat header shows elapsed operation time as `mm:ss`: **Task** while an agent
 works and **Compact** during manual or automatic Codex compaction. The counter

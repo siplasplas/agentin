@@ -57,6 +57,8 @@
 #include <QStandardPaths>
 #include <QTextCursor>
 #include <QTextDocument>
+#include <QTableWidget>
+#include <QHeaderView>
 #include <QTreeWidget>
 #include <QTreeWidgetItemIterator>
 #include <QVBoxLayout>
@@ -168,6 +170,9 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     });
     auto *notificationsAction = settingsMenu->addAction("Notifications…");
     connect(notificationsAction, &QAction::triggered, this, &MainWindow::showNotificationsDialog);
+    auto *openWithAction = settingsMenu->addAction("Open files with…");
+    openWithAction->setObjectName("openWith");
+    connect(openWithAction, &QAction::triggered, this, &MainWindow::showOpenWithDialog);
     auto *approvalsAction = settingsMenu->addAction("Approvals…");
     connect(approvalsAction, &QAction::triggered, this, &MainWindow::showApprovalsDialog);
 
@@ -907,6 +912,7 @@ void MainWindow::loadSettings()
     input_->setShortMessageLength(settings.value("enterSendsUpTo").toInt(60));
     undoAfterSend_ = settings.value("undoAfterSend").toBool(true);
     experimentalAgents_ = settings.value("experimentalAgents").toBool(false);
+    openRules_ = FileOpener::rulesFromJson(settings.value("openWith").toArray());
     const QJsonObject tree = settings.value("conversationTree").toObject();
     treeByDirectory_ = tree.value("groupBy").toString() == "directory";
     chatsByModified_ = tree.value("chatOrder").toString() != "created";
@@ -981,6 +987,7 @@ void MainWindow::saveSettings()
                                                          {"enterSendsUpTo", input_->shortMessageLength()},
                                                          {"undoAfterSend", undoAfterSend_},
                                                          {"experimentalAgents", experimentalAgents_},
+                                                         {"openWith", FileOpener::rulesToJson(openRules_)},
                                                          {"conversationTree", QJsonObject{
                                                              {"groupBy", treeByDirectory_ ? "directory" : "agent"},
                                                              {"chatOrder", chatsByModified_ ? "modified" : "created"},
@@ -1809,6 +1816,87 @@ void MainWindow::updateOperationTime()
     operationTime_->setText(tab ? tab->operationTimeText() : "Time 00:00");
 }
 
+// Rules are tried from the top; each chooses the system's application, a detected one, or a typed command.
+void MainWindow::showOpenWithDialog()
+{
+    QDialog dialog(this);
+    dialog.setWindowTitle("Open files with");
+    dialog.resize(760, 420);
+    auto *layout = new QVBoxLayout(&dialog);
+    const QList<DetectedApplication> detected = FileOpener::detectApplications();
+    QStringList found;
+    for (const DetectedApplication &application : detected) found.append(application.name + " (" + application.source + ")");
+    auto *info = new QLabel(&dialog);
+    info->setWordWrap(true);
+    info->setText((found.isEmpty() ? QString("No IDE or editor besides the system's choices was found.")
+                                   : "Found: " + found.join(", ") + ". Choose one for a file type, or keep the system's choice.")
+                  + " The first rule whose pattern matches a file's name decides. A typed command may use %f for "
+                    "the file and %l for the first changed line; JetBrains IDEs open the file in a running instance.");
+    layout->addWidget(info);
+    auto *table = new QTableWidget(0, 2, &dialog);
+    table->setObjectName("openWithRules");
+    table->setHorizontalHeaderLabels({"File names", "Open with"});
+    table->horizontalHeader()->setSectionResizeMode(0, QHeaderView::Stretch);
+    table->horizontalHeader()->setSectionResizeMode(1, QHeaderView::Stretch);
+    table->verticalHeader()->hide();
+    const auto addRow = [table, &detected](const OpenRule &rule) {
+        const int row = table->rowCount();
+        table->insertRow(row);
+        table->setItem(row, 0, new QTableWidgetItem(rule.patterns));
+        auto *choice = new QComboBox(table);
+        choice->setEditable(true);
+        // The system's application is named after the first pattern, such as Vim for "*.cpp".
+        QString sample = rule.patterns.section(' ', 0, 0);
+        sample.replace('*', "file");
+        const QString system = FileOpener::systemApplication(sample);
+        choice->addItem(system.isEmpty() ? QString("System default") : "System default (" + system + ")", QString());
+        for (const DetectedApplication &application : detected)
+            choice->addItem(application.name + " — " + application.source, application.command);
+        const int index = choice->findData(rule.command);
+        if (index >= 0) choice->setCurrentIndex(index);
+        else choice->setEditText(rule.command);
+        table->setCellWidget(row, 1, choice);
+    };
+    for (const OpenRule &rule : openRules_) addRow(rule);
+    layout->addWidget(table, 1);
+    auto *rowButtons = new QHBoxLayout;
+    auto *add = new QPushButton("Add rule", &dialog);
+    auto *remove = new QPushButton("Remove rule", &dialog);
+    auto *reset = new QPushButton("Reset to the system's choices", &dialog);
+    rowButtons->addWidget(add);
+    rowButtons->addWidget(remove);
+    rowButtons->addWidget(reset);
+    rowButtons->addStretch(1);
+    layout->addLayout(rowButtons);
+    connect(add, &QPushButton::clicked, &dialog, [table, addRow] {
+        addRow({"*.ext", {}});
+        table->editItem(table->item(table->rowCount() - 1, 0));
+    });
+    connect(remove, &QPushButton::clicked, &dialog, [table] {
+        if (table->currentRow() >= 0) table->removeRow(table->currentRow());
+    });
+    connect(reset, &QPushButton::clicked, &dialog, [table, addRow] {
+        table->setRowCount(0);
+        for (const OpenRule &rule : FileOpener::defaultRules()) addRow(rule);
+    });
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    layout->addWidget(buttons);
+    if (dialog.exec() != QDialog::Accepted) return;
+    QList<OpenRule> rules;
+    for (int row = 0; row < table->rowCount(); ++row) {
+        const QString patterns = table->item(row, 0) ? table->item(row, 0)->text().simplified() : QString();
+        auto *choice = qobject_cast<QComboBox *>(table->cellWidget(row, 1));
+        if (patterns.isEmpty() || !choice) continue;
+        // A chosen entry keeps its command; edited text is a command of its own.
+        const bool chosen = choice->currentIndex() >= 0 && choice->currentText() == choice->itemText(choice->currentIndex());
+        rules.append({patterns, chosen ? choice->currentData().toString() : choice->currentText().trimmed()});
+    }
+    openRules_ = rules.isEmpty() ? FileOpener::defaultRules() : rules;
+    saveSettings();
+}
+
 // One window per chat; opening it again raises it.
 void MainWindow::showChangesWindow()
 {
@@ -1819,7 +1907,12 @@ void MainWindow::showChangesWindow()
     for (ChangesWindow *open : findChildren<ChangesWindow *>(QString(), Qt::FindDirectChildrenOnly))
         if (open->tracker() == tracker) window = open;
     // The window closes itself when the chat's tracker goes with its tab.
-    if (!window) window = new ChangesWindow(tracker, tab->provider()->name() + ": " + tab->title().left(60), this);
+    if (!window) {
+        window = new ChangesWindow(tracker, tab->provider()->name() + ": " + tab->title().left(60), this);
+        window->setOpener([this](const QString &path, int line) {
+            if (!FileOpener::open(path, line, openRules_)) appendLine("[Could not open " + QDir::toNativeSeparators(path) + "]");
+        });
+    }
     window->show();
     window->raise();
     window->activateWindow();

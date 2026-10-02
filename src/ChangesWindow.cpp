@@ -475,9 +475,21 @@ bool ChangesWindow::eventFilter(QObject *object, QEvent *event)
 void ChangesWindow::openFile(QTreeWidgetItem *item) const
 {
     if (!item || !tracker_) return;
-    const QStringList parts = item->data(1, Qt::UserRole).toString().split('\n');
+    const QString itemKey = item->data(1, Qt::UserRole).toString();
+    const QStringList parts = itemKey.split('\n');
     const QString path = QDir(parts.value(0)).filePath(parts.value(1));
-    if (QFileInfo(path).isFile()) QDesktopServices::openUrl(QUrl::fromLocalFile(path));
+    if (!QFileInfo(path).isFile()) return;
+    // The shown diff gives the first changed line of the file, where an editor can open it.
+    int line = 1;
+    if (diff_ && diff_->root + '\n' + diff_->path == itemKey) {
+        for (const diffcore::Hunk &hunk : diff_->hunks) {
+            if (hunk.type == diffcore::ChangeType::Equal) continue;
+            line = hunk.rightRange.start + 1;
+            break;
+        }
+    }
+    if (opener_) opener_(path, line);
+    else QDesktopServices::openUrl(QUrl::fromLocalFile(path));
 }
 
 void ChangesWindow::showMenu(const QPoint &position)

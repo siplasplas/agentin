@@ -6,6 +6,7 @@
 #include <QSet>
 #include <QWidget>
 
+#include <functional>
 #include <optional>
 
 class QComboBox;
@@ -26,6 +27,8 @@ class ChangesWindow : public QWidget
 public:
     ChangesWindow(ChangeTracker *tracker, const QString &title, QWidget *parent = nullptr);
     ChangeTracker *tracker() const { return tracker_; }
+    // Opens a file at a line; without it the system opens the file.
+    void setOpener(std::function<void(const QString &path, int line)> opener) { opener_ = std::move(opener); }
 
 protected:
     bool eventFilter(QObject *object, QEvent *event) override;
@@ -55,6 +58,7 @@ private:
     std::optional<FileChange> selectedChange() const;
 
     QPointer<ChangeTracker> tracker_;
+    std::function<void(const QString &path, int line)> opener_;
     QLabel *summary_;
     QComboBox *since_;
     QTreeWidget *list_;
