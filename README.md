@@ -414,9 +414,27 @@ gives the language and the voice's name). espeak-ng's mechanical voice is offere
 only for a language without a Piper voice. Polish is spoken in Polish sentences,
 other languages in English ones. The speech is generated when needed, so the
 repository contains no audio files; when no voice can speak, a double click plays
-instead. Sounds and speech start after 0.4 s of silence, so that an audio output
-waking up from idle does not cut off a short sound or the agent's name: ffplay
-and mpv delay sound files, and pw-play and paplay play a short silence before them. A spoken announcement names the chat by the first words of its title,
+instead. Sounds and speech start after a short silence, so that an audio output
+waking up does not cut off a short sound or the agent's name: ffplay and mpv delay
+sound files, and pw-play and paplay play the silence before them. It is 0.4 s, or
+1.5 s when `pactl` reports the default output as suspended, since an idle output,
+HDMI above all, can take over a second to wake up.
+
+When short sounds are still cut off, or the delay is unwelcome, it can be worth
+keeping the output awake. With PipeWire, a WirePlumber rule does that, for example
+for HDMI outputs in `~/.config/wireplumber/wireplumber.conf.d/51-no-suspend.conf`:
+
+```
+monitor.alsa.rules = [
+  {
+    matches = [ { node.name = "~alsa_output.*hdmi.*" } ]
+    actions = { update-props = { session.suspend-timeout-seconds = 0 } }
+  }
+]
+```
+
+followed by `systemctl --user restart wireplumber`; agentin then finds the output
+awake and waits only 0.4 s. A spoken announcement names the chat by the first words of its title,
 about 32 characters. Answering the approval or question it announces, or a new
 request of the same chat, stops it at once.
 

@@ -16,8 +16,33 @@
 #include <cmath>
 
 namespace {
-// Silence before every sound and speech, while an idle audio output wakes up.
+// Silence before every sound and speech, while the audio output wakes up: an output that PipeWire or
+// PulseAudio suspended when idle, HDMI above all, can take over a second, an active one hardly any time.
 constexpr int kLeadingSilenceMs = 400;
+constexpr int kSuspendedSilenceMs = 1500;
+
+int leadingSilenceMs()
+{
+    const auto run = [](const QStringList &arguments) {
+        QProcess pactl;
+        pactl.start("pactl", arguments);
+        if (!pactl.waitForFinished(300)) {
+            pactl.kill();
+            pactl.waitForFinished(100);
+            return QString();
+        }
+        return QString::fromUtf8(pactl.readAllStandardOutput());
+    };
+    if (QStandardPaths::findExecutable("pactl").isEmpty()) return kLeadingSilenceMs;
+    const QString sink = run({"get-default-sink"}).trimmed();
+    // Lines are: index, name, driver, sample format, state.
+    for (const QString &line : run({"list", "sinks", "short"}).split('\n')) {
+        const QStringList fields = line.split('\t');
+        if (fields.size() >= 5 && fields.at(1) == sink)
+            return fields.at(4).trimmed() == "SUSPENDED" ? kSuspendedSilenceMs : kLeadingSilenceMs;
+    }
+    return kLeadingSilenceMs;
+}
 constexpr int kSampleRate = 44100;
 
 // Long chat titles are cut at a word so that a spoken announcement stays short.
@@ -346,7 +371,7 @@ bool Notifier::say(const Settings &settings, const Voice &voice, const QString &
     // The speech is written to a WAV file and played with a short silence before it: an audio output that
     // was idle wakes up during its first moments, which would cut off the agent's name.
     const auto play = [this, output](bool success) {
-        if (success) addLeadingSilence(output, kLeadingSilenceMs);
+        if (success) addLeadingSilence(output, leadingSilenceMs());
         if (!success || !playSoundFile(output, true)) removeTemporaryFile(output);
     };
     if (espeak) {
@@ -457,7 +482,7 @@ bool Notifier::playSoundOrBuiltIn(const QString &sound)
     if (samples.isEmpty()) return playSoundFile(sound, false);
     const QString file = writeTemporaryWav(samples);
     if (file.isEmpty()) return false;
-    addLeadingSilence(file, kLeadingSilenceMs);
+    addLeadingSilence(file, leadingSilenceMs());
     if (!playSoundFile(file, true)) {
         QFile::remove(file);
         return false;
@@ -493,13 +518,15 @@ QString Notifier::writeTemporaryWav(const QList<qint16> &samples)
 }
 
 // An audio output that was idle wakes up during the first moments of playback, which would cut off the
-// start of a short sound. Generated files (built-in sounds and speech) begin with silence. Other files are
+// start of a short sound, so every sound begins after leadingSilenceMs(). Generated files (built-in sounds
+// and speech) begin with that silence. Other files are
 // delayed by ffplay or mpv; pw-play and paplay, which cannot delay them, first play a file of silence and
 // then the sound, while the output, woken by the silence, is still awake.
 bool Notifier::playSoundFile(const QString &file, bool temporary)
 {
     if (file.isEmpty() || !QFileInfo(file).isFile()) return false;
-    const QString delay = QString("adelay=%1:all=1").arg(kLeadingSilenceMs);
+    const int silence = temporary ? 0 : leadingSilenceMs();
+    const QString delay = QString("adelay=%1:all=1").arg(silence);
     const QList<QStringList> players{
         temporary ? QStringList{"ffplay", "-nodisp", "-autoexit", "-loglevel", "quiet"}
                   : QStringList{"ffplay", "-nodisp", "-autoexit", "-loglevel", "quiet", "-af", delay},
@@ -511,18 +538,19 @@ bool Notifier::playSoundFile(const QString &file, bool temporary)
         const QString program = QStandardPaths::findExecutable(player.first());
         if (program.isEmpty()) continue;
         const QStringList options = player.mid(1);
-        const QString silence = temporary || player.first() == "ffplay" || player.first() == "mpv"
-            ? QString() : writeTemporaryWav(QList<qint16>(kSampleRate * kLeadingSilenceMs / 1000, 0));
-        if (silence.isEmpty()) {
+        const QString silenceFile = temporary || player.first() == "ffplay" || player.first() == "mpv"
+            ? QString() : writeTemporaryWav(QList<qint16>(kSampleRate * silence / 1000, 0));
+        if (silenceFile.isEmpty()) {
             startPlaybackProcess(program, options + QStringList{file}, [this, file, temporary](bool) {
                 if (temporary) removeTemporaryFile(file);
             });
             return true;
         }
-        temporaryFiles_.append(silence);
+        temporaryFiles_.append(silenceFile);
         // Stopping the silence also cancels the sound.
-        startPlaybackProcess(program, options + QStringList{silence}, [this, program, options, file, silence](bool completed) {
-            removeTemporaryFile(silence);
+        startPlaybackProcess(program, options + QStringList{silenceFile},
+                             [this, program, options, file, silenceFile](bool completed) {
+            removeTemporaryFile(silenceFile);
             if (completed) startPlaybackProcess(program, options + QStringList{file});
         });
         return true;
