@@ -1635,14 +1635,17 @@ QWidget *MainWindow::addChatTab(AgentProvider *selected, const QString &workingD
     tab->setTurnLocks(turnLocks_);
     tab->document()->setDefaultFont(chatView_->font());
     tab->reasoningDocument()->setDefaultFont(chatView_->font());
-    connect(tab->reasoningDocument(), &QTextDocument::contentsChanged, this, [this, tab] {
-        if (reasoning_->document() != tab->reasoningDocument()) return;
+    // Queued: moving the view's cursor while the document is still being edited, for example inside
+    // QTextDocument::clear(), frees a cursor the document then uses and corrupts the heap.
+    const QPointer<QTextDocument> reasoningDocument = tab->reasoningDocument();
+    connect(tab->reasoningDocument(), &QTextDocument::contentsChanged, this, [this, reasoningDocument] {
+        if (!reasoningDocument || reasoning_->document() != reasoningDocument) return;
         auto *scroll = reasoning_->verticalScrollBar();
         if (scroll->value() >= scroll->maximum() - reasoning_->fontMetrics().height() * 2) {
             reasoning_->moveCursor(QTextCursor::End);
             reasoning_->ensureCursorVisible();
         }
-    });
+    }, Qt::QueuedConnection);
     connect(tab, &ChatTab::logMessage, this, &MainWindow::appendLine);
     connect(tab, &ChatTab::steeringFailed, this, [this, tab](const QString &text) {
         if (currentTab() == tab && input_->toPlainText().isEmpty()) input_->replaceText(text);
