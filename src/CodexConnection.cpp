@@ -319,10 +319,18 @@ QList<QJsonObject> CodexConnection::conversations() const
     // A chat started here appears in thread/list only after the next sync.
     for (auto it = liveThreadDirectories_.begin(); it != liveThreadDirectories_.end(); ++it) {
         if (cachedConversations_.contains(it.key())) continue;
-        result.append({{"id", it.key()}, {"cwd", it.value()}, {"title", "Current chat"},
-                       {"tooltip", it.key()}, {"createdAt", 0}});
+        const QString title = liveThreadTitles_.value(it.key(), "New chat");
+        result.append({{"id", it.key()}, {"cwd", it.value()}, {"title", title},
+                       {"tooltip", title + "\n\n" + it.key()}, {"createdAt", 0}});
     }
     return result;
+}
+
+void CodexConnection::setConversationTitle(const QString &id, const QString &title)
+{
+    if (liveThreadTitles_.value(id) == title) return;
+    liveThreadTitles_.insert(id, title);
+    if (liveThreadDirectories_.contains(id)) emit conversationsChanged();
 }
 
 // The next sync replaces this with the server's own time.

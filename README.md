@@ -183,6 +183,8 @@ button is available only when that directory exists. Each chat opens in its own
 tab and has one working directory; files under that directory are available
 subject to the selected agent's permissions. At startup one Codex tab is ready
 in the working directory, and its conversation starts with the first message.
+A new chat is called "New chat" in its tab and in the tree until its first
+message is sent; then both show the beginning of that message.
 
 When the window closes, the open tabs are saved in `open-tabs.json` in the
 application data directory, with their model, effort and read-only mode, and

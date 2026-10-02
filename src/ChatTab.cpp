@@ -324,9 +324,11 @@ bool ChatTab::send(const QString &text)
         emit logMessage("[The displayed chat is a read-only preview. Double-click it in the tree to continue it.]");
         return false;
     }
-    // The title names the chat also to other chats that wait for its directory.
-    if (id_.isEmpty() && title_ == "New chat") {
+    // A new chat is named after its first message; the title names it also to other chats that wait for
+    // its directory. Codex opens the conversation before the first message, so it may have an ID already.
+    if (title_ == "New chat" && historyMessages_.isEmpty() && sentMessages_.isEmpty()) {
         title_ = text.simplified().left(200);
+        if (!id_.isEmpty()) provider_->setConversationTitle(id_, title_);
         emit changed();
     }
     outgoing_.append(text);
@@ -503,6 +505,7 @@ void ChatTab::setAgent(AgentBackend *agent)
             lockNotice_.clear();
         } else if (!resumed && live_) {
             id_ = id;
+            if (title_ != "New chat") provider_->setConversationTitle(id_, title_);
         }
         if (id == id_ && !id_.isEmpty()) emit conversationOpened(id_);
         emit changed();

@@ -39,6 +39,7 @@ public:
     void recordActivity(const QString &id) override;
     QList<AgentModel> models() const override { return models_; }
     bool supportsUsageLimits() const override { return true; }
+    void setConversationTitle(const QString &id, const QString &title) override;
     bool supportsSuggestions() const override { return true; }
     void suggest(const QString &workingDirectory, const QString &prompt, QObject *context,
                  const std::function<void(const QString &text, const QString &error)> &done) override;
@@ -97,6 +98,8 @@ private:
     QHash<qint64, PendingRequest> pendingRequests_;
     QHash<QString, QPointer<CodexAgent>> threads_;
     QHash<QString, QString> liveThreadDirectories_;
+    // Titles of chats started here, until thread/list reports their threads.
+    QHash<QString, QString> liveThreadTitles_;
     QString syncCursor_;
     QList<AgentModel> models_;
     QList<AgentModel> stagedModels_;

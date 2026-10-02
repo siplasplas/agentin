@@ -152,6 +152,12 @@ public:
     virtual QList<QJsonObject> conversations() const = 0;
     // A turn of the conversation has just ended in this application.
     virtual void recordActivity(const QString &id) { Q_UNUSED(id); }
+    // A chat started here was named after its first message, before the agent's own list knows it.
+    virtual void setConversationTitle(const QString &id, const QString &title)
+    {
+        Q_UNUSED(id);
+        Q_UNUSED(title);
+    }
     // Models chats can switch to; empty when the agent offers no choice.
     virtual QList<AgentModel> models() const { return {}; }
     // Account usage limits as far as the agent reports them.
