@@ -36,10 +36,15 @@ data directory (for example `~/.local/share/agentin/agentin-crash.log`) instead
 of the terminal; each start adds a header with the version and time, and a
 crash appends its stack trace.
 
-`cmake --install build` (with `--prefix` to choose another location) installs
+`cmake --install build` installs into `~/.local` unless `CMAKE_INSTALL_PREFIX` or
+`--prefix` chooses another location. It installs
 `bin/agentin` and the Claude bridge as `share/agentin/claude_bridge.py`. The
 executable uses the bridge next to itself, as in the build directory, and
 otherwise the one in `../share/agentin`; `--claude-bridge` overrides both.
+It also installs `share/applications/agentin.desktop` and the icon
+`share/icons/hicolor/scalable/apps/agentin.svg`. The window has the icon on
+its own, but on Wayland the desktop shows the icon of the desktop file, so a
+build that is run without installing it shows a generic icon in Alt+Tab.
 
 For Claude, provide `ANTHROPIC_API_KEY` in the application's environment:
 

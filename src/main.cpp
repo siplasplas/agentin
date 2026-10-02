@@ -7,6 +7,7 @@
 #include <QDateTime>
 #include <QDir>
 #include <QFileInfo>
+#include <QIcon>
 #include <QStandardPaths>
 #include <backward.hpp>
 
@@ -17,6 +18,9 @@ int main(int argc, char *argv[])
     QApplication app(argc, argv);
     QCoreApplication::setApplicationName("agentin");
     QCoreApplication::setApplicationVersion("0.1.0");
+    // On Wayland the desktop shows the icon of agentin.desktop, which this name points to.
+    QGuiApplication::setDesktopFileName("agentin");
+    QApplication::setWindowIcon(QIcon(":/icons/agentin.svg"));
 
     QCommandLineParser parser;
     parser.setApplicationDescription("Qt client for Codex, Claude, GLM, Gemini and Antigravity");

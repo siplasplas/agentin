@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=agentin
+GenericName=AI agent client
+Comment=Qt client for Codex, Claude, GLM, Gemini and Antigravity
+Exec=agentin
+Icon=agentin
+Terminal=false
+Categories=Development;Qt;
+StartupWMClass=agentin

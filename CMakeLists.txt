@@ -4,6 +4,10 @@ project(agentin VERSION 0.1.0 LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
+# Installs for the current user unless a prefix is given, so that no root rights are needed.
+if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
+    set(CMAKE_INSTALL_PREFIX "$ENV{HOME}/.local" CACHE PATH "Installation prefix" FORCE)
+endif()
 
 find_package(Qt6 REQUIRED COMPONENTS Widgets)
 # QxFileDialog and MruTabWidget come from the qt-extra library (source: /home/andrzej/wazne/gitmy/qt-extra),
@@ -19,11 +23,17 @@ if(CMAKE_VERSION VERSION_GREATER_EQUAL 4.0)
     set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
 endif()
 include(FetchContent)
+set(backward_exclude)
+if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.28)
+    set(backward_exclude EXCLUDE_FROM_ALL)
+endif()
 FetchContent_Declare(
     backward
     GIT_REPOSITORY https://github.com/bombela/backward-cpp.git
     GIT_TAG 0bfd0a07a61551413ccd2ab9a9099af3bad40681
     GIT_SHALLOW TRUE
+    # Only built into agentin; its own install rules would add a header and a CMake package.
+    ${backward_exclude}
 )
 FetchContent_MakeAvailable(backward)
 
@@ -76,6 +86,8 @@ add_executable(agentin
     src/FileOpener.h
 )
 target_link_libraries(agentin PRIVATE Qt6::Widgets qt-extra Backward::Object diffcore::diffcore PkgConfig::LIBGIT2)
+# The window icon; Qt draws it with its SVG image format plugin.
+qt_add_resources(agentin icons PREFIX "/" FILES icons/agentin.svg)
 target_include_directories(agentin PRIVATE src)
 # Keeps the information backward-cpp needs for files and line numbers, also in optimized builds.
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
@@ -86,6 +98,12 @@ include(GNUInstallDirs)
 install(TARGETS agentin RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 # The executable looks for the bridge in ../share/agentin relative to its own directory.
 install(FILES ${CMAKE_CURRENT_BINARY_DIR}/claude_bridge.py DESTINATION ${CMAKE_INSTALL_DATADIR}/agentin)
+# Wayland desktops take the icon of a window from the desktop file named by its application ID.
+install(FILES agentin.desktop DESTINATION ${CMAKE_INSTALL_DATADIR}/applications)
+install(FILES icons/agentin.svg DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps)
+# Lets the desktop notice the new file at once; the tool may be missing, which is harmless. Icons are found
+# without a cache.
+install(CODE "execute_process(COMMAND update-desktop-database \"\${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_DATADIR}/applications\" ERROR_QUIET)")
 
 option(BUILD_TESTING "Build tests" OFF)
 include(CTest)
