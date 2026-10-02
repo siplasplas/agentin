@@ -274,6 +274,7 @@ QList<QJsonObject> CodexConnection::conversations() const
         if (title.isEmpty()) title = id;
         result.append({{"id", id}, {"cwd", thread.value("cwd").toString()}, {"title", title},
                        {"tooltip", title + "\n\n" + id}, {"createdAt", thread.value("createdAt").toInteger()},
+                       {"modifiedAt", thread.value("updatedAt").toInteger()},
                        {"archived", thread.value("archived").toBool()}});
     }
     // A chat started here appears in thread/list only after the next sync.
@@ -283,6 +284,14 @@ QList<QJsonObject> CodexConnection::conversations() const
                        {"tooltip", it.key()}, {"createdAt", 0}});
     }
     return result;
+}
+
+// The next sync replaces this with the server's own time.
+void CodexConnection::recordActivity(const QString &id)
+{
+    if (!cachedConversations_.contains(id)) return;
+    cachedConversations_[id].insert("updatedAt", QDateTime::currentSecsSinceEpoch());
+    emit conversationsChanged();
 }
 
 bool CodexConnection::loadConversationIndex()

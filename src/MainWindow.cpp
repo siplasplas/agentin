@@ -34,6 +34,8 @@
 #include <QJsonObject>
 #include <QLabel>
 #include <QLineEdit>
+#include <QActionGroup>
+#include <QMenu>
 #include <QMenuBar>
 #include <QMessageBox>
 #include <QPainter>
@@ -170,6 +172,38 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     reasoningVisibleAction_ = viewMenu->addAction("Reasoning");
     reasoningVisibleAction_->setObjectName("showReasoning");
     reasoningVisibleAction_->setCheckable(true);
+    // The same menus open from the buttons above the conversation tree.
+    auto *treeMenu = viewMenu->addMenu("Conversation tree");
+    const auto choice = [this](QMenu *menu, QActionGroup *group, const QString &text, const QString &name) {
+        QAction *action = menu->addAction(text);
+        action->setObjectName(name);
+        action->setCheckable(true);
+        group->addAction(action);
+        return action;
+    };
+    auto *groupMenu = new QMenu("Group", this);
+    auto *grouping = new QActionGroup(this);
+    groupByAgentAction_ = choice(groupMenu, grouping, "By agent, then directory", "groupByAgent");
+    groupByDirectoryAction_ = choice(groupMenu, grouping, "By directory, agent in each chat", "groupByDirectory");
+    auto *sortMenu = new QMenu("Sort", this);
+    sortMenu->addSection("Chats");
+    auto *chatOrder = new QActionGroup(this);
+    chatsByCreatedAction_ = choice(sortMenu, chatOrder, "Newest created first", "sortChatsByCreated");
+    chatsByModifiedAction_ = choice(sortMenu, chatOrder, "Most recently changed first", "sortChatsByModified");
+    sortMenu->addSection("Directories");
+    auto *directoryOrder = new QActionGroup(this);
+    directoriesByNameAction_ = choice(sortMenu, directoryOrder, "By path", "sortDirectoriesByName");
+    directoriesByRecentAction_ = choice(sortMenu, directoryOrder, "By their first chat", "sortDirectoriesByRecent");
+    for (QActionGroup *group : {grouping, chatOrder, directoryOrder})
+        connect(group, &QActionGroup::triggered, this, &MainWindow::applyTreeOptions);
+    treeMenu->addMenu(groupMenu);
+    treeMenu->addMenu(sortMenu);
+    treeMenu->addSeparator();
+    for (int level = 1; level <= 3; ++level) {
+        treeLevelActions_[level - 1] = treeMenu->addAction(QString());
+        treeLevelActions_[level - 1]->setObjectName(QString("treeLevel%1").arg(level));
+        connect(treeLevelActions_[level - 1], &QAction::triggered, this, [this, level] { setTreeLevel(level); });
+    }
 
 
     auto *central = new QWidget(this);
@@ -330,14 +364,47 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     layout->addWidget(usageSplitter_, 1);
     layout->addLayout(inputRow);
     auto *chatSplitter = new QSplitter(Qt::Horizontal, this);
-    conversationTree_ = new QTreeWidget(chatSplitter);
+    auto *treePanel = new QWidget(chatSplitter);
+    auto *treeLayout = new QVBoxLayout(treePanel);
+    treeLayout->setContentsMargins(0, 0, 0, 0);
+    treeLayout->setSpacing(0);
+    auto *treeTools = new QHBoxLayout;
+    treeTools->setContentsMargins(2, 0, 2, 0);
+    treeTools->setSpacing(0);
+    const auto toolButton = [treePanel](const QString &text, const QString &name) {
+        auto *button = new QToolButton(treePanel);
+        button->setText(text);
+        button->setObjectName(name);
+        button->setAutoRaise(true);
+        return button;
+    };
+    treeGroupButton_ = toolButton(QString(), "treeGroupButton");
+    treeGroupButton_->setMenu(groupMenu);
+    treeGroupButton_->setPopupMode(QToolButton::InstantPopup);
+    treeGroupButton_->setToolTip("How chats are grouped");
+    auto *sortButton = toolButton("Sort", "treeSortButton");
+    sortButton->setMenu(sortMenu);
+    sortButton->setPopupMode(QToolButton::InstantPopup);
+    sortButton->setToolTip("Order of chats and directories");
+    treeTools->addWidget(treeGroupButton_);
+    treeTools->addWidget(sortButton);
+    treeTools->addStretch(1);
+    for (int level = 1; level <= 3; ++level) {
+        treeLevelButtons_[level - 1] = toolButton(QString::number(level), QString("treeLevelButton%1").arg(level));
+        connect(treeLevelButtons_[level - 1], &QToolButton::clicked, this, [this, level] { setTreeLevel(level); });
+        treeTools->addWidget(treeLevelButtons_[level - 1]);
+    }
+    treeLayout->addLayout(treeTools);
+    conversationTree_ = new QTreeWidget(treePanel);
     conversationTree_->setObjectName("conversationTree");
     conversationTree_->setHeaderHidden(true);
     conversationTree_->setMinimumWidth(0);
+    treeLayout->addWidget(conversationTree_, 1);
+    treePanel->setMinimumWidth(0);
     auto *leftSplitter = new QSplitter(Qt::Vertical, chatSplitter);
     leftSplitter->setObjectName("conversationReasoningSplitter");
     leftSplitter->setHandleWidth(6);
-    leftSplitter->addWidget(conversationTree_);
+    leftSplitter->addWidget(treePanel);
     reasoning_ = new QPlainTextEdit(leftSplitter);
     reasoning_->setObjectName("reasoningPanel");
     reasoning_->setReadOnly(true);
@@ -380,6 +447,8 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
         openConversation(item, true);
     });
     connect(conversationTree_, &QTreeWidget::itemExpanded, this, [this](QTreeWidgetItem *item) {
+        if (item->data(0, Qt::UserRole).toString() == "directory")
+            setDirectoryExpanded(item->data(0, Qt::UserRole + 1).toString(), true);
         if (item->data(0, Qt::UserRole).toString() != "provider") return;
         // Rebuilding the tree deletes item, so read its provider first.
         const QString name = item->text(0);
@@ -388,6 +457,8 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
         if (AgentProvider *expanded = provider(name)) expanded->refreshConversations();
     });
     connect(conversationTree_, &QTreeWidget::itemCollapsed, this, [this](QTreeWidgetItem *item) {
+        if (item->data(0, Qt::UserRole).toString() == "directory")
+            setDirectoryExpanded(item->data(0, Qt::UserRole + 1).toString(), false);
         if (item->data(0, Qt::UserRole).toString() != "provider") return;
         expandedProviders_.remove(item->text(0));
         refreshConversationTree();
@@ -476,6 +547,8 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     showEnterAction(input_->enterSends());
     loadRecentDirectories();
     refreshConversationTree();
+    // Without agent rows to expand, all chats are discovered; this waits until the Claude environment is set.
+    if (treeByDirectory_) QTimer::singleShot(0, this, &MainWindow::discoverConversations);
     chatTab(addChatTab(codex_, workingDirectory_))->startDraft();
     if (!QDir(workingDirectory_).exists()) {
         appendLine("[Working directory does not exist: " + workingDirectory_ + "]");
@@ -699,6 +772,72 @@ void MainWindow::setExperimentalAgentsEnabled(bool enabled)
     if (experimentalAgents_ == enabled) return;
     experimentalAgents_ = enabled;
     refreshConversationTree();
+    if (enabled && treeByDirectory_) discoverConversations();
+}
+
+void MainWindow::discoverConversations()
+{
+    for (AgentProvider *listed : visibleProviders()) listed->refreshConversations();
+}
+
+void MainWindow::applyTreeOptions()
+{
+    const bool wasByDirectory = treeByDirectory_;
+    treeByDirectory_ = groupByDirectoryAction_->isChecked();
+    chatsByModified_ = chatsByModifiedAction_->isChecked();
+    directoriesByName_ = directoriesByNameAction_->isChecked();
+    updateTreeControls();
+    saveSettings();
+    refreshConversationTree();
+    if (treeByDirectory_ && !wasByDirectory) discoverConversations();
+}
+
+void MainWindow::updateTreeControls()
+{
+    (treeByDirectory_ ? groupByDirectoryAction_ : groupByAgentAction_)->setChecked(true);
+    (chatsByModified_ ? chatsByModifiedAction_ : chatsByCreatedAction_)->setChecked(true);
+    (directoriesByName_ ? directoriesByNameAction_ : directoriesByRecentAction_)->setChecked(true);
+    treeGroupButton_->setText(treeByDirectory_ ? "By directory" : "By agent");
+    const QStringList levels = treeByDirectory_
+        ? QStringList{"Directories only", "Directories and chats", QString()}
+        : QStringList{"Agents only", "Agents and directories", "Agents, directories and chats"};
+    for (int i = 0; i < 3; ++i) {
+        treeLevelActions_[i]->setText(levels.at(i).isEmpty() ? QString("Level %1").arg(i + 1) : "Show " + levels.at(i));
+        treeLevelActions_[i]->setEnabled(!levels.at(i).isEmpty());
+        treeLevelButtons_[i]->setEnabled(!levels.at(i).isEmpty());
+        treeLevelButtons_[i]->setToolTip(levels.at(i).isEmpty() ? QString() : "Show " + levels.at(i));
+    }
+}
+
+void MainWindow::setTreeLevel(int level)
+{
+    directoriesCollapsed_ = treeByDirectory_ ? level == 1 : level == 2;
+    toggledDirectories_.clear();
+    if (treeByDirectory_) {
+        refreshConversationTree();
+        return;
+    }
+    const QSet<QString> expandedBefore = expandedProviders_;
+    expandedProviders_.clear();
+    if (level > 1) {
+        for (const AgentProvider *listed : visibleProviders()) expandedProviders_.insert(listed->name());
+    }
+    refreshConversationTree();
+    for (AgentProvider *listed : visibleProviders()) {
+        if (expandedProviders_.contains(listed->name()) && !expandedBefore.contains(listed->name()))
+            listed->refreshConversations();
+    }
+}
+
+bool MainWindow::isDirectoryExpanded(const QString &key) const
+{
+    return directoriesCollapsed_ == toggledDirectories_.contains(key);
+}
+
+void MainWindow::setDirectoryExpanded(const QString &key, bool expanded)
+{
+    if (expanded == directoriesCollapsed_) toggledDirectories_.insert(key);
+    else toggledDirectories_.remove(key);
 }
 
 // settings.json keeps each agent's default model and effort for new chats. The effort defaults to
@@ -721,6 +860,11 @@ void MainWindow::loadSettings()
     input_->setShortMessageLength(settings.value("enterSendsUpTo").toInt(60));
     undoAfterSend_ = settings.value("undoAfterSend").toBool(true);
     experimentalAgents_ = settings.value("experimentalAgents").toBool(false);
+    const QJsonObject tree = settings.value("conversationTree").toObject();
+    treeByDirectory_ = tree.value("groupBy").toString() == "directory";
+    chatsByModified_ = tree.value("chatOrder").toString() != "created";
+    directoriesByName_ = tree.value("directoryOrder").toString() == "path";
+    updateTreeControls();
     notifier_->setSettings(Notifier::Settings::fromJson(settings.value("notifications").toObject()));
     lastAudioDirectory_ = settings.value("lastAudioDirectory").toString();
     {
@@ -784,6 +928,10 @@ void MainWindow::saveSettings()
                                                          {"enterSendsUpTo", input_->shortMessageLength()},
                                                          {"undoAfterSend", undoAfterSend_},
                                                          {"experimentalAgents", experimentalAgents_},
+                                                         {"conversationTree", QJsonObject{
+                                                             {"groupBy", treeByDirectory_ ? "directory" : "agent"},
+                                                             {"chatOrder", chatsByModified_ ? "modified" : "created"},
+                                                             {"directoryOrder", directoriesByName_ ? "path" : "recent"}}},
                                                          {"chatFont", chatView_->font().toString()},
                                                          {"notifications", notifier_->settings().toJson()},
                                                          {"lastAudioDirectory", lastAudioDirectory_},
@@ -1281,48 +1429,87 @@ void MainWindow::refreshConversationTree()
 {
     const QSignalBlocker blocker(conversationTree_);
     conversationTree_->clear();
-    for (AgentProvider *listed : visibleProviders()) {
-        const QString name = listed->name();
-        auto *root = new QTreeWidgetItem(conversationTree_, {name});
-        root->setData(0, Qt::UserRole, "provider");
-        root->setChildIndicatorPolicy(QTreeWidgetItem::ShowIndicator);
-        if (!expandedProviders_.contains(name)) continue;
-        root->setExpanded(true);
-        QList<QJsonObject> chats = listed->conversations();
-        // Restored chats must be reachable even before the provider finishes its discovery.
-        QSet<QString> ids;
-        for (const QJsonObject &chat : chats) ids.insert(chat.value("id").toString());
-        for (int i = 0; i < tabs_->count(); ++i) {
-            const ChatTab *tab = chatTab(tabs_->widget(i));
-            if (!tab || tab->provider() != listed || tab->conversationId().isEmpty()
-                || ids.contains(tab->conversationId())) continue;
-            chats.append({{"id", tab->conversationId()}, {"cwd", tab->workingDirectory()},
-                          {"title", tab->title()}, {"tooltip", tab->headerText()}});
-            ids.insert(tab->conversationId());
+    if (treeByDirectory_) {
+        QList<QJsonObject> chats;
+        for (AgentProvider *listed : visibleProviders()) chats += treeChats(listed);
+        addDirectoryItems(nullptr, chats);
+    } else {
+        for (AgentProvider *listed : visibleProviders()) {
+            const QString name = listed->name();
+            auto *root = new QTreeWidgetItem(conversationTree_, {name});
+            root->setData(0, Qt::UserRole, "provider");
+            root->setChildIndicatorPolicy(QTreeWidgetItem::ShowIndicator);
+            if (!expandedProviders_.contains(name)) continue;
+            root->setExpanded(true);
+            addDirectoryItems(root, treeChats(listed));
         }
-        std::stable_sort(chats.begin(), chats.end(), [](const QJsonObject &left, const QJsonObject &right) {
-            return left.value("createdAt").toInteger() > right.value("createdAt").toInteger();
+    }
+    revealCurrentConversation(false);
+}
+
+// Restored chats must be reachable even before the provider finishes its discovery. Each chat gets
+// its agent and the time it is sorted by; a chat without a modification time sorts by its creation.
+QList<QJsonObject> MainWindow::treeChats(AgentProvider *listed) const
+{
+    QList<QJsonObject> chats = listed->conversations();
+    QSet<QString> ids;
+    for (const QJsonObject &chat : chats) ids.insert(chat.value("id").toString());
+    for (int i = 0; i < tabs_->count(); ++i) {
+        const ChatTab *tab = chatTab(tabs_->widget(i));
+        if (!tab || tab->provider() != listed || tab->conversationId().isEmpty()
+            || ids.contains(tab->conversationId())) continue;
+        chats.append({{"id", tab->conversationId()}, {"cwd", tab->workingDirectory()},
+                      {"title", tab->title()}, {"tooltip", tab->headerText()}});
+        ids.insert(tab->conversationId());
+    }
+    for (QJsonObject &chat : chats) {
+        const qint64 modified = chat.value("modifiedAt").toInteger();
+        chat.insert("sortAt", chatsByModified_ && modified > 0 ? modified : chat.value("createdAt").toInteger());
+        chat.insert("provider", listed->name());
+    }
+    return chats;
+}
+
+void MainWindow::addDirectoryItems(QTreeWidgetItem *root, QList<QJsonObject> chats)
+{
+    std::stable_sort(chats.begin(), chats.end(), [](const QJsonObject &left, const QJsonObject &right) {
+        return left.value("sortAt").toInteger() > right.value("sortAt").toInteger();
+    });
+    // Without sorting by path, a directory comes where its first chat would.
+    QStringList paths;
+    QHash<QString, QList<QJsonObject>> chatsByPath;
+    for (const QJsonObject &chat : chats) {
+        const QString path = chat.value("cwd").toString();
+        if (!chatsByPath.contains(path)) paths.append(path);
+        chatsByPath[path].append(chat);
+    }
+    if (directoriesByName_) {
+        std::stable_sort(paths.begin(), paths.end(), [](const QString &left, const QString &right) {
+            if (left.isEmpty() != right.isEmpty()) return right.isEmpty();
+            return left.compare(right, Qt::CaseInsensitive) < 0;
         });
-        QHash<QString, QTreeWidgetItem *> directories;
-        for (const QJsonObject &chat : chats) {
-            const QString path = chat.value("cwd").toString();
-            QTreeWidgetItem *directory = directories.value(path);
-            if (!directory) {
-                directory = new QTreeWidgetItem(root, {path.isEmpty() ? "(unknown directory)" : QDir::toNativeSeparators(path)});
-                directory->setToolTip(0, path);
-                directory->setExpanded(true);
-                directories.insert(path, directory);
-            }
+    }
+    for (const QString &path : paths) {
+        const QString label = path.isEmpty() ? "(unknown directory)" : QDir::toNativeSeparators(path);
+        auto *directory = root ? new QTreeWidgetItem(root, {label}) : new QTreeWidgetItem(conversationTree_, {label});
+        const QString key = (root ? root->text(0) : QString()) + '\n' + path;
+        directory->setData(0, Qt::UserRole, "directory");
+        directory->setData(0, Qt::UserRole + 1, key);
+        directory->setData(0, Qt::UserRole + 2, path);
+        directory->setToolTip(0, path);
+        for (const QJsonObject &chat : chatsByPath.value(path)) {
+            const QString name = chat.value("provider").toString();
             QString title = shortPreview(chat.value("title").toString());
             if (chat.value("archived").toBool()) title += " (archived)";
+            if (!root) title = name + ": " + title;
             auto *item = new QTreeWidgetItem(directory, {title});
             item->setData(0, Qt::UserRole, name);
             item->setData(0, Qt::UserRole + 1, chat.value("id").toString());
             item->setData(0, Qt::UserRole + 2, path);
             item->setToolTip(0, chat.value("tooltip").toString());
         }
+        directory->setExpanded(isDirectoryExpanded(key));
     }
-    revealCurrentConversation(false);
 }
 
 void MainWindow::revealCurrentConversation(bool expandBranch, bool focusTree)
@@ -1330,32 +1517,44 @@ void MainWindow::revealCurrentConversation(bool expandBranch, bool focusTree)
     const ChatTab *tab = currentTab();
     if (!tab) return;
     const QString name = tab->provider()->name();
-    if (tab->conversationId().isEmpty() && !expandedProviders_.contains(name)) return;
-    if (expandBranch && !expandedProviders_.contains(name)) {
-        expandedProviders_.insert(name);
-        refreshConversationTree();
+    if (!treeByDirectory_) {
+        if (tab->conversationId().isEmpty() && !expandedProviders_.contains(name)) return;
+        if (expandBranch && !expandedProviders_.contains(name)) {
+            expandedProviders_.insert(name);
+            refreshConversationTree();
+        }
     }
     // Selecting the matching row must not create a preview tab or reload its history.
     const QSignalBlocker blocker(conversationTree_);
+    QList<QTreeWidgetItem *> directories;
     for (int i = 0; i < conversationTree_->topLevelItemCount(); ++i) {
-        QTreeWidgetItem *root = conversationTree_->topLevelItem(i);
-        if (root->text(0) != name || !root->isExpanded()) continue;
-        for (int j = 0; j < root->childCount(); ++j) {
-            QTreeWidgetItem *directory = root->child(j);
-            QTreeWidgetItem *match = nullptr;
-            if (tab->conversationId().isEmpty() && directory->toolTip(0) == tab->workingDirectory())
-                match = directory;
-            for (int k = 0; k < directory->childCount() && !match; ++k) {
-                QTreeWidgetItem *item = directory->child(k);
-                if (item->data(0, Qt::UserRole + 1).toString() == tab->conversationId()) match = item;
-            }
-            if (!match) continue;
-            if (expandBranch) directory->setExpanded(true);
-            conversationTree_->setCurrentItem(match);
-            conversationTree_->scrollToItem(match, QAbstractItemView::EnsureVisible);
-            if (focusTree) conversationTree_->setFocus(Qt::OtherFocusReason);
-            return;
+        QTreeWidgetItem *top = conversationTree_->topLevelItem(i);
+        if (treeByDirectory_) {
+            directories.append(top);
+        } else if (top->text(0) == name && top->isExpanded()) {
+            for (int j = 0; j < top->childCount(); ++j) directories.append(top->child(j));
         }
+    }
+    for (QTreeWidgetItem *directory : directories) {
+        QTreeWidgetItem *match = nullptr;
+        if (tab->conversationId().isEmpty() && directory->data(0, Qt::UserRole + 2).toString() == tab->workingDirectory())
+            match = directory;
+        for (int k = 0; k < directory->childCount() && !match; ++k) {
+            QTreeWidgetItem *item = directory->child(k);
+            if (item->data(0, Qt::UserRole).toString() == name
+                && item->data(0, Qt::UserRole + 1).toString() == tab->conversationId()) match = item;
+        }
+        if (!match) continue;
+        if (match != directory && !directory->isExpanded()) {
+            // Selecting a row scrolls to it, which would open a directory the user closed.
+            if (!expandBranch) return;
+            setDirectoryExpanded(directory->data(0, Qt::UserRole + 1).toString(), true);
+            directory->setExpanded(true);
+        }
+        conversationTree_->setCurrentItem(match);
+        conversationTree_->scrollToItem(match, QAbstractItemView::EnsureVisible);
+        if (focusTree) conversationTree_->setFocus(Qt::OtherFocusReason);
+        return;
     }
 }
 

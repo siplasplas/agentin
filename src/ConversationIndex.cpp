@@ -63,6 +63,13 @@ bool ConversationIndex::remember(const QString &id, const QString &workingDirect
                    {"createdAt", QDateTime::currentSecsSinceEpoch()}});
 }
 
+bool ConversationIndex::touch(const QString &id)
+{
+    if (!entries_.contains(id)) return false;
+    entries_[id].insert("lastModified", QDateTime::currentSecsSinceEpoch());
+    return true;
+}
+
 QList<QJsonObject> ConversationIndex::treeEntries() const
 {
     QList<QJsonObject> result;
@@ -87,7 +94,8 @@ QList<QJsonObject> ConversationIndex::treeEntries() const
         addText("tag", "Tag");
         addText("firstPrompt", "First prompt");
         result.append({{"id", id}, {"cwd", path}, {"title", title}, {"tooltip", details.join('\n')},
-                       {"createdAt", thread.value("createdAt").toInteger()}});
+                       {"createdAt", thread.value("createdAt").toInteger()},
+                       {"modifiedAt", thread.value("lastModified").toInteger()}});
     }
     return result;
 }

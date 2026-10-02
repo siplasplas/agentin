@@ -36,6 +36,7 @@ public:
     void loadConversations() override;
     void refreshConversations() override;
     QList<QJsonObject> conversations() const override;
+    void recordActivity(const QString &id) override;
     QList<AgentModel> models() const override { return models_; }
     bool supportsUsageLimits() const override { return true; }
     QList<UsageLimit> usageLimits() const override;

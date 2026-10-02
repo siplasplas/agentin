@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QJsonObject>
 #include <QList>
 #include <QMainWindow>
 #include <QPointer>
@@ -77,6 +78,16 @@ private:
     void showNewConversationDialog();
     void newConversation(AgentProvider *provider, const QString &path);
     void refreshConversationTree();
+    QList<QJsonObject> treeChats(AgentProvider *provider) const;
+    // Adds directory rows with their chats under root, or as top-level rows when root is null.
+    void addDirectoryItems(QTreeWidgetItem *root, QList<QJsonObject> chats);
+    bool isDirectoryExpanded(const QString &key) const;
+    void setDirectoryExpanded(const QString &key, bool expanded);
+    void applyTreeOptions();
+    void updateTreeControls();
+    // Level 1 shows the top rows only, level 2 one level deeper and level 3 everything.
+    void setTreeLevel(int level);
+    void discoverConversations();
     void revealCurrentConversation(bool expandBranch, bool focusTree = false);
     void openConversation(QTreeWidgetItem *item, bool continueChat);
     QWidget *addChatTab(AgentProvider *provider, const QString &workingDirectory);
@@ -146,6 +157,22 @@ private:
     QAction *reasoningVisibleAction_;
     QTreeWidget *conversationTree_;
     QSet<QString> expandedProviders_;
+    // The tree groups chats by agent and then directory, or by directory with the agent in each chat row.
+    bool treeByDirectory_ = false;
+    bool chatsByModified_ = true;
+    bool directoriesByName_ = false;
+    // Directory rows follow directoriesCollapsed_ except those the user toggled since the last level choice.
+    bool directoriesCollapsed_ = false;
+    QSet<QString> toggledDirectories_;
+    QAction *groupByAgentAction_;
+    QAction *groupByDirectoryAction_;
+    QAction *chatsByCreatedAction_;
+    QAction *chatsByModifiedAction_;
+    QAction *directoriesByNameAction_;
+    QAction *directoriesByRecentAction_;
+    QAction *treeLevelActions_[3];
+    QToolButton *treeGroupButton_;
+    QToolButton *treeLevelButtons_[3];
     QStringList recentDirectories_;
     // Ctrl+Z in the message field can bring back the message just sent.
     bool undoAfterSend_ = true;

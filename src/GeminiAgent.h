@@ -24,6 +24,7 @@ public:
     // Lists sessions saved by Gemini CLI under its data directory across all projects.
     void refreshConversations() override;
     QList<QJsonObject> conversations() const override { return index_.treeEntries(); }
+    void recordActivity(const QString &id) override;
     QList<AgentModel> models() const override;
     AgentBackend *createChat(const QString &workingDirectory, QObject *parent) override;
 

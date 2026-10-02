@@ -99,7 +99,23 @@ and `CODEX_BIN`. You can select an executable explicitly with
 
 ## Conversations
 
-The left pane groups chats by agent and working directory. Expanding Codex
+The left pane groups chats by agent and working directory. The buttons above it,
+also in **View → Conversation tree**, change the layout and order, and the
+choice is saved:
+
+- **By agent** / **By directory**: agent rows with directories and chats, or
+  the full directory paths as the top rows, each chat showing its agent as
+  `Claude: title`. Grouping by directory discovers the chats of all agents
+  shown, as expanding each agent would.
+- **Sort**: chats newest created first or most recently changed first (the
+  default; a chat without a change time sorts by its creation), and
+  directories by path or by their first chat in that order (the default).
+  A turn that ends in this application counts as a change at once.
+- **1 2 3**: show only the top rows, one level more, or everything; by
+  directory there are two levels. Directories you open or close afterwards
+  stay so until the next choice.
+
+Expanding Codex
 loads its conversations through App Server, including chats from Codex CLI,
 Codex desktop, and this application when they use the same local Codex data.
 Each provider node has an expand control. Expanding Codex refreshes

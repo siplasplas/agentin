@@ -22,6 +22,7 @@ public:
     void loadConversations() override;
     void refreshConversations() override;
     QList<QJsonObject> conversations() const override { return index_.treeEntries(); }
+    void recordActivity(const QString &id) override;
     QList<AgentModel> models() const override { return models_; }
     AgentBackend *createChat(const QString &workingDirectory, QObject *parent) override;
 

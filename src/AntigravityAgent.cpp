@@ -87,6 +87,13 @@ AgentBackend *AntigravityProvider::createChat(const QString &workingDirectory, Q
     return new AntigravityAgent(this, workingDirectory, parent);
 }
 
+void AntigravityProvider::recordActivity(const QString &id)
+{
+    if (!index_.touch(id)) return;
+    reportIndexError(index_.save());
+    emit conversationsChanged();
+}
+
 void AntigravityProvider::rememberConversation(const QString &id, const QString &workingDirectory,
                                                const QString &firstPrompt)
 {

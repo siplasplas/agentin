@@ -143,11 +143,13 @@ public:
     }
 
     // Conversations shown in the tree. Each entry has id, cwd, title, tooltip and createdAt, and
-    // optionally archived. loadConversations() reads saved data at startup; refreshConversations()
-    // discovers current ones and reports through conversationsChanged().
+    // optionally modifiedAt and archived. loadConversations() reads saved data at startup;
+    // refreshConversations() discovers current ones and reports through conversationsChanged().
     virtual void loadConversations() = 0;
     virtual void refreshConversations() = 0;
     virtual QList<QJsonObject> conversations() const = 0;
+    // A turn of the conversation has just ended in this application.
+    virtual void recordActivity(const QString &id) { Q_UNUSED(id); }
     // Models chats can switch to; empty when the agent offers no choice.
     virtual QList<AgentModel> models() const { return {}; }
     // Account usage limits as far as the agent reports them.

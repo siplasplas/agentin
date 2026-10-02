@@ -413,6 +413,7 @@ void ChatTab::setAgent(AgentBackend *agent)
         // Between turns the directory is free for other agents; the next queued message takes it again.
         inTurn_ = false;
         releaseDirectory();
+        if (!id_.isEmpty()) provider_->recordActivity(id_);
         QTimer::singleShot(0, this, &ChatTab::dispatch);
         if (status != "completed")
             emit logMessage("[" + name + " response: " + status + (details.isEmpty() ? "" : ": " + details) + "]");

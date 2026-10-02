@@ -260,6 +260,13 @@ AgentBackend *ClaudeProvider::createChat(const QString &workingDirectory, QObjec
     return new ClaudeAgent(this, workingDirectory, parent);
 }
 
+void ClaudeProvider::recordActivity(const QString &id)
+{
+    if (!index_.touch(id)) return;
+    reportIndexError(index_.save());
+    emit conversationsChanged();
+}
+
 void ClaudeProvider::rememberConversation(const QString &id, const QString &workingDirectory, const QString &firstPrompt)
 {
     if (!index_.remember(id, workingDirectory, firstPrompt)) return;

@@ -192,6 +192,13 @@ QString GeminiProvider::sessionFile(const QString &id)
     return filePath;
 }
 
+void GeminiProvider::recordActivity(const QString &id)
+{
+    if (!index_.touch(id)) return;
+    reportIndexError(index_.save());
+    emit conversationsChanged();
+}
+
 void GeminiProvider::rememberConversation(const QString &id, const QString &workingDirectory, const QString &firstPrompt)
 {
     if (!index_.remember(id, workingDirectory, firstPrompt)) return;

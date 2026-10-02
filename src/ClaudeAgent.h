@@ -60,6 +60,7 @@ public:
     // GLM sessions are only those recorded here; Claude also lists SDK sessions from all projects.
     void refreshConversations() override;
     QList<QJsonObject> conversations() const override { return index_.treeEntries(); }
+    void recordActivity(const QString &id) override;
     QList<AgentModel> models() const override;
     bool supportsUsageLimits() const override { return true; }
     QList<UsageLimit> usageLimits() const override { return usage_.values(); }

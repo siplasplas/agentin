@@ -20,6 +20,8 @@ public:
     bool insert(QJsonObject entry);
     // Adds a conversation started in this application unless it is already known.
     bool remember(const QString &id, const QString &workingDirectory, const QString &firstPrompt);
+    // Sets a known conversation's modification time to now and returns whether it is known.
+    bool touch(const QString &id);
     // Entries in the form AgentBackend::conversations() returns.
     QList<QJsonObject> treeEntries() const;
 
