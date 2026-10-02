@@ -95,7 +95,8 @@ void MessageInput::keyPressEvent(QKeyEvent *event)
     // Any change made from the keyboard counts as typing, except pasting.
     const int revision = document()->revision();
     QPlainTextEdit::keyPressEvent(event);
-    if (document()->revision() != revision && !event->matches(QKeySequence::Paste)) typed_ = true;
+    // Clearing the field by keyboard leaves nothing typed.
+    if (document()->revision() != revision && !event->matches(QKeySequence::Paste)) typed_ = !document()->isEmpty();
     updateEnterAction();
 }
 
@@ -177,10 +178,19 @@ void MessageInput::recall(int step)
 
 // Line breaks, spaces and tabs around pasted text are dropped: a trailing line break would make Enter
 // start a new line instead of sending.
+// Pasted text that replaces the whole field counts as unchanged, so Enter sends it whatever its length.
 void MessageInput::insertFromMimeData(const QMimeData *source)
 {
+    const QTextCursor cursor = textCursor();
+    const bool replacesAll = document()->isEmpty()
+        || (cursor.selectionStart() == 0 && cursor.selectionEnd() == document()->characterCount() - 1);
     if (source->hasText()) insertPlainText(source->text().trimmed());
     else QPlainTextEdit::insertFromMimeData(source);
+    if (replacesAll) {
+        typed_ = false;
+        typedLineBreak_ = false;
+        updateEnterAction();
+    }
 }
 
 void MessageInput::mousePressEvent(QMouseEvent *event)
