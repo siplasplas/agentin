@@ -329,6 +329,10 @@ the full text in the conversation and also applies to multiline tool entries
 in loaded history.
 The scroll range follows the visible lines when tool output is folded, expanded,
 or streamed, including wrapped headings and output.
+Codex can run several commands at once. Each output then goes under the heading
+of its own command, repeated with `(continued)` when another command wrote in
+between, and the final status names the command, such as
+`[shell rg -n pattern: completed]`.
 **View → Tool calls** hides the tools altogether: their headings, output, final
 status lines such as `[shell: completed]` and the blank lines after them, so the
 chat shows only your messages and the answers. A thin dashed line marks where

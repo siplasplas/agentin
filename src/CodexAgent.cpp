@@ -605,8 +605,18 @@ void CodexAgent::sendStopIfPossible()
     });
 }
 
+void CodexAgent::showOutputOf(const QString &itemId)
+{
+    if (itemId == outputCommand_) return;
+    outputCommand_ = itemId;
+    const QString command = runningCommands_.value(itemId);
+    emit toolStarted("shell", (command.isEmpty() ? QString("output") : command) + " (continued)");
+}
+
 void CodexAgent::resetTurn()
 {
+    runningCommands_.clear();
+    outputCommand_.clear();
     busy_ = false;
     manualCompaction_ = false;
     emit compactionFinished();
@@ -657,10 +667,13 @@ void CodexAgent::handleNotification(const QString &method, const QJsonObject &pa
         emit reasoningUpdated(itemId, reasoningText(snapshot));
     } else if (method == "item/commandExecution/outputDelta") {
         streamedCommands_.insert(itemId);
+        showOutputOf(itemId);
         emit toolOutput(params.value("delta").toString());
     } else if (method == "item/started" && item.value("type") == "contextCompaction") {
         emit compactionStarted();
     } else if (method == "item/started" && item.value("type") == "commandExecution") {
+        runningCommands_.insert(itemId, item.value("command").toString());
+        outputCommand_ = itemId;
         emit toolStarted("shell", item.value("command").toString());
     } else if (method == "item/completed") {
         const QString type = item.value("type").toString();
@@ -678,9 +691,18 @@ void CodexAgent::handleNotification(const QString &method, const QJsonObject &pa
         } else if (type == "commandExecution") {
             if (!streamedCommands_.remove(completedId)) {
                 const QString output = item.value("aggregatedOutput").toString();
-                if (!output.isEmpty()) emit toolOutput(output);
+                if (!output.isEmpty()) {
+                    showOutputOf(completedId);
+                    emit toolOutput(output);
+                }
             }
-            emit toolFinished("shell", item.value("status").toString());
+            // With commands running in parallel, the status says which one ended.
+            const QString command = runningCommands_.value(completedId, item.value("command").toString());
+            const bool parallel = runningCommands_.size() > 1 || outputCommand_ != completedId;
+            runningCommands_.remove(completedId);
+            outputCommand_.clear();
+            emit toolFinished(parallel ? "shell " + command.simplified().left(60) : QString("shell"),
+                              item.value("status").toString());
         } else if (type == "fileChange") {
             emit toolFinished("file changes", item.value("status").toString());
         } else if (type == "contextCompaction") {

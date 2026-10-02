@@ -66,6 +66,7 @@ private:
     void sendNextPrompt();
     void sendStopIfPossible();
     void resetTurn();
+    void showOutputOf(const QString &itemId);
     void refreshAfterCompaction();
     QJsonObject sandboxPolicy() const;
 
@@ -90,6 +91,10 @@ private:
     QStringList queuedPrompts_;
     QSet<QString> streamedMessages_;
     QSet<QString> streamedCommands_;
+    // Commands can run in parallel; each keeps its command, and output goes under the block of the
+    // command it belongs to, which is reopened when another command wrote in between.
+    QHash<QString, QString> runningCommands_;
+    QString outputCommand_;
     QHash<QString, QJsonObject> reasoningItems_;
     QHash<int, QJsonValue> serverRequests_;
     QHash<int, QList<AgentQuestion>> pendingQuestions_;
