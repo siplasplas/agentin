@@ -114,7 +114,8 @@ private:
     QProcess *startPlaybackProcess(const QString &program, const QStringList &arguments,
                                    std::function<void(bool)> completed = {});
     bool playSoundFile(const QString &file, bool temporary);
-    static bool addLeadingSilence(const QString &file, int milliseconds);
+    // Inserts the lead-in at the start of the samples of a PCM WAV file; false when the file is not one.
+    static bool addLeadIn(const QString &file, int milliseconds);
     static QString writeTemporaryWav(const QList<qint16> &samples);
     // A file, or a built-in sound written to a temporary file.
     bool playSoundOrBuiltIn(const QString &sound);

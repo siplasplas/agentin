@@ -661,7 +661,8 @@ void MainWindowTest::speakerStopsAudio()
     player.write(R"PY(import os, sys
 with open(__file__ + ".started", "w") as log:
     log.write(sys.argv[-1])
-if not sys.argv[-1].endswith("done.mp3"):
+# Only the long sound plays until stopped; the lead-in before it ends at once.
+if sys.argv[-1].endswith("long.mp3"):
     sys.stdin.read()
 )PY");
     player.close();

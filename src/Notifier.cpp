@@ -6,6 +6,7 @@
 #include <QFileInfo>
 #include <QLocale>
 #include <QProcess>
+#include <QRandomGenerator>
 #include <QStandardPaths>
 #include <QStyle>
 #include <QSystemTrayIcon>
@@ -16,12 +17,16 @@
 #include <cmath>
 
 namespace {
-// Silence before every sound and speech, while the audio output wakes up: an output that PipeWire or
-// PulseAudio suspended when idle, HDMI above all, can take over a second, an active one hardly any time.
-constexpr int kLeadingSilenceMs = 400;
-constexpr int kSuspendedSilenceMs = 1500;
+// A lead-in plays before every sound and speech while the audio output wakes up: an output that PipeWire
+// or PulseAudio suspended when idle, HDMI above all, can take over a second, an active one hardly any time.
+// The lead-in is noise far too quiet to hear rather than silence, because some monitors and TVs keep
+// their speakers muted until the signal is more than digital silence.
+constexpr int kLeadInMs = 400;
+constexpr int kSuspendedLeadInMs = 1500;
+// About -74 dB below full scale.
+constexpr int kLeadInNoise = 6;
 
-int leadingSilenceMs()
+int leadInMs()
 {
     const auto run = [](const QStringList &arguments) {
         QProcess pactl;
@@ -33,15 +38,22 @@ int leadingSilenceMs()
         }
         return QString::fromUtf8(pactl.readAllStandardOutput());
     };
-    if (QStandardPaths::findExecutable("pactl").isEmpty()) return kLeadingSilenceMs;
+    if (QStandardPaths::findExecutable("pactl").isEmpty()) return kLeadInMs;
     const QString sink = run({"get-default-sink"}).trimmed();
     // Lines are: index, name, driver, sample format, state.
     for (const QString &line : run({"list", "sinks", "short"}).split('\n')) {
         const QStringList fields = line.split('\t');
         if (fields.size() >= 5 && fields.at(1) == sink)
-            return fields.at(4).trimmed() == "SUSPENDED" ? kSuspendedSilenceMs : kLeadingSilenceMs;
+            return fields.at(4).trimmed() == "SUSPENDED" ? kSuspendedLeadInMs : kLeadInMs;
     }
-    return kLeadingSilenceMs;
+    return kLeadInMs;
+}
+
+QList<qint16> leadInSamples(qsizetype count)
+{
+    QList<qint16> samples(count);
+    for (qint16 &sample : samples) sample = qint16(QRandomGenerator::global()->bounded(-kLeadInNoise, kLeadInNoise + 1));
+    return samples;
 }
 constexpr int kSampleRate = 44100;
 
@@ -371,7 +383,7 @@ bool Notifier::say(const Settings &settings, const Voice &voice, const QString &
     // The speech is written to a WAV file and played with a short silence before it: an audio output that
     // was idle wakes up during its first moments, which would cut off the agent's name.
     const auto play = [this, output](bool success) {
-        if (success) addLeadingSilence(output, leadingSilenceMs());
+        if (success) addLeadIn(output, leadInMs());
         if (!success || !playSoundFile(output, true)) removeTemporaryFile(output);
     };
     if (espeak) {
@@ -388,8 +400,7 @@ bool Notifier::say(const Settings &settings, const Voice &voice, const QString &
     return true;
 }
 
-// Inserts silence at the start of the samples of a PCM WAV file; returns false when the file is not one.
-bool Notifier::addLeadingSilence(const QString &file, int milliseconds)
+bool Notifier::addLeadIn(const QString &file, int milliseconds)
 {
     QFile wav(file);
     if (!wav.open(QIODevice::ReadWrite)) return false;
@@ -405,18 +416,29 @@ bool Notifier::addLeadingSilence(const QString &file, int milliseconds)
     if (bytes.size() < 12 || !bytes.startsWith("RIFF") || bytes.mid(8, 4) != "WAVE") return false;
     quint32 blockAlign = 0;
     quint32 byteRate = 0;
+    int bits = 0;
     for (qsizetype at = 12; at + 8 <= bytes.size();) {
         const QByteArray id = bytes.mid(at, 4);
         const quint32 size = read32(at + 4);
         if (id == "fmt " && at + 24 <= bytes.size()) {
             byteRate = read32(at + 16);
             blockAlign = quint8(bytes.at(at + 20)) | quint8(bytes.at(at + 21)) << 8;
+            bits = quint8(bytes.at(at + 22)) | quint8(bytes.at(at + 23)) << 8;
         } else if (id == "data") {
             if (!blockAlign || !byteRate) return false;
-            const quint32 silence = quint32(qint64(byteRate) * milliseconds / 1000) / blockAlign * blockAlign;
-            bytes.insert(at + 8, QByteArray(silence, '\0'));
-            write32(at + 4, size + silence);
-            write32(4, read32(4) + silence);
+            const quint32 length = quint32(qint64(byteRate) * milliseconds / 1000) / blockAlign * blockAlign;
+            // 16-bit samples get the quiet noise; other formats fall back to silence.
+            QByteArray leadIn(length, '\0');
+            if (bits == 16) {
+                const QList<qint16> noise = leadInSamples(length / 2);
+                for (qsizetype i = 0; i < noise.size(); ++i) {
+                    leadIn[2 * i] = char(quint16(noise.at(i)) & 0xff);
+                    leadIn[2 * i + 1] = char(quint16(noise.at(i)) >> 8);
+                }
+            }
+            bytes.insert(at + 8, leadIn);
+            write32(at + 4, size + length);
+            write32(4, read32(4) + length);
             return wav.seek(0) && wav.write(bytes) == bytes.size();
         }
         at += 8 + size + (size & 1);
@@ -482,7 +504,7 @@ bool Notifier::playSoundOrBuiltIn(const QString &sound)
     if (samples.isEmpty()) return playSoundFile(sound, false);
     const QString file = writeTemporaryWav(samples);
     if (file.isEmpty()) return false;
-    addLeadingSilence(file, leadingSilenceMs());
+    addLeadIn(file, leadInMs());
     if (!playSoundFile(file, true)) {
         QFile::remove(file);
         return false;
@@ -518,39 +540,31 @@ QString Notifier::writeTemporaryWav(const QList<qint16> &samples)
 }
 
 // An audio output that was idle wakes up during the first moments of playback, which would cut off the
-// start of a short sound, so every sound begins after leadingSilenceMs(). Generated files (built-in sounds
-// and speech) begin with that silence. Other files are
-// delayed by ffplay or mpv; pw-play and paplay, which cannot delay them, first play a file of silence and
-// then the sound, while the output, woken by the silence, is still awake.
+// start of a short sound, so every sound begins after the lead-in. Generated files (built-in sounds and
+// speech) begin with it; before other files, of any format and with any player, a file of the lead-in
+// plays first, and the sound follows while the output, woken by it, is still awake.
 bool Notifier::playSoundFile(const QString &file, bool temporary)
 {
     if (file.isEmpty() || !QFileInfo(file).isFile()) return false;
-    const int silence = temporary ? 0 : leadingSilenceMs();
-    const QString delay = QString("adelay=%1:all=1").arg(silence);
-    const QList<QStringList> players{
-        temporary ? QStringList{"ffplay", "-nodisp", "-autoexit", "-loglevel", "quiet"}
-                  : QStringList{"ffplay", "-nodisp", "-autoexit", "-loglevel", "quiet", "-af", delay},
-        temporary ? QStringList{"mpv", "--no-video", "--really-quiet"}
-                  : QStringList{"mpv", "--no-video", "--really-quiet", "--af=lavfi=[" + delay + "]"},
-        {"pw-play"},
-        {"paplay"}};
+    const QList<QStringList> players{{"ffplay", "-nodisp", "-autoexit", "-loglevel", "quiet"},
+                                     {"mpv", "--no-video", "--really-quiet"},
+                                     {"pw-play"},
+                                     {"paplay"}};
     for (const QStringList &player : players) {
         const QString program = QStandardPaths::findExecutable(player.first());
         if (program.isEmpty()) continue;
         const QStringList options = player.mid(1);
-        const QString silenceFile = temporary || player.first() == "ffplay" || player.first() == "mpv"
-            ? QString() : writeTemporaryWav(QList<qint16>(kSampleRate * silence / 1000, 0));
-        if (silenceFile.isEmpty()) {
+        const QString leadIn = temporary ? QString() : writeTemporaryWav(leadInSamples(qsizetype(kSampleRate) * leadInMs() / 1000));
+        if (leadIn.isEmpty()) {
             startPlaybackProcess(program, options + QStringList{file}, [this, file, temporary](bool) {
                 if (temporary) removeTemporaryFile(file);
             });
             return true;
         }
-        temporaryFiles_.append(silenceFile);
-        // Stopping the silence also cancels the sound.
-        startPlaybackProcess(program, options + QStringList{silenceFile},
-                             [this, program, options, file, silenceFile](bool completed) {
-            removeTemporaryFile(silenceFile);
+        temporaryFiles_.append(leadIn);
+        // Stopping the lead-in also cancels the sound.
+        startPlaybackProcess(program, options + QStringList{leadIn}, [this, program, options, file, leadIn](bool completed) {
+            removeTemporaryFile(leadIn);
             if (completed) startPlaybackProcess(program, options + QStringList{file});
         });
         return true;

@@ -414,11 +414,14 @@ gives the language and the voice's name). espeak-ng's mechanical voice is offere
 only for a language without a Piper voice. Polish is spoken in Polish sentences,
 other languages in English ones. The speech is generated when needed, so the
 repository contains no audio files; when no voice can speak, a double click plays
-instead. Sounds and speech start after a short silence, so that an audio output
-waking up does not cut off a short sound or the agent's name: ffplay and mpv delay
-sound files, and pw-play and paplay play the silence before them. It is 0.4 s, or
-1.5 s when `pactl` reports the default output as suspended, since an idle output,
-HDMI above all, can take over a second to wake up.
+instead. Sounds and speech start after a short lead-in, so that an audio output
+waking up does not cut off a short sound or the agent's name. The lead-in is noise
+far too quiet to hear (about −74 dB) rather than silence, because some monitors and
+TVs keep their speakers muted until the signal is more than digital silence.
+Built-in sounds and speech begin with it, and a sound file plays after a separate
+lead-in, with any player and in any format. It lasts 0.4 s, or 1.5 s when `pactl`
+reports the default output as suspended, since an idle output, HDMI above all,
+can take over a second to wake up.
 
 When short sounds are still cut off, or the delay is unwelcome, it can be worth
 keeping the output awake. With PipeWire, a WirePlumber rule does that, for example
