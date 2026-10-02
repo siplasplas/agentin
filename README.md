@@ -28,6 +28,14 @@ cmake --build build
 ./build/agentin -C /path/to/project
 ```
 
+The first CMake configuration downloads
+[backward-cpp](https://github.com/bombela/backward-cpp), which writes a stack
+trace with files and line numbers when the application crashes. After the
+command line is read, diagnostics go to `agentin-crash.log` in the application
+data directory (for example `~/.local/share/agentin/agentin-crash.log`) instead
+of the terminal; each start adds a header with the version and time, and a
+crash appends its stack trace.
+
 `cmake --install build` (with `--prefix` to choose another location) installs
 `bin/agentin` and the Claude bridge as `share/agentin/claude_bridge.py`. The
 executable uses the bridge next to itself, as in the build directory, and
@@ -115,6 +123,10 @@ choice is saved:
   directory there are two levels. Directories you open or close afterwards
   stay so until the next choice.
 
+The selected agent, directory or chat stays selected when these choices
+rebuild the tree; a row in a closed branch is represented by the closed row
+that contains it.
+
 Expanding Codex
 loads its conversations through App Server, including chats from Codex CLI,
 Codex desktop, and this application when they use the same local Codex data.
@@ -158,7 +170,10 @@ Antigravity index to remain available.
 Use the **New chat…** button, Ctrl+T, **Conversations → New conversation in
 directory…**, or type `new` to start a chat. Ctrl+W closes the current tab. In the dialog, choose the agent,
 then enter a directory path or choose one with **Browse…**, which also lists
-recently used directories. The **Create chat**
+recently used directories. The path starts as the directory selected in the
+conversation tree, or the directory of the selected chat; otherwise, for
+example when an agent row is selected, it is the directory last chosen in this
+dialog. The **Create chat**
 button is available only when that directory exists. Each chat opens in its own
 tab and has one working directory; files under that directory are available
 subject to the selected agent's permissions. At startup one Codex tab is ready

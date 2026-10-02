@@ -56,6 +56,7 @@
 #include <QTextCursor>
 #include <QTextDocument>
 #include <QTreeWidget>
+#include <QTreeWidgetItemIterator>
 #include <QVBoxLayout>
 #include <QWidget>
 
@@ -1362,7 +1363,11 @@ void MainWindow::rememberRecentDirectory(const QString &path)
 void MainWindow::showNewConversationDialog()
 {
     const ChatTab *tab = currentTab();
-    const QString currentPath = tab ? tab->workingDirectory() : workingDirectory_;
+    // A directory or chat selected in the tree gives its directory; otherwise the last one chosen here.
+    const QTreeWidgetItem *selected = conversationTree_->currentItem();
+    QString currentPath = selected ? selected->data(0, Qt::UserRole + 2).toString() : QString();
+    if (currentPath.isEmpty()) currentPath = recentDirectories_.value(0);
+    if (currentPath.isEmpty()) currentPath = tab ? tab->workingDirectory() : workingDirectory_;
     QDialog dialog(this);
     dialog.setWindowTitle("New conversation");
     auto *layout = new QVBoxLayout(&dialog);
@@ -1428,6 +1433,21 @@ void MainWindow::newConversation(AgentProvider *selected, const QString &path)
 void MainWindow::refreshConversationTree()
 {
     const QSignalBlocker blocker(conversationTree_);
+    // The selected agent, directory or chat stays selected when the tree is rebuilt or regrouped.
+    QString selectedKind, selectedName, selectedId, selectedPath;
+    if (const QTreeWidgetItem *selected = conversationTree_->currentItem()) {
+        selectedKind = selected->data(0, Qt::UserRole).toString();
+        if (selectedKind == "provider") {
+            selectedName = selected->text(0);
+        } else if (selectedKind == "directory") {
+            selectedName = selected->parent() ? selected->parent()->text(0) : QString();
+            selectedPath = selected->data(0, Qt::UserRole + 2).toString();
+        } else {
+            selectedName = selectedKind;
+            selectedKind = "chat";
+            selectedId = selected->data(0, Qt::UserRole + 1).toString();
+        }
+    }
     conversationTree_->clear();
     if (treeByDirectory_) {
         QList<QJsonObject> chats;
@@ -1444,7 +1464,32 @@ void MainWindow::refreshConversationTree()
             addDirectoryItems(root, treeChats(listed));
         }
     }
-    revealCurrentConversation(false);
+    QTreeWidgetItem *match = nullptr;
+    for (QTreeWidgetItemIterator it(conversationTree_); *it && !selectedKind.isEmpty(); ++it) {
+        QTreeWidgetItem *item = *it;
+        const QString kind = item->data(0, Qt::UserRole).toString();
+        if (selectedKind == "provider" ? kind == "provider" && item->text(0) == selectedName
+            : selectedKind == "directory" ? kind == "directory" && item->data(0, Qt::UserRole + 2).toString() == selectedPath
+            : kind == selectedName && item->data(0, Qt::UserRole + 1).toString() == selectedId) {
+            // The same directory under the same agent is preferred over its rows under other agents.
+            if (!match || (item->parent() && item->parent()->text(0) == selectedName)) match = item;
+            if (selectedKind != "directory") break;
+        }
+    }
+    // A chat under an agent row that is closed, and so has no rows, is represented by that agent.
+    for (int i = 0; !match && selectedKind != "provider" && i < conversationTree_->topLevelItemCount(); ++i) {
+        QTreeWidgetItem *top = conversationTree_->topLevelItem(i);
+        if (top->data(0, Qt::UserRole).toString() == "provider" && top->text(0) == selectedName) match = top;
+    }
+    if (!match) {
+        revealCurrentConversation(false);
+        return;
+    }
+    // A row inside a closed branch is represented by the closed row that contains it.
+    for (QTreeWidgetItem *parent = match->parent(); parent; parent = parent->parent())
+        if (!parent->isExpanded()) match = parent;
+    conversationTree_->setCurrentItem(match);
+    conversationTree_->scrollToItem(match);
 }
 
 // Restored chats must be reachable even before the provider finishes its discovery. Each chat gets

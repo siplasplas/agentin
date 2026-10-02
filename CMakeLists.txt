@@ -11,6 +11,19 @@ find_package(Qt6 REQUIRED COMPONENTS Widgets)
 find_package(qt-extra 2.1 REQUIRED)
 configure_file(claude/bridge.py ${CMAKE_CURRENT_BINARY_DIR}/claude_bridge.py COPYONLY)
 
+# backward-cpp writes a stack trace after a crash; it declares compatibility with older CMake releases.
+if(CMAKE_VERSION VERSION_GREATER_EQUAL 4.0)
+    set(CMAKE_POLICY_VERSION_MINIMUM 3.5)
+endif()
+include(FetchContent)
+FetchContent_Declare(
+    backward
+    GIT_REPOSITORY https://github.com/bombela/backward-cpp.git
+    GIT_TAG 0bfd0a07a61551413ccd2ab9a9099af3bad40681
+    GIT_SHALLOW TRUE
+)
+FetchContent_MakeAvailable(backward)
+
 add_executable(agentin
     src/main.cpp
     src/CodexLocator.cpp
@@ -49,8 +62,12 @@ add_executable(agentin
     src/Notifier.cpp
     src/Notifier.h
 )
-target_link_libraries(agentin PRIVATE Qt6::Widgets qt-extra)
+target_link_libraries(agentin PRIVATE Qt6::Widgets qt-extra Backward::Object)
 target_include_directories(agentin PRIVATE src)
+# Keeps the information backward-cpp needs for files and line numbers, also in optimized builds.
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(agentin PRIVATE -g -fno-omit-frame-pointer)
+endif()
 
 include(GNUInstallDirs)
 install(TARGETS agentin RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})

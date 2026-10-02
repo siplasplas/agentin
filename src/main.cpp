@@ -4,8 +4,13 @@
 #include <QApplication>
 #include <QCommandLineOption>
 #include <QCommandLineParser>
+#include <QDateTime>
 #include <QDir>
 #include <QFileInfo>
+#include <QStandardPaths>
+#include <backward.hpp>
+
+#include <cstdio>
 
 int main(int argc, char *argv[])
 {
@@ -30,6 +35,18 @@ int main(int argc, char *argv[])
     parser.addOption(geminiOption);
     parser.addOption(antigravityOption);
     parser.process(app);
+
+    // Diagnostics and, after a fatal signal or an unhandled exception, backward-cpp's stack trace go
+    // to the crash log instead of the terminal.
+    const QString dataDirectory = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation);
+    QDir().mkpath(dataDirectory);
+    const QString crashLog = QDir(dataDirectory).filePath("agentin-crash.log");
+    if (std::freopen(crashLog.toLocal8Bit().constData(), "a", stderr)) {
+        std::setvbuf(stderr, nullptr, _IONBF, 0);
+        std::fprintf(stderr, "\n=== agentin %s, started %s ===\n", qPrintable(QCoreApplication::applicationVersion()),
+                     qPrintable(QDateTime::currentDateTime().toString(Qt::ISODate)));
+    }
+    static backward::SignalHandling crashHandler;
 
     const QString codexProgram = parser.isSet(codexOption) ? parser.value(codexOption) : locateCodex();
     QString claudePython = parser.value(claudePythonOption);
