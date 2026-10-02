@@ -98,6 +98,11 @@ private:
     QSet<QString> trustedSessionCommands_;
     QString trustedConversationId_;
     QHash<int, QString> requestSessionRules_;
+    // Additional permissions Codex asked for, by approval request.
+    QHash<int, QJsonObject> permissionRequests_;
+    // Directories Codex may also write to after a permission request, for this turn or this thread.
+    QStringList turnWriteRoots_;
+    QStringList sessionWriteRoots_;
     int nextServerRequest_ = 1;
     QString historyThreadId_;
     QString historyCursor_;

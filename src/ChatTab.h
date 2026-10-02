@@ -120,6 +120,8 @@ private:
     // Returns false when the agent refused the message.
     bool dispatch();
     void releaseDirectory();
+    QString lockOwner() const;
+    QString lockLabel() const;
     void updateTaskClock();
     void finishCompactionClock();
     QElapsedTimer taskClock_;

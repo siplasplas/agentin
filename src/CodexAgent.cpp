@@ -8,6 +8,48 @@
 namespace {
 constexpr int kHistoryPageSize = 40;
 
+// A path, glob pattern or special location of a Codex permission request, as text.
+QString permissionPath(const QJsonObject &path)
+{
+    const QString type = path.value("type").toString();
+    if (type == "path") return path.value("path").toString();
+    if (type == "glob_pattern") return path.value("pattern").toString();
+    const QJsonObject special = path.value("value").toObject();
+    const QString subpath = special.value("subpath").toString();
+    return "(" + special.value("kind").toString() + (subpath.isEmpty() ? QString() : ": " + subpath) + ")";
+}
+
+// The file system part of a permission profile as pairs of access and path, including the older lists.
+QList<QPair<QString, QString>> permissionEntries(const QJsonObject &permissions)
+{
+    const QJsonObject fileSystem = permissions.value("fileSystem").toObject();
+    QList<QPair<QString, QString>> entries;
+    for (const QJsonValue &value : fileSystem.value("entries").toArray()) {
+        const QJsonObject entry = value.toObject();
+        entries.append({entry.value("access").toString(), permissionPath(entry.value("path").toObject())});
+    }
+    for (const QString &access : {QStringLiteral("read"), QStringLiteral("write")})
+        for (const QJsonValue &path : fileSystem.value(access).toArray()) entries.append({access, path.toString()});
+    return entries;
+}
+
+// Plain directories granted for writing; patterns and special locations cannot be held by the directory lock.
+QStringList permissionWriteRoots(const QJsonObject &permissions)
+{
+    QStringList roots;
+    const QJsonObject fileSystem = permissions.value("fileSystem").toObject();
+    for (const QJsonValue &value : fileSystem.value("entries").toArray()) {
+        const QJsonObject entry = value.toObject();
+        const QJsonObject path = entry.value("path").toObject();
+        if (entry.value("access").toString() == "write" && path.value("type").toString() == "path")
+            roots.append(path.value("path").toString());
+    }
+    for (const QJsonValue &path : fileSystem.value("write").toArray()) roots.append(path.toString());
+    roots.removeAll(QString());
+    roots.removeDuplicates();
+    return roots;
+}
+
 QString reasoningText(const QJsonObject &item)
 {
     QStringList parts;
@@ -53,6 +95,7 @@ CodexAgent::CodexAgent(CodexConnection *connection, const QString &workingDirect
     : AgentBackend(parent), connection_(connection), workingDirectory_(workingDirectory)
 {
     connect(connection, &CodexConnection::stateChanged, this, &AgentBackend::stateChanged);
+    connect(this, &AgentBackend::turnCompleted, this, [this] { turnWriteRoots_.clear(); });
     connect(connection, &CodexConnection::connected, this, [this] {
         if (historyPending_) loadHistory(historyThreadId_, {}, false);
         // After a restart the chat continues its thread; a queued message waits until it is open.
@@ -82,6 +125,8 @@ CodexAgent::CodexAgent(CodexConnection *connection, const QString &workingDirect
         pendingQuestions_.clear();
         proposedRules_.clear();
         requestSessionRules_.clear();
+        permissionRequests_.clear();
+        sessionWriteRoots_.clear();
         queuedPrompts_.clear();
         if (refreshingHistory_) ++historyGeneration_;
         refreshingHistory_ = false;
@@ -325,6 +370,24 @@ void CodexAgent::answerApproval(int id, ApprovalDecision decision)
     const QJsonArray rule = proposedRules_.take(id);
     const QString sessionRule = requestSessionRules_.take(id);
     if (requestId.isUndefined() || !connection_) return;
+    if (permissionRequests_.contains(id)) {
+        // The grant lasts for this turn or for the thread's session; Codex keeps it, nothing is saved.
+        const QJsonObject permissions = permissionRequests_.take(id);
+        const bool granted = decision == ApprovalDecision::Accept || decision == ApprovalDecision::AcceptAlways
+            || decision == ApprovalDecision::AcceptForSession;
+        const bool session = decision == ApprovalDecision::AcceptForSession;
+        connection_->respond(requestId, {{"permissions", granted ? permissions : QJsonObject()},
+                                         {"scope", session ? "session" : "turn"}});
+        if (granted) {
+            QStringList &roots = session ? sessionWriteRoots_ : turnWriteRoots_;
+            for (const QString &root : permissionWriteRoots(permissions))
+                if (!roots.contains(root)) roots.append(root);
+        }
+        emit message(QString("[Permissions: ") + (granted ? (session ? "granted for the session" : "granted for this turn")
+                                                         : "declined") + "]");
+        if (decision == ApprovalDecision::Cancel) interrupt();
+        return;
+    }
     if (!sessionRule.isEmpty() && decision == ApprovalDecision::AcceptForSession) {
         trustedSessionCommands_.insert(sessionRule);
         trustedConversationId_ = threadId_;
@@ -399,6 +462,8 @@ QStringList CodexAgent::writableDirectories() const
     if (readOnly_) return {};
     QStringList directories;
     for (const QJsonValue &root : sandboxPolicy().value("writableRoots").toArray()) directories.append(root.toString());
+    for (const QString &root : sessionWriteRoots_ + turnWriteRoots_)
+        if (!directories.contains(root)) directories.append(root);
     return directories;
 }
 
@@ -452,6 +517,8 @@ void CodexAgent::closeThread()
     pendingQuestions_.clear();
     proposedRules_.clear();
     requestSessionRules_.clear();
+    permissionRequests_.clear();
+    sessionWriteRoots_.clear();
     if (connection_ && !threadId_.isEmpty()) {
         connection_->unregisterThread(threadId_);
         connection_->request("thread/unsubscribe", {{"threadId", threadId_}});
@@ -561,6 +628,7 @@ void CodexAgent::handleNotification(const QString &method, const QJsonObject &pa
             pendingQuestions_.remove(id);
             proposedRules_.remove(id);
             requestSessionRules_.remove(id);
+            permissionRequests_.remove(id);
             emit requestResolved(id);
             break;
         }
@@ -724,6 +792,20 @@ void CodexAgent::handleServerRequest(const QString &method, const QJsonValue &id
             alwaysRule = "Allow commands starting with \"" + words.join(' ') + "\" without asking";
         }
         emit approvalRequested(requestId, "Approve Codex action", description.trimmed(), true, alwaysRule, sessionRule);
+    } else if (method == "item/permissions/requestApproval") {
+        const QJsonObject permissions = params.value("permissions").toObject();
+        QStringList lines{params.value("reason").toString()};
+        for (const auto &[access, path] : permissionEntries(permissions)) {
+            const QString label = access == "write" ? "Write" : (access == "read" ? "Read" : "No access");
+            lines.append(label + ": " + path);
+        }
+        if (permissions.value("network").toObject().value("enabled").toBool()) lines.append("Network access");
+        lines.append("Directory: " + params.value("cwd").toString());
+        lines.removeAll(QString());
+        const int requestId = nextServerRequest_++;
+        serverRequests_.insert(requestId, id);
+        permissionRequests_.insert(requestId, permissions);
+        emit approvalRequested(requestId, "Codex asks for additional permissions", lines.join('\n'), true, {});
     } else if (method == "item/tool/requestUserInput" || method == "tool/requestUserInput") {
         QList<AgentQuestion> questions;
         for (const QJsonValue &value : params.value("questions").toArray()) {

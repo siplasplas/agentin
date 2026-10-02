@@ -499,6 +499,17 @@ Trust belongs to one conversation in one chat and ends when changing the
 conversation or exiting the application.
 Network approval requests require their own decision.
 
+Codex can also ask for additional permissions, such as writing to or reading
+directories outside the chat's directory, or network access. The panel lists
+each path with its access and the reason. **Accept** grants them for the
+current turn and **Accept for session** until the chat's thread is closed;
+Codex keeps the grant, and nothing is saved in its configuration. Declining
+grants nothing, and **Decline and stop** also ends the turn. Directories
+granted for writing join the directory lock: from the next turn, and at once
+for the running turn when no other chat holds them; otherwise the chat and the
+log say that the directory is also used by that chat. Patterns and special
+locations, such as the temporary directory, are granted but not locked.
+
 Incoming Codex command approval requests for `git push`, `sudo`, `doas`, `su`,
 and system package changes through apt/apt-get, dnf/dnf5, yum, zypper, pacman,
 apk, pkg, or brew are automatically declined. On Windows, runas and recognized

@@ -57,9 +57,7 @@ bool ChatTab::dispatch()
     // A read-only turn in a sandbox cannot change files, so it neither takes nor waits for the directory;
     // an agent that only promises not to change files still waits.
     if (locks_ && !holdsDirectory_ && !(agent_->isReadOnly() && agent_->readOnlyIsEnforced())) {
-        const QString label = provider_->name() + " chat \"" + title_.left(40) + "\"";
-        const QString holder = locks_->acquire(QString("%1").arg(quintptr(this)),
-                                               QStringList{path_} + agent_->writableDirectories(), label);
+        const QString holder = locks_->acquire(lockOwner(), QStringList{path_} + agent_->writableDirectories(), lockLabel());
         if (!holder.isEmpty()) {
             if (waitingFor_ != holder) {
                 waitingFor_ = holder;
@@ -92,7 +90,17 @@ void ChatTab::releaseDirectory()
 {
     if (!holdsDirectory_) return;
     holdsDirectory_ = false;
-    if (locks_) locks_->release(QString("%1").arg(quintptr(this)));
+    if (locks_) locks_->release(lockOwner());
+}
+
+QString ChatTab::lockOwner() const
+{
+    return QString::number(quintptr(this));
+}
+
+QString ChatTab::lockLabel() const
+{
+    return provider_->name() + " chat \"" + title_.left(40) + "\"";
 }
 
 namespace {
@@ -636,7 +644,19 @@ void ChatTab::answerApproval(ApprovalDecision decision)
         for (QString &line : lines) line = line.trimmed();
         sessionApprovals_.append(lines.join(" · "));
     }
+    const QStringList writableBefore = agent_->writableDirectories();
     agent_->answerApproval(request.id, decision);
+    // Write access granted during a turn joins the directories the turn holds. When another chat holds
+    // one of them, the turn keeps what it held; the access was granted anyway, so this is reported.
+    if (holdsDirectory_ && locks_ && agent_->writableDirectories() != writableBefore) {
+        const QString holder = locks_->acquire(lockOwner(), QStringList{path_} + agent_->writableDirectories(), lockLabel());
+        if (!holder.isEmpty()) {
+            locks_->acquire(lockOwner(), QStringList{path_} + writableBefore, lockLabel());
+            const QString warning = "[" + provider_->name() + " may now write to a directory used by " + holder + "]";
+            emit logMessage(warning);
+            appendText(warning + '\n');
+        }
+    }
     emit requestsChanged();
 }
 
