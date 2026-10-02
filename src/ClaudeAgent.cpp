@@ -1,4 +1,5 @@
 #include "ClaudeAgent.h"
+#include "CommandApproval.h"
 
 #include "ProcessLocks.h"
 
@@ -694,6 +695,16 @@ void ClaudeAgent::handleLine(const QByteArray &line)
         emit stateChanged();
         sendNextPrompt();
     } else if (type == "approval") {
+        if (event.value("tool").toString() == "Bash" && !readOnly_) {
+            const QString command = event.value("input").toObject().value("command").toString();
+            const QString trusted = classifyCommandApproval(command).deniedReason.isEmpty()
+                ? trustedCommandRule(command) : QString();
+            if (!trusted.isEmpty()) {
+                send({{"type", "approval_response"}, {"id", event.value("id").toInt()}, {"allow", true}, {"decision", "accept"}});
+                emit message("[Allowed without asking, as the options say: " + trusted + "]");
+                return;
+            }
+        }
         const QString details = QString::fromUtf8(QJsonDocument(event.value("input").toObject()).toJson(QJsonDocument::Indented));
         emit approvalRequested(event.value("id").toInt(), "Approve " + name_ + " action",
                                event.value("tool").toString() + "\n\n" + details.trimmed(),

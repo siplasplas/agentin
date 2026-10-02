@@ -594,6 +594,18 @@ cannot read, write or run other files. Anything the shell would expand or
 chain, unquoted here-documents, relative paths going up with `..`, scripts and
 all other commands still ask.
 
+**Settings → Options…** lists commands that run without asking, by their first
+words; it starts with `git add` and `git commit`. Entries can be added, edited
+with a double-click, and unchecked to keep them listed without effect. A shell
+command of a Codex, Claude or GLM chat is allowed when every command of it starts
+with a checked entry, also in a chain joined by `&&`, `||`, `;` or `|`, in a
+`bash -lc '…'` wrapper, and after Git's `-C`, `--git-dir` or `--work-tree`
+options. A commit message given as `"$(cat <<'EOF' … EOF)"`, as Claude Code
+writes it, counts as plain text. Redirections, other substitutions, variables,
+subshells, background jobs and `git push` always ask or are declined as before,
+and read-only chats do not use the list. The log notes each command allowed this
+way.
+
 For Codex command approval requests, **Trust git add for this chat** and
 **Trust git commit for this chat** remember the command family in agentin's
 memory, without writing a lasting Codex rule. Matching simple commands receive

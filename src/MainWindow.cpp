@@ -2,6 +2,7 @@
 #include "ApprovalRules.h"
 #include "ChatTab.h"
 #include "ChatView.h"
+#include "CommandApproval.h"
 #include "ChangesWindow.h"
 #include "ChangeTracker.h"
 #include "ClaudeAgent.h"
@@ -36,6 +37,7 @@
 #include <QJsonObject>
 #include <QLabel>
 #include <QLineEdit>
+#include <QListWidget>
 #include <QActionGroup>
 #include <QMenu>
 #include <QMenuBar>
@@ -1149,6 +1151,16 @@ void MainWindow::loadSettings()
     undoAfterSend_ = settings.value("undoAfterSend").toBool(true);
     experimentalAgents_ = settings.value("experimentalAgents").toBool(false);
     openRules_ = FileOpener::rulesFromJson(settings.value("openWith").toArray());
+    trustedCommands_.clear();
+    if (settings.value("trustedCommands").isArray()) {
+        for (const QJsonValue &value : settings.value("trustedCommands").toArray()) {
+            const QString command = value.toObject().value("command").toString().simplified();
+            if (!command.isEmpty()) trustedCommands_.append({command, value.toObject().value("enabled").toBool(true)});
+        }
+    } else {
+        for (const QString &command : defaultTrustedCommands()) trustedCommands_.append({command, true});
+    }
+    applyTrustedCommands();
     fastChats_.clear();
     for (const QJsonValue &value : settings.value("fastChats").toArray())
         if (!value.toString().isEmpty()) fastChats_.append(value.toString());
@@ -1219,6 +1231,9 @@ void MainWindow::saveSettings()
     QJsonObject agents;
     for (const AgentProvider *listed : providers_)
         agents.insert(listed->name(), QJsonObject{{"model", listed->defaultModel()}, {"effort", listed->defaultEffort()}});
+    QJsonArray trusted;
+    for (const TrustedCommand &entry : trustedCommands_)
+        trusted.append(QJsonObject{{"command", entry.command}, {"enabled", entry.enabled}});
     if (!QDir().mkpath(dataDirectory_)) return;
     QSaveFile file(QDir(dataDirectory_).filePath("settings.json"));
     if (!file.open(QIODevice::WriteOnly)
@@ -1228,6 +1243,7 @@ void MainWindow::saveSettings()
                                                          {"experimentalAgents", experimentalAgents_},
                                                          {"openWith", FileOpener::rulesToJson(openRules_)},
                                                          {"fastChats", QJsonArray::fromStringList(fastChats_)},
+                                                         {"trustedCommands", trusted},
                                                          {"conversationTree", QJsonObject{
                                                              {"groupBy", treeByDirectory_ ? "directory" : "agent"},
                                                              {"chatOrder", chatsByModified_ ? "modified" : "created"},
@@ -1341,6 +1357,34 @@ void MainWindow::showOptionsDialog()
     }
     if (codex_->models().isEmpty())
         layout->addWidget(new QLabel("Codex models appear here once the App Server is connected.", &dialog));
+    layout->addWidget(new QLabel("Commands that run without asking, by their first words (double-click to edit):", &dialog));
+    auto *trustedList = new QListWidget(&dialog);
+    trustedList->setObjectName("trustedCommands");
+    trustedList->setToolTip("A shell command runs without approval when it starts with a checked entry, also in a "
+                            "chain joined by &&, ||, ; or | where every command does. Redirections, $(...), variables "
+                            "and subshells always ask, and read-only chats never use this list.");
+    const auto addTrusted = [trustedList](const QString &command, bool enabled) {
+        auto *item = new QListWidgetItem(command, trustedList);
+        item->setFlags(item->flags() | Qt::ItemIsUserCheckable | Qt::ItemIsEditable);
+        item->setCheckState(enabled ? Qt::Checked : Qt::Unchecked);
+        return item;
+    };
+    for (const TrustedCommand &entry : trustedCommands_) addTrusted(entry.command, entry.enabled);
+    trustedList->setMaximumHeight(trustedList->sizeHintForRow(0) * 5 + 2 * trustedList->frameWidth() + 4);
+    auto *trustedButtons = new QHBoxLayout;
+    auto *addTrustedButton = new QPushButton("Add", &dialog);
+    auto *removeTrustedButton = new QPushButton("Remove", &dialog);
+    connect(addTrustedButton, &QPushButton::clicked, &dialog, [trustedList, addTrusted] {
+        QListWidgetItem *item = addTrusted(QString(), true);
+        trustedList->setCurrentItem(item);
+        trustedList->editItem(item);
+    });
+    connect(removeTrustedButton, &QPushButton::clicked, &dialog, [trustedList] { delete trustedList->currentItem(); });
+    trustedButtons->addWidget(addTrustedButton);
+    trustedButtons->addWidget(removeTrustedButton);
+    trustedButtons->addStretch(1);
+    layout->addWidget(trustedList);
+    layout->addLayout(trustedButtons);
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
     layout->addWidget(buttons);
     connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
@@ -1349,6 +1393,12 @@ void MainWindow::showOptionsDialog()
     input_->setEnterPolicy(MessageInput::EnterPolicy(enterInput->currentData().toInt()));
     input_->setShortMessageLength(shortLength->value());
     undoAfterSend_ = undoAfterSend->isChecked();
+    trustedCommands_.clear();
+    for (int i = 0; i < trustedList->count(); ++i) {
+        const QString command = trustedList->item(i)->text().simplified();
+        if (!command.isEmpty()) trustedCommands_.append({command, trustedList->item(i)->checkState() == Qt::Checked});
+    }
+    applyTrustedCommands();
     setExperimentalAgentsEnabled(experimental->isChecked());
     for (const Row &row : rows) {
         QString model = row.model->currentData().toString();
@@ -1363,6 +1413,14 @@ void MainWindow::showOptionsDialog()
     saveSettings();
     modelControlsState_.clear();
     updateModelControls();
+}
+
+void MainWindow::applyTrustedCommands()
+{
+    QStringList enabled;
+    for (const TrustedCommand &entry : trustedCommands_)
+        if (entry.enabled) enabled.append(entry.command);
+    setTrustedCommands(enabled);
 }
 
 void MainWindow::showMuteState()

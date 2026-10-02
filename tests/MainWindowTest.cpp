@@ -870,6 +870,9 @@ for line in sys.stdin:
     CodexAgent other(&connection, directory.path());
     QVERIFY(chat.newConversation(directory.path()));
     QTRY_COMPARE(chat.sessionId(), QString("test-thread"));
+    // Trust for one chat is tested without the commands the options allow everywhere.
+    setTrustedCommands({});
+    const auto restoreTrusted = qScopeGuard([] { setTrustedCommands(defaultTrustedCommands()); });
     QSignalSpy approvals(&chat, &AgentBackend::approvalRequested);
     const auto request = [&](int id, const QString &command, bool network = false) {
         QJsonObject params{{"command", command}, {"cwd", directory.path()},

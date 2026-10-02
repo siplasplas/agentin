@@ -786,7 +786,15 @@ void CodexAgent::handleServerRequest(const QString &method, const QJsonValue &id
                 emit message("[Approval automatically declined: " + command.deniedReason + "]");
                 return;
             }
-            if (params.value("networkApprovalContext").toObject().isEmpty()) sessionRule = command.sessionRule;
+            if (params.value("networkApprovalContext").toObject().isEmpty()) {
+                const QString trusted = isReadOnly() ? QString() : trustedCommandRule(params.value("command").toString());
+                if (!trusted.isEmpty()) {
+                    connection_->respond(id, {{"decision", "accept"}});
+                    emit message("[Allowed without asking, as the options say: " + trusted + "]");
+                    return;
+                }
+                sessionRule = command.sessionRule;
+            }
             if (!sessionRule.isEmpty() && trustedSessionCommands_.contains(sessionRule)) {
                 connection_->respond(id, {{"decision", "accept"}});
                 emit message("[Approval allowed by chat trust: " + sessionRule + "]");

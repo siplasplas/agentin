@@ -203,6 +203,14 @@ private:
     QList<OpenRule> openRules_;
     // Conversations whose Fast mode was last switched on, so that it is on again when they reopen.
     QStringList fastChats_;
+    // Commands that run without asking, as their leading words; unchecked ones stay listed but do not apply.
+    struct TrustedCommand
+    {
+        QString command;
+        bool enabled = true;
+    };
+    QList<TrustedCommand> trustedCommands_;
+    void applyTrustedCommands();
     bool sessionEnabled_ = false;
     // Restored Codex chats that continue once the App Server is connected.
     QList<QPointer<QWidget>> continueWhenConnected_;

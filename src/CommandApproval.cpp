@@ -215,3 +215,118 @@ CommandApproval classifyCommandApproval(const QString &command)
 {
     return classify(command, 0);
 }
+
+namespace {
+QStringList &trustedCommandList()
+{
+    static QStringList prefixes = defaultTrustedCommands();
+    return prefixes;
+}
+
+// Only words, quotes and the separators of a command list; anything that could run or write more is refused.
+bool plainCommandList(const QString &text)
+{
+    QChar quote;
+    for (qsizetype i = 0; i < text.size(); ++i) {
+        const QChar c = text.at(i);
+        if (c == '\\' && quote != '\'') {
+            ++i;
+            continue;
+        }
+        if (!quote.isNull()) {
+            if (c == quote) quote = QChar();
+            else if (quote == '"' && (c == '$' || c == '`')) return false;
+            continue;
+        }
+        if (c == '\'' || c == '"') quote = c;
+        else if (QString("<>()$`").contains(c)) return false;
+        else if (c == '&') {
+            if (i + 1 < text.size() && text.at(i + 1) == '&') ++i;
+            else return false;
+        }
+    }
+    return quote.isNull();
+}
+
+// A message given as "$(cat <<'EOF' ... EOF)", as Claude Code writes commits, is plain text: a quoted
+// delimiter turns off expansion in the here-document, which ends at the first line that is exactly the
+// delimiter. Such a substitution becomes a plain word; any other form is left for the checks to refuse.
+QString withoutLiteralMessages(QString text)
+{
+    static const QRegularExpression start(R"(\$\(cat <<(['"])(\w+)\1\n)");
+    qsizetype from = 0;
+    for (QRegularExpressionMatch match = start.match(text, from); match.hasMatch(); match = start.match(text, from)) {
+        const QString delimiter = match.captured(2);
+        qsizetype line = match.capturedEnd();
+        qsizetype end = -1;
+        while (line <= text.size()) {
+            qsizetype next = text.indexOf('\n', line);
+            if (next < 0) next = text.size();
+            if (text.mid(line, next - line) == delimiter) {
+                end = next;
+                break;
+            }
+            line = next + 1;
+        }
+        if (end < 0) return text;
+        qsizetype close = end;
+        while (close < text.size() && text.at(close).isSpace()) ++close;
+        if (close >= text.size() || text.at(close) != ')') return text;
+        text.replace(match.capturedStart(), close + 1 - match.capturedStart(), "message");
+        from = match.capturedStart() + 7;
+    }
+    return text;
+}
+}
+
+QStringList defaultTrustedCommands()
+{
+    return {"git add", "git commit"};
+}
+
+QStringList trustedCommands()
+{
+    return trustedCommandList();
+}
+
+void setTrustedCommands(const QStringList &prefixes)
+{
+    trustedCommandList() = prefixes;
+}
+
+QString trustedCommandRule(const QString &command)
+{
+    if (trustedCommandList().isEmpty()) return {};
+    const QString text = withoutLiteralMessages(command);
+    if (!plainCommandList(text)) return {};
+    const ShellWords parsed = words(text);
+    if (!parsed.valid || parsed.commands.isEmpty() || !parsed.substitutions.isEmpty()) return {};
+    // A whole command line wrapped in a shell, as Codex runs it, is judged by its script.
+    const QStringList &only = parsed.commands.first();
+    if (parsed.commands.size() == 1 && only.size() == 3 && (only.at(1) == "-c" || only.at(1) == "-lc")
+        && QStringList{"sh", "bash", "zsh", "/bin/sh", "/bin/bash", "/bin/zsh", "/usr/bin/bash", "/usr/bin/zsh"}
+               .contains(only.first()))
+        return trustedCommandRule(only.at(2));
+    QStringList rules;
+    for (QStringList args : parsed.commands) {
+        if (args.first().contains('=')) return {};
+        if (args.first() == "git") {
+            int i = 1;
+            while (i < args.size()) {
+                const QString option = args.at(i);
+                if (option == "-C" || option == "--git-dir" || option == "--work-tree") i += 2;
+                else if (option.startsWith("--git-dir=") || option.startsWith("--work-tree=")) ++i;
+                else break;
+            }
+            args = QStringList{"git"} + args.mid(qMin(i, int(args.size())));
+        }
+        QString rule;
+        for (const QString &prefix : trustedCommandList()) {
+            const QStringList words = prefix.split(' ', Qt::SkipEmptyParts);
+            if (!words.isEmpty() && args.mid(0, words.size()) == words) rule = words.join(' ');
+        }
+        if (rule.isEmpty()) return {};
+        if (!rules.contains(rule)) rules.append(rule);
+    }
+    return rules.join(", ");
+}
