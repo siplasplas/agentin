@@ -300,9 +300,9 @@ void ChangesWindow::updateList()
         QString removed;
         switch (change.lines.kind) {
         case LineChanges::Kind::Counted:
-            // A new file's lines count as added.
+            // A new file's lines count as added; it has nothing removed to show.
             added = "+" + QString::number(change.lines.added);
-            removed = "−" + QString::number(change.file.status == ChangedFile::Status::New ? 0 : change.lines.removed);
+            if (change.file.status != ChangedFile::Status::New) removed = "−" + QString::number(change.lines.removed);
             break;
         case LineChanges::Kind::Binary:
             path += "  (binary, " + byteSize(change.file.sizeBefore) + " → " + byteSize(change.file.sizeAfter) + ")";
