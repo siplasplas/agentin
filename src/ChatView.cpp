@@ -4,6 +4,8 @@
 #include <QPaintEvent>
 #include <QPainter>
 #include <QResizeEvent>
+#include <QToolButton>
+#include <QScrollBar>
 #include <QSet>
 #include <QPlainTextDocumentLayout>
 #include <QRegularExpression>
@@ -29,6 +31,59 @@ void UserMessageHighlighter::highlightBlock(const QString &text)
     // Blank lines are left unmarked so that no band separates a message from the answer below it.
     else if (inMessage) setCurrentBlockState(text.trimmed().isEmpty() ? MessageGap : Message);
     else setCurrentBlockState(Other);
+}
+
+TailFollower::TailFollower(QPlainTextEdit *view, const QString &buttonName)
+    : QObject(view), view_(view), button_(new QToolButton(view))
+{
+    button_->setObjectName(buttonName);
+    button_->setArrowType(Qt::DownArrow);
+    button_->setToolTip("New text below; scroll to the end");
+    button_->setCursor(Qt::PointingHandCursor);
+    button_->resize(28, 28);
+    button_->hide();
+    QScrollBar *bar = view->verticalScrollBar();
+    connect(bar, &QScrollBar::valueChanged, this, [this, bar](int value) {
+        following_ = value >= bar->maximum();
+        if (!following_) return;
+        seenDocument_ = view_->document();
+        seenRevision_ = view_->document()->revision();
+        button_->hide();
+    });
+    // Queued, so that scrolling never happens inside an edit of the document.
+    connect(bar, &QScrollBar::rangeChanged, this, [this, bar] {
+        if (following_) {
+            bar->setValue(bar->maximum());
+            seenDocument_ = view_->document();
+            seenRevision_ = view_->document()->revision();
+        } else if (bar->value() < bar->maximum() && view_->document() == seenDocument_
+                   && view_->document()->revision() != seenRevision_) {
+            place();
+            button_->show();
+            button_->raise();
+        }
+    }, Qt::QueuedConnection);
+    connect(button_, &QToolButton::clicked, this, &TailFollower::scrollToEnd);
+    view->viewport()->installEventFilter(this);
+}
+
+void TailFollower::scrollToEnd()
+{
+    following_ = true;
+    view_->verticalScrollBar()->setValue(view_->verticalScrollBar()->maximum());
+    button_->hide();
+}
+
+bool TailFollower::eventFilter(QObject *object, QEvent *event)
+{
+    if (object == view_->viewport() && event->type() == QEvent::Resize) place();
+    return QObject::eventFilter(object, event);
+}
+
+void TailFollower::place()
+{
+    const QRect area = view_->viewport()->geometry();
+    button_->move(area.right() - button_->width() - 8, area.bottom() - button_->height() - 8);
 }
 
 ChatView::ChatView(QWidget *parent) : QPlainTextEdit(parent), foldMargin_(new QWidget(this))

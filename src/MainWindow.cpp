@@ -272,6 +272,7 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     loadEarlierButton_->setObjectName("loadEarlierButton");
     loadEarlierButton_->setVisible(false);
     chatView_ = new ChatView(chatPanel_);
+    new TailFollower(chatView_, "chatNewTextButton");
     chatView_->setObjectName("chatView");
     chatView_->setReadOnly(true);
     chatView_->setLineWrapMode(QPlainTextEdit::WidgetWidth);
@@ -415,6 +416,7 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     leftSplitter->setHandleWidth(6);
     leftSplitter->addWidget(treePanel);
     reasoning_ = new QPlainTextEdit(leftSplitter);
+    new TailFollower(reasoning_, "reasoningNewTextButton");
     reasoning_->setObjectName("reasoningPanel");
     reasoning_->setReadOnly(true);
     reasoning_->setMinimumSize(0, 0);
@@ -1678,17 +1680,6 @@ QWidget *MainWindow::addChatTab(AgentProvider *selected, const QString &workingD
     tab->setTurnLocks(turnLocks_);
     tab->document()->setDefaultFont(chatView_->font());
     tab->reasoningDocument()->setDefaultFont(chatView_->font());
-    // Queued: moving the view's cursor while the document is still being edited, for example inside
-    // QTextDocument::clear(), frees a cursor the document then uses and corrupts the heap.
-    const QPointer<QTextDocument> reasoningDocument = tab->reasoningDocument();
-    connect(tab->reasoningDocument(), &QTextDocument::contentsChanged, this, [this, reasoningDocument] {
-        if (!reasoningDocument || reasoning_->document() != reasoningDocument) return;
-        auto *scroll = reasoning_->verticalScrollBar();
-        if (scroll->value() >= scroll->maximum() - reasoning_->fontMetrics().height() * 2) {
-            reasoning_->moveCursor(QTextCursor::End);
-            reasoning_->ensureCursorVisible();
-        }
-    }, Qt::QueuedConnection);
     connect(tab, &ChatTab::logMessage, this, &MainWindow::appendLine);
     connect(tab, &ChatTab::steeringFailed, this, [this, tab](const QString &text) {
         if (currentTab() == tab && input_->toPlainText().isEmpty()) input_->replaceText(text);
@@ -1705,8 +1696,6 @@ QWidget *MainWindow::addChatTab(AgentProvider *selected, const QString &workingD
             chatRefreshPending_ = false;
             // Refresh the current document, even if the user changed tabs during the batch.
             chatView_->refreshTools();
-            chatView_->moveCursor(QTextCursor::End);
-            chatView_->ensureCursorVisible();
         });
     });
     // A tab in the background that waits for an answer is marked until the user switches to it.

@@ -35,6 +35,30 @@ private:
     std::function<QString()> agentName_;
 };
 
+class QToolButton;
+
+// Keeps a text view at its end while the user is there. Scrolled up, the view stays put, and a button
+// appears when new text arrives below, which scrolls to the end.
+class TailFollower : public QObject
+{
+public:
+    TailFollower(QPlainTextEdit *view, const QString &buttonName);
+    void scrollToEnd();
+
+protected:
+    bool eventFilter(QObject *object, QEvent *event) override;
+
+private:
+    void place();
+
+    QPlainTextEdit *view_;
+    QToolButton *button_;
+    bool following_ = true;
+    // The document and its revision the user last saw at the end.
+    const QTextDocument *seenDocument_ = nullptr;
+    int seenRevision_ = 0;
+};
+
 class ChatView : public QPlainTextEdit
 {
 public:

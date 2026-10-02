@@ -282,6 +282,11 @@ Your messages in the chat (from a line starting with `You: ` or `You (…): `, u
 the agent's answer or the next bracketed entry) have a yellow background across
 the view, darker on a dark color scheme, so they stand out from the answers.
 
+The chat and the reasoning panel follow new text only while you are at their
+end. Scrolled up, they stay where you read, and a button with a down arrow
+appears in the corner when new text arrives below; it scrolls to the end, as
+does scrolling down by hand, and the view follows again.
+
 The chat, message field and log use a 10-point monospace font by default.
 **Settings → Chat font…** changes the font and size and saves the choice.
 **Settings → Chat font size…** also accepts fractional sizes, such as 10.5 points,
