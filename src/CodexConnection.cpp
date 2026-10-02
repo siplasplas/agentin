@@ -9,11 +9,13 @@
 #include <QFileInfo>
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QPointer>
 #include <QProcess>
 #include <QSaveFile>
 #include <QTimer>
 
 #include <algorithm>
+#include <memory>
 
 namespace {
 void limitPreview(QJsonObject &thread)
@@ -111,6 +113,40 @@ CodexConnection::~CodexConnection()
             server_->waitForFinished(1000);
         }
     }
+}
+
+// A hidden one-off chat in an ephemeral thread, read-only and without approvals, with the cheapest model
+// the server offers.
+void CodexConnection::suggest(const QString &workingDirectory, const QString &prompt, QObject *context,
+                              const std::function<void(const QString &text, const QString &error)> &done)
+{
+    const QPointer<QObject> guard(context);
+    if (!isConnected()) {
+        if (guard) done({}, "the Codex App Server is not connected");
+        return;
+    }
+    auto *chat = new CodexAgent(this, workingDirectory, this);
+    chat->makeEphemeral();
+    // The cheapest model the server lists, by name, with its lowest effort; efforts are listed from low to high.
+    const AgentModel *cheapest = nullptr;
+    for (const QString &size : {QString("nano"), QString("mini")}) {
+        for (const AgentModel &candidate : models_)
+            if (!cheapest && candidate.id.contains(size)) cheapest = &candidate;
+    }
+    if (cheapest) chat->setModel(cheapest->id, cheapest->efforts.value(0));
+    auto text = std::make_shared<QString>();
+    connect(chat, &AgentBackend::messageStarted, chat, [text] { text->clear(); });
+    connect(chat, &AgentBackend::messageDelta, chat, [text](const QString &delta) { *text += delta; });
+    connect(chat, &AgentBackend::turnCompleted, chat, [chat, text, guard, done](const QString &status, const QString &details) {
+        if (guard) done(*text, status == "completed" ? QString() : (details.isEmpty() ? status : details));
+        chat->deleteLater();
+    });
+    if (!chat->newConversation(workingDirectory)) {
+        if (guard) done({}, "a Codex thread could not be started");
+        chat->deleteLater();
+        return;
+    }
+    chat->prompt(prompt);
 }
 
 AgentHelp CodexConnection::help() const
@@ -238,6 +274,8 @@ void CodexConnection::registerThread(const QString &threadId, CodexAgent *chat, 
 {
     if (threadId.isEmpty()) return;
     threads_.insert(threadId, chat);
+    // An ephemeral thread is never listed among the conversations.
+    if (chat->isEphemeral()) return;
     liveThreadDirectories_.insert(threadId, workingDirectory);
     emit conversationsChanged();
 }

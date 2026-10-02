@@ -256,6 +256,16 @@ the last step is answered right after the turn, as part of the same turn in the
 chat. Claude Code does not report whether a message was used, so `You (steer)`
 means that it was passed to the session.
 
+In a Codex, Claude or GLM chat, **Suggest** (Ctrl+Space) asks for up to three short ideas
+for your next message, based on the latest exchange: your last message and the
+agent's text answer, without tool output. They are asked outside the conversation,
+in the language you write in, from the cheapest model: Haiku for Claude,
+`glm-4.7-flash` for GLM (`GLM_SUGGEST_MODEL` changes it), and the smallest model
+Codex lists in an ephemeral, read-only thread. Several ideas are offered in a list
+under the message field; the chosen one is put in the field selected, so typing
+replaces it and Enter sends it. Pressing Suggest again for the same exchange shows
+the same ideas without asking the model.
+
 When the chat's directory is in a Git work tree, the chat header also sums up the
 files the latest turn changed, for example `Changes: 7 files, +120 −34`, counting
 added and removed lines. It is compared with the state when the turn started,

@@ -279,6 +279,22 @@ void ClaudeProvider::reportIndexError(const QString &error)
     if (!error.isEmpty()) emit message("[" + error + "]");
 }
 
+// The bridge asks a light model once, in a temporary directory whose session it removes afterwards.
+void ClaudeProvider::suggest(const QString &workingDirectory, const QString &prompt, QObject *context,
+                             const std::function<void(const QString &text, const QString &error)> &done)
+{
+    runHelper({"--provider", kind_, "--suggest", prompt}, workingDirectory, context,
+              [done](QProcess *process, bool started) {
+        if (!started) {
+            done({}, process->errorString());
+            return;
+        }
+        const QJsonObject result = QJsonDocument::fromJson(process->readAllStandardOutput().trimmed()).object();
+        if (result.value("type") == "suggestions") done(result.value("text").toString(), {});
+        else done({}, result.value("message").toString(QString::fromUtf8(process->readAllStandardError()).trimmed()));
+    });
+}
+
 void ClaudeProvider::setEnvironment(ClaudeEnvironment *environment)
 {
     environment_ = environment;

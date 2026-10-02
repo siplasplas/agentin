@@ -60,6 +60,16 @@ void MessageInput::replaceText(const QString &text)
     cursor.endEditBlock();
 }
 
+void MessageInput::showSuggestion(const QString &text)
+{
+    replaceText(text);
+    selectAll();
+    typed_ = false;
+    typedLineBreak_ = false;
+    updateEnterAction();
+    setFocus();
+}
+
 void MessageInput::keyPressEvent(QKeyEvent *event)
 {
     if (event->key() == Qt::Key_Return || event->key() == Qt::Key_Enter) {

@@ -6,6 +6,7 @@ import dataclasses
 import json
 import os
 import re
+import shutil
 import sys
 import tempfile
 import uuid
@@ -343,23 +344,8 @@ class Bridge:
             if self.effort:
                 settings["effort"] = self.effort
         if self.provider == "glm":
-            api_key = os.environ.get("ZAI_API_KEY")
-            if not api_key:
-                raise RuntimeError("Set ZAI_API_KEY to use GLM through the Z.AI Coding Plan")
             model = self.model or os.environ.get("GLM_MODEL", "glm-5.3")
-            settings.update({
-                "model": model,
-                "setting_sources": ["project", "local"],
-                "env": {
-                    "ANTHROPIC_AUTH_TOKEN": api_key,
-                    "ANTHROPIC_API_KEY": "",
-                    "ANTHROPIC_BASE_URL": "https://api.z.ai/api/anthropic",
-                    "ANTHROPIC_DEFAULT_OPUS_MODEL": model,
-                    "ANTHROPIC_DEFAULT_SONNET_MODEL": model,
-                    "ANTHROPIC_DEFAULT_HAIKU_MODEL": model,
-                    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
-                },
-            })
+            settings.update({"model": model, "setting_sources": ["project", "local"], "env": glm_environment(model)})
         options = ClaudeAgentOptions(**settings)
         self.client = ClaudeSDKClient(options=options)
         self.connected = False
@@ -754,6 +740,53 @@ def message_entries(message):
     return entries
 
 
+def glm_environment(model):
+    """Points Claude Code at Z.AI's Anthropic-compatible endpoint, with every model alias on the GLM model."""
+    api_key = os.environ.get("ZAI_API_KEY")
+    if not api_key:
+        raise RuntimeError("Set ZAI_API_KEY to use GLM through the Z.AI Coding Plan")
+    return {
+        "ANTHROPIC_AUTH_TOKEN": api_key,
+        "ANTHROPIC_API_KEY": "",
+        "ANTHROPIC_BASE_URL": "https://api.z.ai/api/anthropic",
+        "ANTHROPIC_DEFAULT_OPUS_MODEL": model,
+        "ANTHROPIC_DEFAULT_SONNET_MODEL": model,
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL": model,
+        "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+    }
+
+
+async def suggest(prompt, provider):
+    """Answers one prompt with a light model and no tools, leaving no session behind.
+
+    It runs in a temporary directory, and the session Claude Code records for that directory is removed
+    afterwards, so it never appears among the user's conversations."""
+    from claude_agent_sdk import query
+
+    directory = os.path.realpath(tempfile.mkdtemp(prefix="agentin-suggest-"))
+    settings = {"cwd": directory, "tools": [], "max_turns": 1, "setting_sources": [], "permission_mode": "default"}
+    if provider == "glm":
+        # The flash model is Z.AI's cheapest, which is enough for a few short suggestions.
+        model = os.environ.get("GLM_SUGGEST_MODEL", "glm-4.7-flash")
+        settings.update({"model": model, "env": glm_environment(model)})
+    else:
+        settings["model"] = "haiku"
+    text = ""
+    try:
+        async for message in query(prompt=prompt, options=ClaudeAgentOptions(**settings)):
+            if isinstance(message, AssistantMessage):
+                parts = [block.text for block in message.content if isinstance(block, TextBlock)]
+                if parts:
+                    text = "".join(parts)
+            elif isinstance(message, ResultMessage) and message.is_error:
+                raise RuntimeError(message.result or "; ".join(message.errors or []) or "the model failed")
+    finally:
+        shutil.rmtree(directory, ignore_errors=True)
+        config = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude")
+        shutil.rmtree(os.path.join(config, "projects", re.sub(r"[^A-Za-z0-9]", "-", directory)), ignore_errors=True)
+    return text
+
+
 def read_session(session_id, directory, limit):
     from claude_agent_sdk import get_session_messages
 
@@ -774,7 +807,15 @@ if __name__ == "__main__":
     parser.add_argument("--directories", default="[]")
     parser.add_argument("--read-session")
     parser.add_argument("--limit", type=int, default=20)
+    parser.add_argument("--suggest")
     args = parser.parse_args()
+    if args.suggest:
+        try:
+            send({"type": "suggestions", "text": asyncio.run(suggest(args.suggest, args.provider))})
+        except Exception as exc:
+            send({"type": "error", "message": f"Could not get suggestions: {exc}"})
+            raise SystemExit(1)
+        raise SystemExit(0)
     if args.read_session:
         try:
             send(read_session(args.read_session, args.cwd, args.limit))

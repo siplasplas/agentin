@@ -39,6 +39,9 @@ public:
     void recordActivity(const QString &id) override;
     QList<AgentModel> models() const override { return models_; }
     bool supportsUsageLimits() const override { return true; }
+    bool supportsSuggestions() const override { return true; }
+    void suggest(const QString &workingDirectory, const QString &prompt, QObject *context,
+                 const std::function<void(const QString &text, const QString &error)> &done) override;
     QList<UsageLimit> usageLimits() const override;
     void setUsageLimitsActive(bool active) override;
     AgentBackend *createChat(const QString &workingDirectory, QObject *parent) override;

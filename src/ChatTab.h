@@ -63,6 +63,17 @@ public:
     bool hasMoreHistory() const { return hasMore_; }
     // The user's messages in this conversation as far as loaded, oldest first, for recalling them.
     QStringList userMessages() const { return historyMessages_ + sentMessages_; }
+    // The agent's text answer since the user's latest message, without tools and reasoning.
+    QString lastAnswer() const { return lastAnswer_; }
+    // Ideas for the next message, kept with the exchange they were asked for.
+    struct Suggestions
+    {
+        QString exchange;
+        QStringList items;
+        bool pending = false;
+    };
+    Suggestions &suggestions() { return suggestions_; }
+    const Suggestions &suggestions() const { return suggestions_; }
 
     // Live chat in the agent's directory; the conversation starts with the first message.
     void startDraft();
@@ -152,6 +163,8 @@ private:
     qsizetype historyRefreshSentCount_ = 0;
     QStringList historyMessages_;
     QStringList sentMessages_;
+    QString lastAnswer_;
+    Suggestions suggestions_;
     QString lockNotice_;
     QList<PendingRequest> requests_;
     QStringList sessionApprovals_;

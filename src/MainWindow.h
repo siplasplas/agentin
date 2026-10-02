@@ -66,6 +66,9 @@ private:
     void submitFromKeyboard();
     bool canSteerNow() const;
     void updateSteerButton();
+    void suggestMessage();
+    void showSuggestions(const QStringList &items);
+    void updateSuggestButton();
     void showHelp();
     void requestStop();
     AgentProvider *provider(const QString &name) const;
@@ -159,6 +162,7 @@ private:
     QLabel *enterIndicator_;
     QPushButton *sendButton_;
     QPushButton *steerButton_;
+    QPushButton *suggestButton_;
     QPushButton *stopButton_;
     QPushButton *newChatButton_;
     QLabel *status_;

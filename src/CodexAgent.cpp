@@ -539,6 +539,10 @@ void CodexAgent::startThread()
     const QString startModel = modelChosen_ ? model_ : connection_->defaultModel();
     if (!startModel.isEmpty()) params.insert("model", startModel);
     if (sandboxChosen_ && readOnly_) params.insert("sandbox", "read-only");
+    if (ephemeral_) {
+        params.insert("ephemeral", true);
+        params.insert("approvalPolicy", "never");
+    }
     connection_->request("thread/start", params, this,
                          [this](const QJsonObject &result, const QString &error) {
         threadOpening_ = false;

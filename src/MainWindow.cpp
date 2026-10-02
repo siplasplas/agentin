@@ -267,6 +267,12 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
                              "Send queues it for the next turn");
     steerButton_->setEnabled(false);
     steerButton_->hide();
+    suggestButton_ = new QPushButton("Suggest", central);
+    suggestButton_->setObjectName("suggestButton");
+    suggestButton_->setShortcut(QKeySequence("Ctrl+Space"));
+    suggestButton_->setToolTip("Ideas for your next message from the agent's cheapest model, based on the latest "
+                               "exchange (Ctrl+Space). They are asked once per exchange and shown again from memory.");
+    suggestButton_->setEnabled(false);
     stopButton_ = new QPushButton("Stop", central);
     stopButton_->setObjectName("stopButton");
     stopButton_->setEnabled(false);
@@ -363,6 +369,7 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     auto *inputRow = new QHBoxLayout;
     inputRow->addWidget(input_, 1);
     inputRow->addWidget(enterIndicator_);
+    inputRow->addWidget(suggestButton_);
     inputRow->addWidget(sendButton_);
     inputRow->addWidget(steerButton_);
     inputRow->addWidget(stopButton_);
@@ -555,6 +562,7 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     connect(input_, &MessageInput::enterActionChanged, this, &MainWindow::showEnterAction);
     connect(sendButton_, &QPushButton::clicked, this, &MainWindow::submitCommand);
     connect(steerButton_, &QPushButton::clicked, this, &MainWindow::submitSteer);
+    connect(suggestButton_, &QPushButton::clicked, this, &MainWindow::suggestMessage);
     connect(input_, &QPlainTextEdit::textChanged, this, &MainWindow::updateSteerButton);
     connect(stopButton_, &QPushButton::clicked, this, &MainWindow::requestStop);
     connect(newChatButton_, &QPushButton::clicked, this, &MainWindow::showNewConversationDialog);
@@ -783,6 +791,109 @@ void MainWindow::updateSteerButton()
     const ChatTab *tab = currentTab();
     steerButton_->setVisible(tab && tab->agent()->supportsSteering());
     steerButton_->setEnabled(canSteerNow());
+}
+
+namespace {
+// The user's latest message and the agent's answer to it, after a few earlier requests that show where
+// the work is going; empty before the first answer.
+QString latestExchange(const ChatTab *tab)
+{
+    const QStringList messages = tab->userMessages();
+    if (messages.isEmpty() || tab->lastAnswer().trimmed().isEmpty()) return {};
+    QString text;
+    const QStringList earlier = messages.mid(qMax(0, messages.size() - 4), qMin(3, messages.size() - 1));
+    if (!earlier.isEmpty()) {
+        text = "Earlier requests of the user, oldest first:\n";
+        for (const QString &message : earlier) text += "- " + message.simplified().left(300) + '\n';
+        text += '\n';
+    }
+    return text + "User:\n" + messages.last().left(2000) + "\n\nAgent:\n" + tab->lastAnswer().right(4000);
+}
+
+QStringList parseSuggestions(const QString &text)
+{
+    static const QRegularExpression marker(R"(^(?:[-*•]|\d+[.)])\s*)");
+    QStringList items;
+    for (QString line : text.split('\n')) {
+        line = line.trimmed().remove(marker).trimmed();
+        if (line.size() > 1 && line.startsWith('"') && line.endsWith('"')) line = line.mid(1, line.size() - 2);
+        if (!line.isEmpty() && items.size() < 3) items.append(line);
+    }
+    return items;
+}
+}
+
+void MainWindow::updateSuggestButton()
+{
+    const ChatTab *tab = currentTab();
+    const bool supported = tab && tab->provider()->supportsSuggestions();
+    suggestButton_->setVisible(supported);
+    suggestButton_->setEnabled(supported && tab->isLive() && !tab->agent()->isResponding()
+                               && !tab->suggestions().pending && !latestExchange(tab).isEmpty());
+}
+
+// Suggestions are asked once per exchange, outside the conversation; asking again shows them from memory.
+void MainWindow::suggestMessage()
+{
+    ChatTab *tab = currentTab();
+    if (!tab || !suggestButton_->isEnabled()) return;
+    const QString exchange = latestExchange(tab);
+    ChatTab::Suggestions &cache = tab->suggestions();
+    if (cache.exchange == exchange && !cache.items.isEmpty()) {
+        showSuggestions(cache.items);
+        return;
+    }
+    cache.pending = true;
+    updateSuggestButton();
+    status_->setText("Asking for suggestions…");
+    const QString prompt =
+        "Below is the latest exchange between a user and a coding agent. Suggest up to three short messages the user "
+        "might send next, most useful first, each one or two sentences.\n"
+        "Make them concrete next steps that move the work forward: continuing or extending the task, checking or "
+        "testing the result, fixing what the answer left open or got wrong, or deciding a question it raised. "
+        "Make the three ideas clearly different from each other. Suggest committing only when the work looks "
+        "finished, and then always together with what to do next. Avoid generic messages such as thanks, "
+        "\"continue\" or \"looks good\".\n"
+        "Write them in the language the user writes in. Reply with only the messages, one per line, without "
+        "numbering, quotes or comments.\n\n" + exchange;
+    const QString before = input_->toPlainText();
+    tab->provider()->suggest(tab->workingDirectory(), prompt, tab,
+                             [this, tab, exchange, before](const QString &text, const QString &error) {
+        ChatTab::Suggestions &cache = tab->suggestions();
+        cache.pending = false;
+        const QStringList items = error.isEmpty() ? parseSuggestions(text) : QStringList();
+        if (items.isEmpty()) {
+            appendLine("[Suggestions failed: " + (error.isEmpty() ? QString("the model gave none") : error) + "]");
+        } else {
+            cache.exchange = exchange;
+            cache.items = items;
+            // Shown only where the user still waits for them, not over a message typed meanwhile.
+            if (currentTab() == tab && input_->toPlainText() == before) showSuggestions(items);
+        }
+        updateStatus();
+    });
+}
+
+// One suggestion goes straight into the message field; several are offered in a list under it first.
+void MainWindow::showSuggestions(const QStringList &items)
+{
+    if (items.size() == 1) {
+        input_->showSuggestion(items.first());
+        return;
+    }
+    auto *menu = new QMenu(this);
+    menu->setAttribute(Qt::WA_DeleteOnClose);
+    const int width = input_->width();
+    for (const QString &item : items) {
+        QAction *action = menu->addAction(menu->fontMetrics().elidedText(item, Qt::ElideRight, width));
+        action->setToolTip(item);
+        connect(action, &QAction::triggered, this, [this, item] { input_->showSuggestion(item); });
+    }
+    menu->setToolTipsVisible(true);
+    menu->setMinimumWidth(width);
+    menu->setActiveAction(menu->actions().first());
+    const QSize size = menu->sizeHint();
+    menu->popup(input_->mapToGlobal(QPoint(0, -size.height())));
 }
 
 void MainWindow::showHelp()
@@ -1976,6 +2087,7 @@ void MainWindow::updateStatus()
 {
     updateOperationTime();
     updateSteerButton();
+    updateSuggestButton();
     const ChatTab *tab = currentTab();
     QTextDocument *reasoningDocument = tab ? tab->reasoningDocument() : emptyDocument_;
     if (reasoning_->document() != reasoningDocument) {

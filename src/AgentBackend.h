@@ -7,6 +7,8 @@
 #include <QString>
 #include <QStringList>
 
+#include <functional>
+
 struct ChatEntry
 {
     QString role;
@@ -168,6 +170,19 @@ public:
     }
 
     virtual AgentBackend *createChat(const QString &workingDirectory, QObject *parent) = 0;
+
+    // Short ideas for the user's next message, asked of a light model outside the conversation, so that
+    // its history and directory lock stay untouched. done receives the model's text or an error, unless
+    // context has been destroyed by then.
+    virtual bool supportsSuggestions() const { return false; }
+    virtual void suggest(const QString &workingDirectory, const QString &prompt, QObject *context,
+                         const std::function<void(const QString &text, const QString &error)> &done)
+    {
+        Q_UNUSED(workingDirectory);
+        Q_UNUSED(prompt);
+        Q_UNUSED(context);
+        Q_UNUSED(done);
+    }
 
 signals:
     void message(const QString &text);

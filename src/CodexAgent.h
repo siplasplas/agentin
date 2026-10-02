@@ -36,6 +36,9 @@ public:
     bool readOnlyIsEnforced() const override { return true; }
     QStringList writableDirectories() const override;
     void setReadOnly(bool readOnly) override;
+    // Read-only, never asking for approval, with a thread Codex does not keep; for one-off questions.
+    void makeEphemeral() { ephemeral_ = true; setReadOnly(true); }
+    bool isEphemeral() const { return ephemeral_; }
     bool newConversation(const QString &workingDirectory) override;
     bool resumeConversation(const QString &id, const QString &workingDirectory) override;
     bool prompt(const QString &text) override;
@@ -88,6 +91,8 @@ private:
     QJsonObject threadSandbox_;
     bool readOnly_ = false;
     bool sandboxChosen_ = false;
+    // A one-off chat, such as one asked for suggestions, whose thread Codex does not keep.
+    bool ephemeral_ = false;
     QStringList queuedPrompts_;
     QSet<QString> streamedMessages_;
     QSet<QString> streamedCommands_;

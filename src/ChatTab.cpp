@@ -243,6 +243,7 @@ bool ChatTab::startNew(const QString &workingDirectory)
     conversationUsageFromAgent_ = false;
     historyMessages_.clear();
     sentMessages_.clear();
+    lastAnswer_.clear();
     emit userMessagesChanged();
     document_->clear();
     emit changed();
@@ -275,6 +276,7 @@ void ChatTab::showPreview(AgentProvider *provider, const QString &id, const QStr
     conversationUsageFromAgent_ = false;
     historyMessages_.clear();
     sentMessages_.clear();
+    lastAnswer_.clear();
     emit userMessagesChanged();
     document_->setPlainText("Loading the latest messages…");
     emit changed();
@@ -326,6 +328,7 @@ bool ChatTab::send(const QString &text)
     if (!dispatch()) return false;
     appendText("\nYou: " + text + '\n');
     sentMessages_.append(text);
+    lastAnswer_.clear();
     emit userMessagesChanged();
     return true;
 }
@@ -392,8 +395,14 @@ void ChatTab::setAgent(AgentBackend *agent)
         appendText("\nYou (steer not confirmed): " + text + '\n');
         emit steeringFailed(text);
     });
-    connect(agent, &AgentBackend::messageStarted, this, [this, name] { appendText("\n" + name + ": "); });
-    connect(agent, &AgentBackend::messageDelta, this, &ChatTab::appendText);
+    connect(agent, &AgentBackend::messageStarted, this, [this, name] {
+        if (!lastAnswer_.isEmpty()) lastAnswer_ += "\n\n";
+        appendText("\n" + name + ": ");
+    });
+    connect(agent, &AgentBackend::messageDelta, this, [this](const QString &text) {
+        lastAnswer_ += text;
+        appendText(text);
+    });
     connect(agent, &AgentBackend::reasoningUpdated, this, &ChatTab::updateReasoning);
     connect(agent, &AgentBackend::messageFinished, this, [this] { appendText("\n"); });
     connect(agent, &AgentBackend::toolStarted, this, [this, name](const QString &tool, const QString &details) {
@@ -596,6 +605,7 @@ void ChatTab::showHistory(const QList<ChatEntry> &entries, bool hasMore, const Q
     QStringList blocks;
     QList<int> historyTools;
     historyMessages_.clear();
+    lastAnswer_.clear();
     QStringList reasoningHistory;
     int reasoningIndex = 0;
     for (const ChatEntry &entry : entries) {
@@ -609,6 +619,7 @@ void ChatTab::showHistory(const QList<ChatEntry> &entries, bool hasMore, const Q
         }
         if (entry.role == "user") {
             historyMessages_.append(entry.text);
+            lastAnswer_.clear();
             blocks.append("You: " + entry.text);
         } else if (entry.role == "tool") {
             historyTools.append(blocks.size());
@@ -617,6 +628,8 @@ void ChatTab::showHistory(const QList<ChatEntry> &entries, bool hasMore, const Q
                           + (entry.text == heading ? QString() : "\n" + entry.text));
         } else {
             blocks.append(name + ": " + entry.text);
+            if (!lastAnswer_.isEmpty()) lastAnswer_ += "\n\n";
+            lastAnswer_ += entry.text;
         }
     }
     for (const QString &key : reasoningOrder_)
