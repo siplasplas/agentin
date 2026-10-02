@@ -115,6 +115,7 @@ private:
                                    std::function<void(bool)> completed = {});
     bool playSoundFile(const QString &file, bool temporary);
     static bool addLeadingSilence(const QString &file, int milliseconds);
+    static QString writeTemporaryWav(const QList<qint16> &samples);
     // A file, or a built-in sound written to a temporary file.
     bool playSoundOrBuiltIn(const QString &sound);
     void updatePlaybackState();

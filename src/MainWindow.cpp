@@ -639,6 +639,7 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     connect(steerButton_, &QPushButton::clicked, this, &MainWindow::submitSteer);
     connect(suggestButton_, &QPushButton::clicked, this, &MainWindow::suggestMessage);
     connect(input_, &QPlainTextEdit::textChanged, this, &MainWindow::updateSteerButton);
+    connect(input_, &QPlainTextEdit::textChanged, this, &MainWindow::updateSuggestButton);
     connect(stopButton_, &QPushButton::clicked, this, &MainWindow::requestStop);
     connect(newChatButton_, &QPushButton::clicked, this, &MainWindow::showNewConversationDialog);
     auto *newChatShortcut = new QShortcut(QKeySequence("Ctrl+T"), this);
@@ -920,7 +921,8 @@ QStringList parseSuggestions(const QString &text)
 void MainWindow::updateSuggestButton()
 {
     const ChatTab *tab = currentTab();
-    const bool supported = tab && tab->provider()->supportsSuggestions();
+    // Ideas are offered only for an empty message field; spaces and line breaks alone count as empty.
+    const bool supported = tab && tab->provider()->supportsSuggestions() && input_->toPlainText().trimmed().isEmpty();
     suggestButton_->setVisible(supported);
     suggestButton_->setEnabled(supported && tab->isLive() && !tab->agent()->isResponding()
                                && !tab->suggestions().pending && !latestExchange(tab).isEmpty());

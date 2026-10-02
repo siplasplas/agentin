@@ -262,7 +262,8 @@ the last step is answered right after the turn, as part of the same turn in the
 chat. Claude Code does not report whether a message was used, so `You (steer)`
 means that it was passed to the session.
 
-In a Codex, Claude or GLM chat, **Suggest** (the light bulb, Ctrl+Space) asks for up to three short ideas
+In a Codex, Claude or GLM chat, **Suggest** (the light bulb, Ctrl+Space, shown while the
+message field is empty or holds only spaces and line breaks) asks for up to three short ideas
 for your next message, based on the latest exchange (your last message and the
 agent's text answer, without tool output) and, in short, the four before it. They are asked outside the conversation,
 in the language you write in, from the cheapest model: Haiku for Claude,
@@ -411,8 +412,9 @@ gives the language and the voice's name). espeak-ng's mechanical voice is offere
 only for a language without a Piper voice. Polish is spoken in Polish sentences,
 other languages in English ones. The speech is generated when needed, so the
 repository contains no audio files; when no voice can speak, a double click plays
-instead. Speech starts after 0.4 s of silence, so that an audio output waking up
-from idle does not cut off the agent's name. A spoken announcement names the chat by the first words of its title,
+instead. Sounds and speech start after 0.4 s of silence, so that an audio output
+waking up from idle does not cut off a short sound or the agent's name: ffplay
+and mpv delay sound files, and pw-play and paplay play a short silence before them. A spoken announcement names the chat by the first words of its title,
 about 32 characters. Answering the approval or question it announces, or a new
 request of the same chat, stops it at once.
 
