@@ -240,7 +240,7 @@ bool ChatTab::startNew(const QString &workingDirectory)
     historyRefreshQueuedText_.clear();
     toolGroup_ = 0;
     messageOpen_ = false;
-    toolEventsDuringMessage_.clear();
+    eventsDuringMessage_.clear();
     turnUsage_ = {};
     conversationUsage_ = {};
     conversationUsageFromAgent_ = false;
@@ -275,7 +275,7 @@ void ChatTab::showPreview(AgentProvider *provider, const QString &id, const QStr
     historyRefreshQueuedText_.clear();
     toolGroup_ = 0;
     messageOpen_ = false;
-    toolEventsDuringMessage_.clear();
+    eventsDuringMessage_.clear();
     turnUsage_ = {};
     conversationUsage_ = {};
     conversationUsageFromAgent_ = false;
@@ -391,7 +391,7 @@ void ChatTab::setAgent(AgentBackend *agent)
             QTimer::singleShot(0, this, &ChatTab::dispatch);
     });
     connect(agent, &AgentBackend::steerAccepted, this, [this](const QString &text) {
-        appendText("\nYou (steer): " + text + '\n');
+        runOutsideMessage([this, text] { appendUntagged("\nYou (steer): " + text + '\n'); });
         sentMessages_.append(text);
         if (exchanges_.isEmpty()) exchanges_.append({text, {}});
         else exchanges_.last().message += "\n\n" + text;
@@ -399,7 +399,7 @@ void ChatTab::setAgent(AgentBackend *agent)
     });
     connect(agent, &AgentBackend::steerFailed, this, [this, name](const QString &text, const QString &reason) {
         emit logMessage("[" + name + " steering was not confirmed: " + reason + "]");
-        appendText("\nYou (steer not confirmed): " + text + '\n');
+        runOutsideMessage([this, text] { appendUntagged("\nYou (steer not confirmed): " + text + '\n'); });
         emit steeringFailed(text);
     });
     connect(agent, &AgentBackend::messageStarted, this, [this, name] {
@@ -419,13 +419,13 @@ void ChatTab::setAgent(AgentBackend *agent)
     connect(agent, &AgentBackend::reasoningUpdated, this, &ChatTab::updateReasoning);
     connect(agent, &AgentBackend::messageFinished, this, &ChatTab::finishMessage);
     connect(agent, &AgentBackend::toolStarted, this, [this, name](const QString &tool, const QString &details) {
-        runToolEvent([this, name, tool, details] { startTool(name, tool, details); });
+        runOutsideMessage([this, name, tool, details] { startTool(name, tool, details); });
     });
     connect(agent, &AgentBackend::toolOutput, this, [this](const QString &text) {
-        runToolEvent([this, text] { appendToolText(text); });
+        runOutsideMessage([this, text] { appendToolText(text); });
     });
     connect(agent, &AgentBackend::toolFinished, this, [this](const QString &tool, const QString &status) {
-        runToolEvent([this, tool, status] { finishTool(tool, status); });
+        runOutsideMessage([this, tool, status] { finishTool(tool, status); });
     });
     connect(agent, &AgentBackend::turnCompleted, this, [this, name](const QString &status, const QString &details) {
         // A message the agent left unfinished releases the tool lines that waited for it.
@@ -586,9 +586,9 @@ void ChatTab::finishTool(const QString &tool, const QString &status)
     document_->lastBlock().previous().setUserData(data);
 }
 
-void ChatTab::runToolEvent(const std::function<void()> &event)
+void ChatTab::runOutsideMessage(const std::function<void()> &event)
 {
-    if (messageOpen_) toolEventsDuringMessage_.append(event);
+    if (messageOpen_) eventsDuringMessage_.append(event);
     else event();
 }
 
@@ -598,7 +598,7 @@ void ChatTab::finishMessage()
     if (!messageOpen_) return;
     messageOpen_ = false;
     toolGroup_ = toolGroupBeforeMessage_;
-    const QList<std::function<void()>> events = std::exchange(toolEventsDuringMessage_, {});
+    const QList<std::function<void()>> events = std::exchange(eventsDuringMessage_, {});
     for (const auto &event : events) event();
 }
 
@@ -610,6 +610,15 @@ void ChatTab::appendText(const QString &text)
     cursor.movePosition(QTextCursor::End);
     cursor.insertText(text);
     emit textAppended();
+}
+
+// Text that starts on a new line outside any tool's folding, even right after a tool's output.
+void ChatTab::appendUntagged(const QString &text)
+{
+    const int first = document_->blockCount();
+    appendText(text);
+    for (QTextBlock block = document_->findBlockByNumber(first); block.isValid(); block = block.next())
+        block.setUserData(nullptr);
 }
 
 void ChatTab::appendToolText(const QString &text)

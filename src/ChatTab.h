@@ -139,12 +139,14 @@ private:
     void appendToolText(const QString &text);
     int toolGroup_ = 0;
     int nextToolGroup_ = 0;
-    // A tool that runs in parallel may report while the agent writes a message; its lines wait until the
-    // message ends, so that they never split it, and the message stays outside the tool's folding.
+    // A tool that runs in parallel, or an accepted steering message, may arrive while the agent writes a
+    // message; its lines wait until the message ends, so that they never split it, and the message stays
+    // outside a tool's folding.
     bool messageOpen_ = false;
     int toolGroupBeforeMessage_ = 0;
-    QList<std::function<void()>> toolEventsDuringMessage_;
-    void runToolEvent(const std::function<void()> &event);
+    QList<std::function<void()>> eventsDuringMessage_;
+    void runOutsideMessage(const std::function<void()> &event);
+    void appendUntagged(const QString &text);
     void startTool(const QString &name, const QString &tool, const QString &details);
     void finishTool(const QString &tool, const QString &status);
     void finishMessage();
