@@ -63,8 +63,13 @@ public:
     bool hasMoreHistory() const { return hasMore_; }
     // The user's messages in this conversation as far as loaded, oldest first, for recalling them.
     QStringList userMessages() const { return historyMessages_ + sentMessages_; }
-    // The agent's text answer since the user's latest message, without tools and reasoning.
-    QString lastAnswer() const { return lastAnswer_; }
+    // The user's messages with the agent's text answers, without tools and reasoning, oldest first.
+    struct Exchange
+    {
+        QString message;
+        QString answer;
+    };
+    QList<Exchange> exchanges() const { return exchanges_; }
     // Ideas for the next message, kept with the exchange they were asked for.
     struct Suggestions
     {
@@ -163,7 +168,7 @@ private:
     qsizetype historyRefreshSentCount_ = 0;
     QStringList historyMessages_;
     QStringList sentMessages_;
-    QString lastAnswer_;
+    QList<Exchange> exchanges_;
     Suggestions suggestions_;
     QString lockNotice_;
     QList<PendingRequest> requests_;

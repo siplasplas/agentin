@@ -347,6 +347,9 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     stopButton_->setAccessibleName("Stop");
     stopButton_->setToolTip("Stop the running turn");
     stopButton_->setEnabled(false);
+    // As narrow as their icons, so that the message field keeps the width.
+    for (QPushButton *button : {suggestButton_, sendButton_, steerButton_, stopButton_})
+        button->setFixedWidth(iconSize + 10);
 
     chatPanel_ = new QWidget(this);
     chatPanel_->hide();
@@ -864,20 +867,25 @@ void MainWindow::updateSteerButton()
 }
 
 namespace {
-// The user's latest message and the agent's answer to it, after a few earlier requests that show where
-// the work is going; empty before the first answer.
+// The latest exchange in full, after a few earlier ones in short, which show where the work is going; the
+// end of an answer usually sums it up. Empty before the first answer.
 QString latestExchange(const ChatTab *tab)
 {
-    const QStringList messages = tab->userMessages();
-    if (messages.isEmpty() || tab->lastAnswer().trimmed().isEmpty()) return {};
+    const QList<ChatTab::Exchange> exchanges = tab->exchanges();
+    if (exchanges.isEmpty() || exchanges.last().answer.trimmed().isEmpty()) return {};
     QString text;
-    const QStringList earlier = messages.mid(qMax(0, messages.size() - 4), qMin(3, messages.size() - 1));
-    if (!earlier.isEmpty()) {
-        text = "Earlier requests of the user, oldest first:\n";
-        for (const QString &message : earlier) text += "- " + message.simplified().left(300) + '\n';
-        text += '\n';
+    const qsizetype first = qMax<qsizetype>(0, exchanges.size() - 5);
+    if (first < exchanges.size() - 1) {
+        text = "Earlier exchanges, shortened, oldest first:\n\n";
+        for (qsizetype i = first; i < exchanges.size() - 1; ++i) {
+            const QString answer = exchanges.at(i).answer.simplified();
+            text += "User: " + exchanges.at(i).message.simplified().left(300) + "\nAgent: "
+                + (answer.size() > 600 ? "…" + answer.right(600) : answer) + "\n\n";
+        }
+        text += "The latest exchange:\n\n";
     }
-    return text + "User:\n" + messages.last().left(2000) + "\n\nAgent:\n" + tab->lastAnswer().right(4000);
+    return text + "User:\n" + exchanges.last().message.left(2000) + "\n\nAgent:\n"
+        + exchanges.last().answer.right(4000);
 }
 
 QStringList parseSuggestions(const QString &text)
@@ -917,8 +925,8 @@ void MainWindow::suggestMessage()
     updateSuggestButton();
     status_->setText("Asking for suggestions…");
     const QString prompt =
-        "Below is the latest exchange between a user and a coding agent. Suggest up to three short messages the user "
-        "might send next, most useful first, each one or two sentences.\n"
+        "Below is a conversation between a user and a coding agent, ending with its latest exchange. Suggest up to "
+        "three short messages the user might send next, most useful first, each one or two sentences.\n"
         "Make them concrete next steps that move the work forward: continuing or extending the task, checking or "
         "testing the result, fixing what the answer left open or got wrong, or deciding a question it raised. "
         "Make the three ideas clearly different from each other. Suggest committing only when the work looks "

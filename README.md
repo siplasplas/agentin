@@ -257,8 +257,8 @@ chat. Claude Code does not report whether a message was used, so `You (steer)`
 means that it was passed to the session.
 
 In a Codex, Claude or GLM chat, **Suggest** (the light bulb, Ctrl+Space) asks for up to three short ideas
-for your next message, based on the latest exchange: your last message and the
-agent's text answer, without tool output. They are asked outside the conversation,
+for your next message, based on the latest exchange (your last message and the
+agent's text answer, without tool output) and, in short, the four before it. They are asked outside the conversation,
 in the language you write in, from the cheapest model: Haiku for Claude,
 `glm-4.7-flash` for GLM (`GLM_SUGGEST_MODEL` changes it), and the smallest model
 Codex lists in an ephemeral, read-only thread. Several ideas are offered in a list

@@ -243,7 +243,7 @@ bool ChatTab::startNew(const QString &workingDirectory)
     conversationUsageFromAgent_ = false;
     historyMessages_.clear();
     sentMessages_.clear();
-    lastAnswer_.clear();
+    exchanges_.clear();
     emit userMessagesChanged();
     document_->clear();
     emit changed();
@@ -276,7 +276,7 @@ void ChatTab::showPreview(AgentProvider *provider, const QString &id, const QStr
     conversationUsageFromAgent_ = false;
     historyMessages_.clear();
     sentMessages_.clear();
-    lastAnswer_.clear();
+    exchanges_.clear();
     emit userMessagesChanged();
     document_->setPlainText("Loading the latest messages…");
     emit changed();
@@ -328,7 +328,7 @@ bool ChatTab::send(const QString &text)
     if (!dispatch()) return false;
     appendText("\nYou: " + text + '\n');
     sentMessages_.append(text);
-    lastAnswer_.clear();
+    exchanges_.append({text, {}});
     emit userMessagesChanged();
     return true;
 }
@@ -388,6 +388,8 @@ void ChatTab::setAgent(AgentBackend *agent)
     connect(agent, &AgentBackend::steerAccepted, this, [this](const QString &text) {
         appendText("\nYou (steer): " + text + '\n');
         sentMessages_.append(text);
+        if (exchanges_.isEmpty()) exchanges_.append({text, {}});
+        else exchanges_.last().message += "\n\n" + text;
         emit userMessagesChanged();
     });
     connect(agent, &AgentBackend::steerFailed, this, [this, name](const QString &text, const QString &reason) {
@@ -396,11 +398,11 @@ void ChatTab::setAgent(AgentBackend *agent)
         emit steeringFailed(text);
     });
     connect(agent, &AgentBackend::messageStarted, this, [this, name] {
-        if (!lastAnswer_.isEmpty()) lastAnswer_ += "\n\n";
+        if (!exchanges_.isEmpty() && !exchanges_.last().answer.isEmpty()) exchanges_.last().answer += "\n\n";
         appendText("\n" + name + ": ");
     });
     connect(agent, &AgentBackend::messageDelta, this, [this](const QString &text) {
-        lastAnswer_ += text;
+        if (!exchanges_.isEmpty()) exchanges_.last().answer += text;
         appendText(text);
     });
     connect(agent, &AgentBackend::reasoningUpdated, this, &ChatTab::updateReasoning);
@@ -605,7 +607,7 @@ void ChatTab::showHistory(const QList<ChatEntry> &entries, bool hasMore, const Q
     QStringList blocks;
     QList<int> historyTools;
     historyMessages_.clear();
-    lastAnswer_.clear();
+    exchanges_.clear();
     QStringList reasoningHistory;
     int reasoningIndex = 0;
     for (const ChatEntry &entry : entries) {
@@ -619,7 +621,7 @@ void ChatTab::showHistory(const QList<ChatEntry> &entries, bool hasMore, const Q
         }
         if (entry.role == "user") {
             historyMessages_.append(entry.text);
-            lastAnswer_.clear();
+            exchanges_.append({entry.text, {}});
             blocks.append("You: " + entry.text);
         } else if (entry.role == "tool") {
             historyTools.append(blocks.size());
@@ -628,8 +630,11 @@ void ChatTab::showHistory(const QList<ChatEntry> &entries, bool hasMore, const Q
                           + (entry.text == heading ? QString() : "\n" + entry.text));
         } else {
             blocks.append(name + ": " + entry.text);
-            if (!lastAnswer_.isEmpty()) lastAnswer_ += "\n\n";
-            lastAnswer_ += entry.text;
+            if (!exchanges_.isEmpty()) {
+                QString &answer = exchanges_.last().answer;
+                if (!answer.isEmpty()) answer += "\n\n";
+                answer += entry.text;
+            }
         }
     }
     for (const QString &key : reasoningOrder_)
