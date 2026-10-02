@@ -1458,8 +1458,10 @@ void MainWindow::showNotificationsDialog()
     auto *popups = new QCheckBox("Show desktop notifications", &dialog);
     popups->setChecked(settings.popups);
     form->addRow(QString(), popups);
-    auto *minimum = new QSpinBox(&dialog);
+    auto *minimum = new QDoubleSpinBox(&dialog);
     minimum->setRange(0, 600);
+    minimum->setDecimals(1);
+    minimum->setSingleStep(0.1);
     minimum->setSuffix(" min");
     minimum->setValue(settings.minimumMinutes);
     minimum->setToolTip("Finished and failed turns notify only when they took at least this long; 0 notifies every turn");

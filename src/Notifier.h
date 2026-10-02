@@ -30,7 +30,7 @@ public:
         bool popups = true;
         bool muted = false;
         // Finished and failed turns notify only when they took at least this long.
-        int minimumMinutes = 5;
+        double minimumMinutes = 5;
         QString finishedSound;
         QString failedSound;
         QString waitingSound;

@@ -119,7 +119,7 @@ Notifier::Settings Notifier::Settings::fromJson(const QJsonObject &object)
     const QString waitingSound = systemSound("/usr/share/sounds/freedesktop/stereo/screen-capture.oga", QString());
     settings.popups = object.value("popups").toBool(true);
     settings.muted = object.value("muted").toBool(false);
-    settings.minimumMinutes = object.value("minimumMinutes").toInt(5);
+    settings.minimumMinutes = object.value("minimumMinutes").toDouble(5);
     settings.finishedSound = object.value("finishedSound").toString();
     settings.failedSound = object.value("failedSound").toString();
     settings.waitingSound = object.value("waitingSound").toString(waitingSound);
@@ -168,7 +168,7 @@ Notifier::Notifier(QObject *parent)
 
 void Notifier::turnFinished(const QString &agent, const QString &chat, bool succeeded, qint64 durationMs)
 {
-    if (durationMs < qint64(settings_.minimumMinutes) * 60 * 1000) return;
+    if (durationMs < qRound64(settings_.minimumMinutes * 60 * 1000)) return;
     const qint64 minutes = durationMs / 60000;
     const QString length = minutes > 0 ? QString("%1 min").arg(minutes) : QString("%1 s").arg(durationMs / 1000);
     if (settings_.popups) {

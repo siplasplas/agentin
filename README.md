@@ -370,7 +370,7 @@ tool calls were. The choice is saved in the settings.
 **Settings → Notifications…** sets desktop notifications and sounds (WAV, MP3 or
 OGG files, played with ffplay, mpv, pw-play or paplay, whichever is installed).
 A finished or failed turn notifies only when it took at least a set time (5
-minutes by default). An agent that waits for an approval or an answer is always
+minutes by default, set in tenths of a minute). An agent that waits for an approval or an answer is always
 announced, after a short delay (30 seconds by default) so that answering at once
 stays quiet, and optionally again every few minutes until it is answered, since
 its work stops until then. Approval requests can be left unannounced, while
