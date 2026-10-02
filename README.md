@@ -458,7 +458,9 @@ Ctrl+Enter always sends. By default Enter sends a short message of one line (up
 to 60 characters) and starts a new line in a longer one, so a message you are
 still writing is not sent by accident. Once you type a line break yourself,
 Enter keeps adding lines. A recalled message or pasted text is sent with Enter
-as long as you do not change it. **Settings → Options…** sets the length of a
+as long as you do not change it. Line breaks, spaces and tabs at the start and end of
+pasted text are dropped, so a stray trailing line break does not turn Enter into
+a new line. **Settings → Options…** sets the length of a
 short message (0 never sends typed text with Enter) or makes Enter always send
 or always start a new line; the choices are saved as `enterKey` and
 `enterSendsUpTo` in `settings.json`. Undo and redo work in the field, also for a

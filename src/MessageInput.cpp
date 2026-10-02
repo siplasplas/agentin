@@ -2,6 +2,7 @@
 
 #include <QSet>
 #include <QKeyEvent>
+#include <QMimeData>
 #include <QTextBlock>
 #include <QTextLayout>
 
@@ -172,6 +173,14 @@ void MessageInput::recall(int step)
     typed_ = false;
     updateEnterAction();
     moveCursor(step < 0 ? QTextCursor::End : QTextCursor::Start);
+}
+
+// Line breaks, spaces and tabs around pasted text are dropped: a trailing line break would make Enter
+// start a new line instead of sending.
+void MessageInput::insertFromMimeData(const QMimeData *source)
+{
+    if (source->hasText()) insertPlainText(source->text().trimmed());
+    else QPlainTextEdit::insertFromMimeData(source);
 }
 
 void MessageInput::mousePressEvent(QMouseEvent *event)
