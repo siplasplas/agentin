@@ -286,8 +286,10 @@ diff stay where they are scrolled to, and a file that has just changed lights up
 for a second. With **Group new files**, as JetBrains
 IDEs show them, new files are listed below the changed ones. It lists each file
 with its status (`m` modified, `n` new, `d` deleted, `r` renamed in the index,
-`b` binary) and its added and removed lines, and shows the diff of the selected
-file, unified or side by side, with line numbers and three lines of context;
+`b` binary) and its added and removed lines, a new file's lines counted as added.
+Clicking **File**, **+** or **−** sorts the list by it, the largest numbers first;
+equal counts go by the other count, then by path. The window shows
+the diff of the selected file, unified or side by side, with line numbers and three lines of context;
 longer unchanged stretches are folded into one line that opens with a click, and
 the arrow buttons (or Alt+Up and Alt+Down) move between changes. The list starts
 from the latest turn; it can also show the changes since the chat's first turn,

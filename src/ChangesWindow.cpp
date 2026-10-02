@@ -112,6 +112,16 @@ ChangesWindow::ChangesWindow(ChangeTracker *tracker, const QString &title, QWidg
     list_->header()->setSectionResizeMode(1, QHeaderView::Stretch);
     list_->header()->setSectionResizeMode(2, QHeaderView::ResizeToContents);
     list_->header()->setSectionResizeMode(3, QHeaderView::ResizeToContents);
+    list_->header()->setSectionsClickable(true);
+    list_->header()->setSortIndicatorShown(true);
+    list_->header()->setSortIndicator(sortColumn_, Qt::AscendingOrder);
+    // A click on File sorts by path, on + or − by that count, largest first.
+    connect(list_->header(), &QHeaderView::sectionClicked, this, [this](int column) {
+        const bool sorts = column >= 1 && column != sortColumn_;
+        if (sorts) sortColumn_ = column;
+        list_->header()->setSortIndicator(sortColumn_, sortColumn_ == 1 ? Qt::AscendingOrder : Qt::DescendingOrder);
+        if (sorts) updateList();
+    });
     list_->setToolTip("Double-click or press Enter to open a file with its default application");
 
     auto *diffPanel = new QWidget(this);
@@ -220,7 +230,8 @@ void ChangesWindow::updateList()
 {
     if (!tracker_) return;
     if (isVisible()) tracker_->setExtraSince(since());
-    const QList<FileChange> changes = tracker_->changes(since());
+    QList<FileChange> changes = tracker_->changes(since());
+    sortChanges(changes);
     const QDateTime started = tracker_->startedAt(since());
     QString text;
     if (since() == ChangesSince::Head) {
@@ -289,12 +300,9 @@ void ChangesWindow::updateList()
         QString removed;
         switch (change.lines.kind) {
         case LineChanges::Kind::Counted:
-            if (change.file.status == ChangedFile::Status::New) {
-                path += QString("  (new, %1 %2)").arg(change.lines.added).arg(change.lines.added == 1 ? "line" : "lines");
-            } else {
-                added = "+" + QString::number(change.lines.added);
-                removed = "−" + QString::number(change.lines.removed);
-            }
+            // A new file's lines count as added.
+            added = "+" + QString::number(change.lines.added);
+            removed = "−" + QString::number(change.file.status == ChangedFile::Status::New ? 0 : change.lines.removed);
             break;
         case LineChanges::Kind::Binary:
             path += "  (binary, " + byteSize(change.file.sizeBefore) + " → " + byteSize(change.file.sizeAfter) + ")";
@@ -327,6 +335,30 @@ void ChangesWindow::updateList()
     // A refresh keeps the place the list was scrolled to.
     list_->verticalScrollBar()->setValue(scroll);
     showSelected();
+}
+
+// By the chosen column, counts largest first; equal counts of added lines go by removed ones and the other way round, then by
+// path. Files whose lines were not counted, such as binary ones, count below zero.
+void ChangesWindow::sortChanges(QList<FileChange> &changes) const
+{
+    const auto counts = [](const FileChange &change) {
+        if (change.lines.kind != LineChanges::Kind::Counted) return std::pair{-1, -1};
+        return std::pair{change.lines.added, change.file.status == ChangedFile::Status::New ? 0 : change.lines.removed};
+    };
+    const auto path = [](const FileChange &change) { return QDir(change.root).filePath(change.file.path); };
+    std::stable_sort(changes.begin(), changes.end(), [&](const FileChange &a, const FileChange &b) {
+        if (sortColumn_ != 1) {
+            auto [aAdded, aRemoved] = counts(a);
+            auto [bAdded, bRemoved] = counts(b);
+            if (sortColumn_ == 3) {
+                std::swap(aAdded, aRemoved);
+                std::swap(bAdded, bRemoved);
+            }
+            if (aAdded != bAdded) return aAdded > bAdded;
+            if (aRemoved != bRemoved) return aRemoved > bRemoved;
+        }
+        return QString::compare(path(a), path(b), Qt::CaseInsensitive) < 0;
+    });
 }
 
 // A diff is requested again only when the selected file changed since it was shown.

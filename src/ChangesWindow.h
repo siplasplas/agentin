@@ -55,6 +55,7 @@ private:
     void showSelected();
     void render();
     QList<Row> rows(bool sideBySide) const;
+    void sortChanges(QList<FileChange> &changes) const;
     void moveToChange(int step);
     void openFile(QTreeWidgetItem *item) const;
     void showMenu(const QPoint &position);
@@ -81,6 +82,8 @@ private:
     QHash<QString, QString> listedStates_;
     int listedSince_ = -1;
     QSet<QString> flashing_;
+    // The list's order: by path (column 1), added lines (2) or removed lines (3).
+    int sortColumn_ = 1;
     QTimer *flashEnd_;
     std::optional<FileDiff> diff_;
     QSet<int> openedFolds_;
