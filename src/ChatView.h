@@ -70,7 +70,12 @@ public:
     // Hidden tool calls leave only the user's messages and the answers, with a thin line where they were.
     void setToolsShown(bool shown);
 
+    // What the copy actions of the context menu take from the selection, or from the whole chat without one.
+    enum class CopyMode { ToolsExpanded, ToolsFolded, WithoutTools, ToolsOnly };
+    QString copyText(CopyMode mode) const;
+
 protected:
+    void contextMenuEvent(QContextMenuEvent *event) override;
     void paintEvent(QPaintEvent *event) override;
     void mouseReleaseEvent(QMouseEvent *event) override;
     void resizeEvent(QResizeEvent *event) override;

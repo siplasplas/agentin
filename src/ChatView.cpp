@@ -1,5 +1,9 @@
 #include "ChatView.h"
 
+#include <QClipboard>
+#include <QContextMenuEvent>
+#include <QGuiApplication>
+#include <QMenu>
 #include <QMouseEvent>
 #include <QPaintEvent>
 #include <QPainter>
@@ -164,6 +168,54 @@ void ChatView::refreshTools()
 }
 
 // The user's messages get a yellow band across the view, darker on a dark background.
+QString ChatView::copyText(CopyMode mode) const
+{
+    const QTextCursor selection = textCursor();
+    const bool selected = selection.hasSelection();
+    const int start = selected ? selection.selectionStart() : 0;
+    const int end = selected ? selection.selectionEnd() : document()->characterCount() - 1;
+    QStringList lines;
+    int lastGroup = 0;
+    for (QTextBlock block = document()->findBlock(start); block.isValid() && block.position() <= end; block = block.next()) {
+        const auto *tool = dynamic_cast<const ToolBlockData *>(block.userData());
+        const bool output = tool && !tool->header && !tool->status;
+        if (mode == CopyMode::ToolsFolded && output) continue;
+        if (mode == CopyMode::WithoutTools && tool) continue;
+        if (mode == CopyMode::ToolsOnly && !tool) continue;
+        if (mode == CopyMode::ToolsOnly && tool->group != lastGroup && !lines.isEmpty()) lines.append(QString());
+        if (tool) lastGroup = tool->group;
+        // A selection starting or ending inside a line takes only its selected part.
+        QString text = block.text();
+        const int from = qMax(0, start - block.position());
+        const int to = qMin(int(text.size()), end - block.position());
+        text = text.mid(from, qMax(0, to - from));
+        lines.append(text);
+    }
+    // Removed tool calls leave no runs of empty lines behind.
+    QString text = lines.join('\n');
+    static const QRegularExpression blankRuns("\n{3,}");
+    text.replace(blankRuns, "\n\n");
+    return text.trimmed() + '\n';
+}
+
+void ChatView::contextMenuEvent(QContextMenuEvent *event)
+{
+    QMenu *menu = createStandardContextMenu(event->pos());
+    menu->addSeparator();
+    const QString scope = textCursor().hasSelection() ? "the selection" : "the whole chat";
+    const auto add = [this, menu, &scope](const QString &label, CopyMode mode, const QString &tip) {
+        QAction *action = menu->addAction(label, this, [this, mode] { QGuiApplication::clipboard()->setText(copyText(mode)); });
+        action->setToolTip("Copies " + scope + ": " + tip);
+    };
+    add("Copy with tools expanded", CopyMode::ToolsExpanded, "messages, answers and tool calls with their output");
+    add("Copy with tools folded", CopyMode::ToolsFolded, "messages, answers, and the tool calls' headings and status without output");
+    add("Copy without tools", CopyMode::WithoutTools, "only the messages and the answers");
+    add("Copy tools only", CopyMode::ToolsOnly, "only the tool calls, with their output");
+    menu->setToolTipsVisible(true);
+    menu->exec(event->globalPos());
+    delete menu;
+}
+
 void ChatView::paintEvent(QPaintEvent *event)
 {
     {

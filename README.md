@@ -410,6 +410,13 @@ status lines such as `[shell: completed]` and the blank lines after them, so the
 chat shows only your messages and the answers. A thin dashed line marks where
 tool calls were. The choice is saved in the settings.
 
+Copying the chat (Ctrl+C) always takes the tool calls with their output, folded
+or not. The chat's context menu offers four ways to copy the selection, or the
+whole chat when nothing is selected: **Copy with tools expanded** (everything),
+**Copy with tools folded** (the tool calls' headings and status lines without
+their output), **Copy without tools** (only your messages and the answers) and
+**Copy tools only** (the tool calls with their output, separated by empty lines).
+
 **Settings → Notifications…** sets desktop notifications and sounds (WAV, MP3 or
 OGG files, played with ffplay, mpv, pw-play or paplay, whichever is installed).
 A finished or failed turn notifies only when it took at least a set time (5
