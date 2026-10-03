@@ -505,12 +505,12 @@ to the message field. While the terminal has the focus, every key goes to the
 shell, also Ctrl+W, Ctrl+Tab and the other keys agentin uses, except Alt+F12. A
 shell that ends, for example with `exit`, leaves a button that starts a new one.
 As in other terminals, Ctrl+Shift+C copies the selection and Ctrl+Shift+V or
-Shift+Insert pastes, while Ctrl+C and Ctrl+V stay with the shell. The context menu
-copies and pastes, selects the line under the mouse with its wrapped continuation
-(as a triple click does), selects all, including the lines scrolled above the
-screen, or clears the terminal. Text is selected
-with the mouse; the line being typed belongs to the shell, so it is cut with the
-shell's own keys, such as Ctrl+U and Ctrl+K in bash.
+Shift+Insert pastes, while Ctrl+C and Ctrl+V stay with the shell. A right click
+in the terminal opens its context menu, with **Copy**, **Paste**, **Select Line**
+(the line under the mouse with its wrapped continuation, as a triple click
+selects it), **Select All** (including the lines scrolled above the screen) and
+**Clear**. Text is selected with the mouse; the line being typed belongs to the
+shell, so it is cut with the shell's own keys, such as Ctrl+U and Ctrl+K in bash.
 
 **View → Reasoning** toggles a read-only panel beneath the conversation tree.
 It is hidden by default, and the visibility preference is saved. Drag the divider
