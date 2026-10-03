@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "description": "Shell command lines and the decision agentin should take about them. 'cwd' names a directory of 'directories'; 'writable' lists the directories where writing is allowed. 'expect' is allow, ask, deny, or agent (agentin leaves the decision to the agent). 'asks' lists the commands an ask names. 'pending' marks behaviour planned for a later stage: the test expects it to fail until then.",
+  "description": "Shell command lines and the decision agentin should take about them. 'cwd' names a directory of 'directories'; 'writable' lists the directories where writing is allowed. 'expect' is allow, ask, deny, or agent (agentin leaves the decision to the agent). 'asks' lists the commands an ask names. 'pending' marks behaviour planned for a later stage: the test expects it to fail until then. 'unsupported' marks a line the Bash parser does not support.",
   "directories": {
     "P": "/home/user/work/qcodeedit",
     "S": "/home/user/work/syntax-hi-lib",
@@ -440,6 +440,7 @@
       "cwd": "P",
       "expect": "ask",
       "pending": true,
+      "unsupported": true,
       "note": "cannot judge"
     }
   ]
