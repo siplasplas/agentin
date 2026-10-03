@@ -20,7 +20,7 @@ struct WordPart
     enum class Kind {
         // Unquoted text; glob tells whether it holds an unquoted *, ? or [.
         Literal,
-        // '…' or $'…': the text as written.
+        // '…', or $'…' without escapes: the text as written.
         SingleQuoted,
         // "…": the parts inside.
         DoubleQuoted,
@@ -31,7 +31,8 @@ struct WordPart
         // ~ or ~user at the start of a word: text is the user, empty for one's own home.
         Tilde,
         // A part whose value the shell computes and the evaluation does not: ${NAME:-…} and other
-        // parameter operators, $((…)), and process substitution <(…) or >(…), whose list is in command.
+        // parameter operators, $((…)), $'…' with escapes, and process substitution <(…) or >(…), whose list
+        // is in command.
         Opaque,
     };
     Kind kind = Kind::Literal;
@@ -55,6 +56,8 @@ struct Assignment
 {
     QString name;
     Word value;
+    // NAME+=value, which adds to the present value.
+    bool append = false;
 };
 
 struct Redirection
@@ -80,6 +83,9 @@ struct Redirection
     // The body of a here-document, and whether its delimiter was quoted, so that the body is not expanded.
     QString hereText;
     bool hereQuoted = false;
+    // The body of a here-document with an unquoted delimiter, which the shell expands as it does text in
+    // double quotes.
+    QList<WordPart> hereParts;
 };
 
 struct Node

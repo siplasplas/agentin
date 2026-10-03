@@ -243,10 +243,15 @@
       ]
     },
     {
-      "name": "unknown-program-left-to-agent",
+      "name": "make-install-asks",
       "command": "make && make install",
       "cwd": "P",
-      "expect": "agent"
+      "expect": "ask",
+      "asks": [
+        "make install"
+      ],
+      "pending": true,
+      "note": "installing writes outside the project, to a place the command does not name"
     },
     {
       "name": "cd-then-rm-outside",
@@ -442,6 +447,25 @@
       "pending": true,
       "unsupported": true,
       "note": "cannot judge"
+    },
+    {
+      "name": "xargs-count-lines",
+      "command": "git ls-files | xargs wc -l",
+      "cwd": "P",
+      "expect": "allow",
+      "pending": true,
+      "note": "wc tells about files without showing what is in them"
+    },
+    {
+      "name": "xargs-show-files",
+      "command": "git ls-files | xargs cat",
+      "cwd": "P",
+      "expect": "ask",
+      "asks": [
+        "xargs cat"
+      ],
+      "pending": true,
+      "note": "the files come from the input, so a secret file could be shown"
     }
   ]
 }

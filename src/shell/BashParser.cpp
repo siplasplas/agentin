@@ -13,6 +13,8 @@ namespace shell {
 namespace {
 
 constexpr int kMaximumDepth = 16;
+// Compound commands inside one another; each level uses the stack.
+constexpr int kMaximumNesting = 64;
 
 struct ParseError
 {
@@ -75,6 +77,7 @@ private:
     QString s_;
     int pos_ = 0;
     int depth_;
+    int nesting_ = 0;
     QList<PendingHere> pending_;
 
     bool atEnd() const { return pos_ >= s_.size(); }
@@ -142,7 +145,13 @@ private:
                 lines.append(line);
             }
             if (!closed) throw ParseError{"here-document without its delimiter " + here.delimiter};
-            here.node->redirections[here.index].hereText = lines.join('\n');
+            Redirection &redirection = here.node->redirections[here.index];
+            redirection.hereText = lines.join('\n');
+            if (!redirection.hereQuoted) {
+                if (depth_ >= kMaximumDepth) throw ParseError{"substitutions nested too deeply"};
+                Parser body(redirection.hereText, depth_ + 1);
+                redirection.hereParts = body.readQuotedParts(true).parts;
+            }
         }
     }
 
@@ -244,6 +253,18 @@ private:
 
     NodePtr parseCommand()
     {
+        struct Level
+        {
+            int &nesting;
+            explicit Level(int &value) : nesting(value)
+            {
+                if (++nesting > kMaximumNesting) {
+                    --nesting;
+                    throw ParseError{"commands nested too deeply"};
+                }
+            }
+            ~Level() { --nesting; }
+        } level(nesting_);
         skipBlanks();
         const int start = pos_;
         if (startsWith("((")) throw ParseError{"arithmetic commands are not supported"};
@@ -473,7 +494,8 @@ private:
                     && word.parts.first().text.startsWith(match.captured(0))) {
                     if (peek() == '(' && pos_ - wordStart == match.capturedLength(0))
                         throw ParseError{"array assignments are not supported"};
-                    node->assignments.append({match.captured(1), valueAfter(word, match.capturedLength(0))});
+                    node->assignments.append({match.captured(1), valueAfter(word, match.capturedLength(0)),
+                                              match.captured(0).contains('+')});
                     continue;
                 }
             }
@@ -581,6 +603,13 @@ private:
     WordPart readDoubleQuoted()
     {
         ++pos_;
+        return readQuotedParts(false);
+    }
+
+    // The text inside double quotes up to the closing quote, or the whole body of a here-document, where a
+    // double quote is plain text.
+    WordPart readQuotedParts(bool hereDocument)
+    {
         WordPart quoted;
         quoted.kind = WordPart::Kind::DoubleQuoted;
         QString literal;
@@ -593,9 +622,12 @@ private:
             literal.clear();
         };
         for (;;) {
-            if (atEnd()) throw ParseError{"unclosed \""};
+            if (atEnd()) {
+                if (hereDocument) break;
+                throw ParseError{"unclosed \""};
+            }
             const QChar c = peek();
-            if (c == '"') {
+            if (c == '"' && !hereDocument) {
                 ++pos_;
                 break;
             }
@@ -605,7 +637,7 @@ private:
                     pos_ += 2;
                     continue;
                 }
-                if (next == '$' || next == '`' || next == '"' || next == '\\') {
+                if (next == '$' || next == '`' || (next == '"' && !hereDocument) || next == '\\') {
                     literal += next;
                     pos_ += 2;
                     continue;
@@ -678,8 +710,14 @@ private:
             int end = pos_ + 2;
             while (end < s_.size() && s_.at(end) != '\'') end += s_.at(end) == '\\' ? 2 : 1;
             if (end >= s_.size()) throw ParseError{"unclosed $'"};
-            part.kind = WordPart::Kind::SingleQuoted;
             part.text = s_.mid(pos_ + 2, end - pos_ - 2);
+            // Escapes such as \x2e are not decoded here, so text that has them is not known.
+            if (part.text.contains('\\')) {
+                part.kind = WordPart::Kind::Opaque;
+                part.text = s_.mid(pos_, end + 1 - pos_);
+            } else {
+                part.kind = WordPart::Kind::SingleQuoted;
+            }
             pos_ = end + 1;
             return part;
         }
@@ -960,7 +998,7 @@ QString dumpTree(const NodePtr &node)
         }
         return "(pipe " + items.join(' ') + ")";
     case Node::Kind::Simple:
-        for (const Assignment &assignment : node->assignments) items.append(assignment.name + "=" + dumpWord(assignment.value));
+        for (const Assignment &assignment : node->assignments) items.append(assignment.name + (assignment.append ? "+=" : "=") + dumpWord(assignment.value));
         for (const Word &word : node->words) items.append(dumpWord(word));
         appendRedirections(items, node);
         return "(cmd " + items.join(' ') + ")";
@@ -1007,7 +1045,7 @@ bool hasUnsupported(const NodePtr &node)
     for (const Word &word : node->words)
         if (wordHasUnsupported(word)) return true;
     for (const Redirection &redirection : node->redirections)
-        if (wordHasUnsupported(redirection.target)) return true;
+        if (wordHasUnsupported(redirection.target) || partsHaveUnsupported(redirection.hereParts)) return true;
     return false;
 }
 

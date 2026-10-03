@@ -169,7 +169,8 @@ if(BUILD_TESTING)
     add_test(NAME agentin_test COMMAND agentin_test)
     # Decisions about shell command lines, against a corpus of real commands; no window, milliseconds.
     add_executable(shell_approval_test tests/ShellApprovalTest.cpp src/CommandApproval.cpp src/CommandApproval.h
-        src/shell/BashParser.cpp src/shell/ShellAst.h)
+        src/shell/BashParser.cpp src/shell/ShellAst.h src/shell/CommandCatalog.cpp src/shell/CommandCatalog.h
+        src/shell/ShellEvaluator.cpp src/shell/ShellEvaluator.h)
     target_link_libraries(shell_approval_test PRIVATE Qt6::Core Qt6::Test)
     target_include_directories(shell_approval_test PRIVATE src)
     target_compile_definitions(shell_approval_test PRIVATE
