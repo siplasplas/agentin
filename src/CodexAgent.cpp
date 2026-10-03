@@ -399,6 +399,8 @@ void CodexAgent::answerApproval(int id, ApprovalDecision decision)
             {"acceptWithExecpolicyAmendment", QJsonObject{{"execpolicy_amendment", rule}}}}}});
         QStringList words;
         for (const QJsonValue &word : rule) words.append(word.toString());
+        // The rule also goes into agentin's list, which wins over Codex's own rules.
+        addAllowRule(words.join(' ') + " *");
         emit message("[Approval: always allow commands starting with " + words.join(' ') + "]");
         return;
     }
@@ -780,21 +782,22 @@ void CodexAgent::handleServerRequest(const QString &method, const QJsonValue &id
     if (method == "item/commandExecution/requestApproval" || method == "item/fileChange/requestApproval") {
         QString sessionRule;
         if (method == "item/commandExecution/requestApproval") {
-            const CommandApproval command = classifyCommandApproval(params.value("command").toString());
-            if (!command.deniedReason.isEmpty()) {
+            // agentin's rules decide before chat trust and before asking; Codex's own rules acted already.
+            const CommandVerdict verdict = commandRuleVerdict(params.value("command").toString());
+            if (verdict.decision == CommandDecision::Deny) {
                 connection_->respond(id, {{"decision", "decline"}});
-                emit message("[Approval automatically declined: " + command.deniedReason + "]");
+                emit message("[Declined by agentin's rules: " + verdict.reason + "]");
                 return;
             }
             if (params.value("networkApprovalContext").toObject().isEmpty()) {
-                const QString trusted = isReadOnly() ? QString() : trustedCommandRule(params.value("command").toString());
-                if (!trusted.isEmpty()) {
+                if (verdict.decision == CommandDecision::Allow && !isReadOnly()) {
                     connection_->respond(id, {{"decision", "accept"}});
-                    emit message("[Allowed without asking, as the options say: " + trusted + "]");
+                    emit message("[Allowed by agentin's rules: " + verdict.reason + "]");
                     return;
                 }
-                // Each command of a chain is a family of its own, trusted separately.
-                sessionRule = sessionCommandFamilies(params.value("command").toString()).join(", ");
+                // Each command of a chain is a family of its own, trusted separately; Ask leaves no trust.
+                if (verdict.decision != CommandDecision::Ask)
+                    sessionRule = sessionCommandFamilies(params.value("command").toString()).join(", ");
             }
             const QString trusted = sessionRule.isEmpty()
                 ? QString() : trustedCommandRule(params.value("command").toString(), trustedSessionCommands_.values());
@@ -824,6 +827,7 @@ void CodexAgent::handleServerRequest(const QString &method, const QJsonValue &id
         const QJsonArray rule = QJsonArray::fromStringList(lastingRulePrefix(proposed));
         QString alwaysRule;
         if (!sessionRule.isEmpty()) requestSessionRules_.insert(requestId, sessionRule);
+        // Always is offered also for a command agentin's rules ask about: its more specific allow rule then wins.
         if (!rule.isEmpty() && sessionRule.isEmpty()) {
             proposedRules_.insert(requestId, rule);
             QStringList words;

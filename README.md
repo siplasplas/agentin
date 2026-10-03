@@ -608,14 +608,7 @@ similar actions run without asking from now on: Codex allows commands with the
 proposed prefix (for example `git status`), and Claude saves its suggested rule
 where Claude Code proposes it, such as the project's local settings; the panel
 shows the rule first. Declining lets the agent continue, and **Decline and stop**
-also ends its turn. **Settings → Approvals…** lists the lasting rules (Codex's
-`~/.codex/rules/*.rules`, and Claude Code's `permissions.allow` in the user
-settings and in the `.claude` settings of the directories of open chats and
-recent directories) and the approvals given for the session in open chats, and
-removes the selected ones. A click on a column header sorts the lines within each
-group, and a line's context menu copies the whole line or only its rule. Codex may keep using a removed rule until its App
-Server restarts and cannot withdraw native App Server session approvals; for a Claude or GLM
-chat, withdrawing reconnects it and withdraws all of its session approvals.
+also ends its turn.
 
 Claude and GLM connections explicitly use `default` permission mode, with
 approval questions for actions that are not already allowed by permission rules.
@@ -632,23 +625,68 @@ Claude Code settings the session reads, or in the temporary directory (`/tmp`,
 or `TMPDIR`) are approved without asking. So are
 shell commands that only write such files and whose effect their words fully
 show: `cat`, `echo` or `printf` with `>`/`>>`, `tee`, `touch`, `mkdir`, `cp`
-(its destination), `mv` and `sed -i`, which runs with `--sandbox` so that it
-cannot read, write or run other files. Anything the shell would expand or
+(its destination), `mv`, `rm`, `rmdir` and `sed -i`, which runs with `--sandbox`
+so that it cannot read, write or run other files. A path in `.git`, or the
+removal of a directory that holds a `.git`, always asks. Anything the shell would expand or
 chain, unquoted here-documents, relative paths going up with `..`, scripts and
 all other commands still ask.
 
-**Settings → Options…** lists commands that run without asking, by their first
-words; on the first start it holds `git add` and `git commit -m`. Entries can be
-added, edited with a double-click, removed, or unchecked to keep them listed without
-effect. `git push`, `sudo`, `doas` and `su` cannot be added: they are always declined. A shell
-command of a Codex, Claude or GLM chat is allowed when every command of it starts
-with a checked entry, also in a chain joined by `&&`, `||`, `;` or `|`, in a
-`bash -lc '…'` wrapper, and after Git's `-C`, `--git-dir` or `--work-tree`
-options. A commit message given as `"$(cat <<'EOF' … EOF)"`, as Claude Code
-writes it, counts as plain text. Redirections, other substitutions, variables,
-subshells, background jobs and `git push` always ask or are declined as before,
-and read-only chats do not use the list. The log notes each command allowed this
-way.
+**Settings → Approvals…** holds agentin's own rules for shell commands: each a
+pattern with a check box and **Allow** (runs without asking), **Ask** (always
+asks, whatever chat trust or the agent's own rules say) or **Deny** (declined at
+once, with no way to agree). `*` matches any text and `?`
+one character, and a trailing ` *` also matches the command alone, so
+`git stash *` covers `git stash` and `git stash pop`. A pattern applies to each
+command of a command line, after Git's `-C`, `--git-dir` or `--work-tree`
+options. **Add allow**, **Add ask** and **Add deny** add a line, a double-click
+edits its pattern or switches its decision, **Remove** deletes it, an unchecked line stays
+listed without effect, a click on a column header sorts the list, and a line's
+context menu copies it or sets its decision. On the first start the list holds
+`git add *` and `git commit -m *` as Allow (or the commands an earlier version
+allowed), `rm *` and `rmdir *` as Ask, and as Deny the changes to system packages through apt, apt-get, dnf, yum, zypper,
+pacman, snap, flatpak and brew, which can be removed or unchecked. `git push *`,
+`sudo *`, `doas *` and `su *` are listed as Deny at every start with a checked box
+that cannot be changed, and they apply whatever the settings say.
+
+The rules are kept in `approvals.json` in agentin's data directory, apart from
+`settings.json`, together with the Codex rules agentin has seen and kept.
+agentin watches the file while it runs: an outside edit takes effect at once,
+with the fixed denials added back, and a removed file is written again with the
+default rules, so removing it resets the list. Earlier versions kept such rules
+in `settings.json` (`trustedCommands` or `commandRules`); they are not migrated:
+agentin does not start with such a section and shows an error, which can be
+copied, naming the file, so that the section or the whole file can be removed.
+
+Deny wins over everything, and all of them win over the agents' own rules. A
+command line is denied when any of its commands matches a Deny line, also inside
+a substitution or a `bash -lc '…'` script. It asks when a command matches an Ask
+line and no more specific Allow line, judged by the text before the first
+wildcard: **Always allow** on a command that asks adds such a line, for example
+`rm -rf build *` beside `rm *`, so that this command no longer asks while other
+removals still do. A command that must ask gets no chat trust. It is allowed when it is plain — commands joined by
+`&&`, `||`, `;` or `|`, also inside a `bash -lc '…'` wrapper, with no
+redirections, other substitutions, variables or subshells — and each of its
+commands matches a checked Allow line. A commit message given as
+`"$(cat <<'EOF' … EOF)"`, as Claude Code writes it, counts as plain text.
+Read-only chats are never allowed by the list, but its Deny lines apply. Any
+command other than `git` that names a path in `.git`, such as `rm -rf .git` or
+`cat .git/config`, is always declined: the repository is changed only through
+git. The log notes each command allowed or declined this way.
+
+For Claude and GLM, a `PreToolUse` hook of the bridge asks agentin about every
+shell command before Claude Code applies its own permission rules, so the list
+decides first. For an Ask line agentin shows the approval itself, since Claude
+Code runs commands it deems read-only even when a hook asks; its **Always allow**
+adds the command's line to agentin's list. Codex applies the rules in `~/.codex/rules` itself, without asking
+agentin, and commands it runs in its sandbox without asking, such as removals in
+the chat's directory, never reach agentin: agentin's lines answer Codex's
+questions, but an Ask or Deny line cannot stop a command that Codex does not ask
+about. The dialog therefore lists the Codex rules that allow what agentin denies
+or asks about, with **Remove from Codex**, which
+deletes the rule from Codex's file (Codex keeps using it until its App Server
+restarts), and **Keep Codex's rule**, after which agentin stops reporting it.
+At every start agentin reports, in the log, Codex rules added while it was not
+running and the conflicts not yet resolved.
 
 For Codex command approval requests, **Trust git add for this chat** and
 **Trust git commit for this chat** remember the command family in agentin's
@@ -663,11 +701,11 @@ automatically trusted.
 A lasting **Always allow** rule that Codex proposes for a Git command is saved
 without its files or message, as `git add`, `git commit -m` or `git` with the
 subcommand, so that it matches the next such command; other commands keep the
-proposed rule. `sudo`, `doas`, `su` and `git push` are never offered a lasting
-rule, and requests for them are declined. **Settings → Approvals…** lists these rules as managed by agentin;
-removing one immediately restores questions, including during a running turn.
-Trust belongs to one conversation in one chat and ends when changing the
-conversation or exiting the application.
+proposed rule. The rule goes both into Codex's rules and, with ` *` added, into
+agentin's list. `sudo`, `doas`, `su` and `git push` are never offered a lasting
+rule, and requests for them are declined. Chat trust is kept in memory, belongs
+to one conversation in one chat and ends when changing the conversation or
+exiting the application.
 Network approval requests require their own decision.
 
 Codex can also ask for additional permissions, such as writing to or reading
@@ -681,9 +719,9 @@ for the running turn when no other chat holds them; otherwise the chat and the
 log say that the directory is also used by that chat. Patterns and special
 locations, such as the temporary directory, are granted but not locked.
 
-Incoming Codex command approval requests for `git push`, `sudo`, `doas`, `su`,
-and system package changes through apt/apt-get, dnf/dnf5, yum, zypper, pacman,
-apk, pkg, or brew are automatically declined. On Windows, runas and recognized
+Incoming Codex command approval requests for `git push`, `sudo`, `doas` and `su`
+are automatically declined, and so are system package changes while their Deny
+lines are checked. On Windows, runas and recognized
 winget/choco/scoop changes and PowerShell installation commands are also declined.
 These checks apply to recognized commands in approval requests, not commands
 executed by the agent without requesting approval; unknown shell syntax still

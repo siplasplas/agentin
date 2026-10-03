@@ -15,6 +15,8 @@ struct ApprovalRule
     QString file;
     // The rule as stored: a line of a Codex rules file or an entry of Claude's permissions.allow.
     QString stored;
+    // A Codex rule's command prefix, word by word.
+    QStringList words;
 };
 
 // Codex keeps prefix_rule(...) lines in $CODEX_HOME/rules/*.rules (by default ~/.codex).

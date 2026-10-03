@@ -813,9 +813,10 @@ void MainWindowTest::commandApproval_data()
     QTest::newRow("wrapper-sudo") << "exec env LANG=C sudo true" << "" << true;
     QTest::newRow("nested-sudo") << "git commit -m \"$(sudo true)\"" << "" << true;
     QTest::newRow("backtick-sudo") << "echo `sudo true`" << "" << true;
-    QTest::newRow("apt") << "apt-get -y install something" << "" << true;
-    QTest::newRow("dnf") << "dnf install something" << "" << true;
-    QTest::newRow("pacman") << "pacman -Syu" << "" << true;
+    // Package changes are denied by removable rules of agentin's list, not by the classification.
+    QTest::newRow("apt") << "apt-get -y install something" << "" << false;
+    QTest::newRow("dnf") << "dnf install something" << "" << false;
+    QTest::newRow("pacman") << "pacman -Syu" << "" << false;
     QTest::newRow("apt-show") << "apt show install" << "" << false;
     QTest::newRow("echo") << "echo 'sudo git push'" << "" << false;
     QTest::newRow("empty-wrapper") << "env" << "" << false;
@@ -871,8 +872,8 @@ for line in sys.stdin:
     QVERIFY(chat.newConversation(directory.path()));
     QTRY_COMPARE(chat.sessionId(), QString("test-thread"));
     // Trust for one chat is tested without the commands the options allow everywhere.
-    setTrustedCommands({});
-    const auto restoreTrusted = qScopeGuard([] { setTrustedCommands(defaultTrustedCommands()); });
+    setCommandRules({});
+    const auto restoreTrusted = qScopeGuard([] { setCommandRules(defaultCommandRules()); });
     QSignalSpy approvals(&chat, &AgentBackend::approvalRequested);
     const auto request = [&](int id, const QString &command, bool network = false) {
         QJsonObject params{{"command", command}, {"cwd", directory.path()},

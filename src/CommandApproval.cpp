@@ -4,6 +4,9 @@
 #include <QRegularExpression>
 #include <QStringList>
 
+#include <functional>
+#include <optional>
+
 namespace {
 struct ShellWords {
     QList<QStringList> commands;
@@ -160,25 +163,6 @@ CommandApproval classify(const QString &text, int depth)
                 result.sessionRule = "git " + subcommand;
             continue;
         }
-        const QStringList managers{"apt", "apt-get", "dnf", "dnf5", "yum", "zypper", "apk", "pkg", "brew"};
-        const QStringList mutations{"install", "reinstall", "upgrade", "full-upgrade", "dist-upgrade", "remove",
-                                    "purge", "autoremove", "add", "del", "erase", "update", "in", "rm", "dup"};
-        if (managers.contains(program)) {
-            // The first non-option is the package manager's operation, never a package name.
-            int i = 1;
-            while (i < args.size() && args.at(i).startsWith('-')) {
-                if (QStringList{"-o", "--option", "-c", "--config", "--root", "--installroot", "--releasever"}
-                        .contains(args.at(i))) ++i;
-                ++i;
-            }
-            if (mutations.contains(args.value(i))) return {{}, "System package changes (" + program + ")"};
-        }
-        if (program == "pacman") {
-            for (const QString &arg : args.mid(1))
-                if (arg.startsWith('-') && (arg.contains('S') || arg.contains('R') || arg.contains('U')
-                    || arg == "--sync" || arg == "--remove" || arg == "--upgrade"))
-                    return {{}, "System package changes (pacman)"};
-        }
 #ifdef Q_OS_WIN
         if (QStringList{"cmd", "powershell", "pwsh"}.contains(program)) {
             for (int i = 1; i + 1 < args.size(); ++i) {
@@ -217,10 +201,16 @@ CommandApproval classifyCommandApproval(const QString &command)
 }
 
 namespace {
-QStringList &trustedCommandList()
+QList<CommandRule> &ruleList()
 {
-    static QStringList prefixes = defaultTrustedCommands();
-    return prefixes;
+    static QList<CommandRule> rules = defaultCommandRules();
+    return rules;
+}
+
+std::function<void()> &rulesChangedHandler()
+{
+    static std::function<void()> handler;
+    return handler;
 }
 
 // Only words, quotes and the separators of a command list; anything that could run or write more is refused.
@@ -277,36 +267,216 @@ QString withoutLiteralMessages(QString text)
     }
     return text;
 }
+
+// Git's options that only choose the repository are dropped, so that rules see the subcommand.
+QStringList withoutGitDirectory(QStringList args)
+{
+    if (args.value(0) != "git") return args;
+    int i = 1;
+    while (i < args.size()) {
+        const QString option = args.at(i);
+        if (option == "-C" || option == "--git-dir" || option == "--work-tree") i += 2;
+        else if (option.startsWith("--git-dir=") || option.startsWith("--work-tree=")) ++i;
+        else break;
+    }
+    return QStringList{"git"} + args.mid(qMin(i, int(args.size())));
 }
 
-QStringList defaultTrustedCommands()
+bool isShellWrapper(const ShellWords &parsed)
 {
-    return {"git add", "git commit -m"};
+    const QStringList &only = parsed.commands.value(0);
+    return parsed.commands.size() == 1 && only.size() == 3 && (only.at(1) == "-c" || only.at(1) == "-lc")
+        && QStringList{"sh", "bash", "zsh", "/bin/sh", "/bin/bash", "/bin/zsh", "/usr/bin/bash", "/usr/bin/zsh"}
+               .contains(only.first());
 }
 
-QString forbiddenTrustedCommand(const QString &prefix)
+// The commands of a plain command line, each as its words, or nothing when the line is not plain: plain
+// commands joined by &&, ||, ; or |, also inside a shell -c wrapper, with literal commit messages.
+std::optional<QList<QStringList>> plainCommands(const QString &command, int depth = 0)
 {
-    const QStringList words = prefix.split(' ', Qt::SkipEmptyParts);
+    if (depth > 4) return std::nullopt;
+    const QString text = withoutLiteralMessages(command);
+    if (!plainCommandList(text)) return std::nullopt;
+    const ShellWords parsed = words(text);
+    if (!parsed.valid || parsed.commands.isEmpty() || !parsed.substitutions.isEmpty()) return std::nullopt;
+    if (isShellWrapper(parsed)) return plainCommands(parsed.commands.first().at(2), depth + 1);
+    QList<QStringList> result;
+    for (const QStringList &args : parsed.commands) {
+        if (args.first().contains('=')) return std::nullopt;
+        result.append(withoutGitDirectory(args));
+    }
+    return result;
+}
+
+// Every command a line may run, as far as its words can be read, including substitutions and shell -c
+// scripts; for deny rules, which must also catch commands in lines that are not plain.
+QList<QStringList> anyCommands(const QString &command, int depth = 0)
+{
+    QList<QStringList> result;
+    if (depth > 8) return result;
+    const ShellWords parsed = words(withoutLiteralMessages(command));
+    for (const QString &substitution : parsed.substitutions) result += anyCommands(substitution, depth + 1);
+    for (QStringList args : parsed.commands) {
+        while (!args.isEmpty() && args.first().contains('=')) args.removeFirst();
+        if (args.isEmpty()) continue;
+        for (int i = 1; i + 1 < args.size(); ++i)
+            if (args.at(i) == "-c" || args.at(i) == "-lc") result += anyCommands(args.at(i + 1), depth + 1);
+        result.append(withoutGitDirectory(args));
+    }
+    return result;
+}
+}
+
+QList<CommandRule> defaultCommandRules()
+{
+    QList<CommandRule> rules{{"git add *", CommandDecision::Allow, true}, {"git commit -m *", CommandDecision::Allow, true},
+                             {"rm *", CommandDecision::Ask, true}, {"rmdir *", CommandDecision::Ask, true}};
+    for (const QString &pattern : fixedDeniedPatterns()) rules.append({pattern, CommandDecision::Deny, true});
+    // Changes to the system's packages; "*" before an operation also covers its options and variants such as
+    // reinstall or full-upgrade. These can be removed or unchecked.
+    for (const QString &pattern : {"apt *install *", "apt *remove *", "apt *purge *", "apt *upgrade *",
+                                   "apt-get *install *", "apt-get *remove *", "apt-get *purge *", "apt-get *upgrade *",
+                                   "dnf *install *", "dnf *remove *", "dnf *upgrade *", "yum *install *", "yum *remove *",
+                                   "yum *update *", "zypper *install *", "zypper *remove *", "zypper in *", "zypper rm *",
+                                   "pacman -S*", "pacman -R*", "pacman -U*", "snap install *", "snap remove *",
+                                   "flatpak install *", "flatpak uninstall *", "brew install *", "brew uninstall *"})
+        rules.append({pattern, CommandDecision::Deny, true});
+    return rules;
+}
+
+QString commandDecisionName(CommandDecision decision)
+{
+    return decision == CommandDecision::Deny ? "Deny" : decision == CommandDecision::Ask ? "Ask" : "Allow";
+}
+
+CommandDecision commandDecisionFromName(const QString &name)
+{
+    return name.compare("Deny", Qt::CaseInsensitive) == 0 ? CommandDecision::Deny
+        : name.compare("Ask", Qt::CaseInsensitive) == 0  ? CommandDecision::Ask
+                                                          : CommandDecision::Allow;
+}
+
+QStringList fixedDeniedPatterns()
+{
+    return {"git push *", "sudo *", "doas *", "su *"};
+}
+
+QString fixedDenial(const QString &pattern)
+{
+    const QStringList words = pattern.split(' ', Qt::SkipEmptyParts);
     if (QStringList{"sudo", "doas", "su"}.contains(executable(words.value(0)))) return "privilege escalation is always declined";
     if (words.value(0) == "git" && words.contains("push")) return "git push is always declined";
     return {};
 }
 
-QStringList trustedCommands()
+QList<CommandRule> commandRules()
 {
-    return trustedCommandList();
+    return ruleList();
 }
 
-void setTrustedCommands(const QStringList &prefixes)
+void setCommandRules(const QList<CommandRule> &rules)
 {
-    trustedCommandList().clear();
-    for (const QString &prefix : prefixes)
-        if (forbiddenTrustedCommand(prefix).isEmpty()) trustedCommandList().append(prefix);
+    ruleList() = rules;
 }
 
-QString trustedCommandRule(const QString &command)
+void setCommandRulesChangedHandler(const std::function<void()> &handler)
 {
-    return trustedCommandRule(command, trustedCommandList());
+    rulesChangedHandler() = handler;
+}
+
+bool addAllowRule(const QString &pattern)
+{
+    if (pattern.trimmed().isEmpty() || !fixedDenial(pattern).isEmpty()) return false;
+    for (CommandRule &rule : ruleList()) {
+        if (rule.pattern != pattern) continue;
+        if (rule.decision == CommandDecision::Allow && rule.enabled) return false;
+        rule.decision = CommandDecision::Allow;
+        rule.enabled = true;
+        if (rulesChangedHandler()) rulesChangedHandler()();
+        return true;
+    }
+    ruleList().append({pattern, CommandDecision::Allow, true});
+    if (rulesChangedHandler()) rulesChangedHandler()();
+    return true;
+}
+
+bool commandPatternMatches(const QString &pattern, const QString &command)
+{
+    const auto matches = [&command](const QString &glob) {
+        const QRegularExpression expression(
+            QRegularExpression::wildcardToRegularExpression(glob, QRegularExpression::NonPathWildcardConversion));
+        return expression.isValid() && expression.match(command).hasMatch();
+    };
+    const QString simplified = pattern.simplified();
+    if (simplified.isEmpty()) return false;
+    // "git stash *" also matches "git stash" alone.
+    if (simplified.endsWith(" *") && matches(simplified.chopped(2))) return true;
+    return matches(simplified);
+}
+
+bool patternOverlapsPrefix(const QString &pattern, const QString &prefix)
+{
+    // The literal start keeps a space before a wildcard, so that "apt *" does not reach "apt-get".
+    QString literal = pattern.simplified();
+    static const QRegularExpression wildcard(R"([*?\[])");
+    const qsizetype first = literal.indexOf(wildcard);
+    if (first >= 0) literal = literal.left(first);
+    else literal += ' ';
+    const QString start = prefix.simplified() + ' ';
+    return literal.trimmed().isEmpty() || start.startsWith(literal) || literal.startsWith(start);
+}
+
+CommandVerdict commandRuleVerdict(const QString &command)
+{
+    const CommandApproval classified = classifyCommandApproval(command);
+    if (!classified.deniedReason.isEmpty()) return {CommandDecision::Deny, classified.deniedReason};
+    QList<CommandRule> denies;
+    for (const QString &pattern : fixedDeniedPatterns()) denies.append({pattern, CommandDecision::Deny, true});
+    for (const CommandRule &rule : ruleList())
+        if (rule.enabled && rule.decision == CommandDecision::Deny) denies.append(rule);
+    const QList<QStringList> all = anyCommands(command);
+    for (const QStringList &args : all) {
+        // The repository's .git is changed only through git.
+        if (executable(args.first()) != "git") {
+            for (const QString &arg : args.mid(1))
+                if (arg.split('/').contains(".git"))
+                    return {CommandDecision::Deny, "the repository's .git is used only through git"};
+        }
+        const QString line = args.join(' ');
+        for (const CommandRule &rule : denies)
+            if (commandPatternMatches(rule.pattern, line)) return {CommandDecision::Deny, rule.pattern};
+    }
+    // Between Allow and Ask the more specific pattern wins, judged by its text before the first wildcard, so
+    // that "rm -rf build *", allowed with Always, passes while "rm *" still asks about other removals.
+    const auto specificity = [](const QString &pattern) {
+        static const QRegularExpression wildcard(R"([*?\[])");
+        const qsizetype first = pattern.simplified().indexOf(wildcard);
+        return first < 0 ? pattern.simplified().size() + 1 : first;
+    };
+    const auto best = [&specificity](const QString &line, CommandDecision decision) {
+        QString found;
+        for (const CommandRule &rule : ruleList())
+            if (rule.enabled && rule.decision == decision && commandPatternMatches(rule.pattern, line)
+                && (found.isEmpty() || specificity(rule.pattern) > specificity(found)))
+                found = rule.pattern;
+        return found;
+    };
+    for (const QStringList &args : all) {
+        const QString line = args.join(' ');
+        const QString ask = best(line, CommandDecision::Ask);
+        if (ask.isEmpty()) continue;
+        const QString allow = best(line, CommandDecision::Allow);
+        if (allow.isEmpty() || specificity(allow) <= specificity(ask)) return {CommandDecision::Ask, ask};
+    }
+    const std::optional<QList<QStringList>> commands = plainCommands(command);
+    if (!commands) return {};
+    QStringList patterns;
+    for (const QStringList &args : *commands) {
+        const QString matched = best(args.join(' '), CommandDecision::Allow);
+        if (matched.isEmpty()) return {};
+        if (!patterns.contains(matched)) patterns.append(matched);
+    }
+    return {CommandDecision::Allow, patterns.join(", ")};
 }
 
 QStringList sessionCommandFamilies(const QString &command)
@@ -317,30 +487,10 @@ QStringList sessionCommandFamilies(const QString &command)
 
 QString trustedCommandRule(const QString &command, const QStringList &prefixes)
 {
-    if (prefixes.isEmpty()) return {};
-    const QString text = withoutLiteralMessages(command);
-    if (!plainCommandList(text)) return {};
-    const ShellWords parsed = words(text);
-    if (!parsed.valid || parsed.commands.isEmpty() || !parsed.substitutions.isEmpty()) return {};
-    // A whole command line wrapped in a shell, as Codex runs it, is judged by its script.
-    const QStringList &only = parsed.commands.first();
-    if (parsed.commands.size() == 1 && only.size() == 3 && (only.at(1) == "-c" || only.at(1) == "-lc")
-        && QStringList{"sh", "bash", "zsh", "/bin/sh", "/bin/bash", "/bin/zsh", "/usr/bin/bash", "/usr/bin/zsh"}
-               .contains(only.first()))
-        return trustedCommandRule(only.at(2), prefixes);
+    const std::optional<QList<QStringList>> commands = plainCommands(command);
+    if (prefixes.isEmpty() || !commands) return {};
     QStringList rules;
-    for (QStringList args : parsed.commands) {
-        if (args.first().contains('=')) return {};
-        if (args.first() == "git") {
-            int i = 1;
-            while (i < args.size()) {
-                const QString option = args.at(i);
-                if (option == "-C" || option == "--git-dir" || option == "--work-tree") i += 2;
-                else if (option.startsWith("--git-dir=") || option.startsWith("--work-tree=")) ++i;
-                else break;
-            }
-            args = QStringList{"git"} + args.mid(qMin(i, int(args.size())));
-        }
+    for (const QStringList &args : *commands) {
         QString rule;
         for (const QString &prefix : prefixes) {
             const QStringList words = prefix.split(' ', Qt::SkipEmptyParts);
@@ -361,4 +511,16 @@ QStringList lastingRulePrefix(const QStringList &proposed)
     QStringList prefix{"git", subcommand};
     if (subcommand == "commit" && (proposed.value(2) == "-m" || proposed.value(2) == "--message")) prefix.append(proposed.at(2));
     return prefix;
+}
+
+QStringList alwaysAllowPatterns(const QString &command)
+{
+    QStringList patterns;
+    const std::optional<QList<QStringList>> commands = plainCommands(command);
+    if (!commands) return patterns;
+    for (const QStringList &args : *commands) {
+        const QStringList prefix = lastingRulePrefix(args);
+        if (!prefix.isEmpty() && !patterns.contains(prefix.join(' ') + " *")) patterns.append(prefix.join(' ') + " *");
+    }
+    return patterns;
 }

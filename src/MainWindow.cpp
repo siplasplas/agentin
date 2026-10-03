@@ -30,6 +30,7 @@
 #include <QDoubleSpinBox>
 #include <QFile>
 #include <QFileInfo>
+#include <QFileSystemWatcher>
 #include <QFormLayout>
 #include <QFontDialog>
 #include <QHBoxLayout>
@@ -679,6 +680,9 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     appendLine("Type help to see the available commands.\n");
     for (AgentProvider *listed : providers_) listed->loadConversations();
     loadSettings();
+    setCommandRulesChangedHandler([this] { saveApprovals(); });
+    // Codex rules are compared with agentin's once the log can show what was found.
+    QTimer::singleShot(0, this, &MainWindow::checkCodexRules);
     showEnterAction(input_->enterSends());
     loadRecentDirectories();
     refreshConversationTree();
@@ -1163,21 +1167,7 @@ void MainWindow::loadSettings()
     undoAfterSend_ = settings.value("undoAfterSend").toBool(true);
     experimentalAgents_ = settings.value("experimentalAgents").toBool(false);
     openRules_ = FileOpener::rulesFromJson(settings.value("openWith").toArray());
-    trustedCommands_.clear();
-    for (const QJsonValue &value : settings.value("trustedCommands").toArray()) {
-        QString command = value.toObject().value("command").toString().simplified();
-        // The earlier default "git commit" became "git commit -m", keeping its check box.
-        if (command == "git commit") command = "git commit -m";
-        if (!command.isEmpty() && forbiddenTrustedCommand(command).isEmpty()
-            && std::none_of(trustedCommands_.cbegin(), trustedCommands_.cend(),
-                            [&command](const TrustedCommand &entry) { return entry.command == command; }))
-            trustedCommands_.append({command, value.toObject().value("enabled").toBool(true)});
-    }
-    // The defaults are listed when the settings have no list yet, as on the first start; later the list is
-    // the user's, with whatever they removed or unchecked.
-    if (!settings.value("trustedCommands").isArray())
-        for (const QString &command : defaultTrustedCommands()) trustedCommands_.append({command, true});
-    applyTrustedCommands();
+    loadApprovals();
     fastChats_.clear();
     for (const QJsonValue &value : settings.value("fastChats").toArray())
         if (!value.toString().isEmpty()) fastChats_.append(value.toString());
@@ -1248,9 +1238,6 @@ void MainWindow::saveSettings()
     QJsonObject agents;
     for (const AgentProvider *listed : providers_)
         agents.insert(listed->name(), QJsonObject{{"model", listed->defaultModel()}, {"effort", listed->defaultEffort()}});
-    QJsonArray trusted;
-    for (const TrustedCommand &entry : trustedCommands_)
-        trusted.append(QJsonObject{{"command", entry.command}, {"enabled", entry.enabled}});
     if (!QDir().mkpath(dataDirectory_)) return;
     QSaveFile file(QDir(dataDirectory_).filePath("settings.json"));
     if (!file.open(QIODevice::WriteOnly)
@@ -1260,7 +1247,6 @@ void MainWindow::saveSettings()
                                                          {"experimentalAgents", experimentalAgents_},
                                                          {"openWith", FileOpener::rulesToJson(openRules_)},
                                                          {"fastChats", QJsonArray::fromStringList(fastChats_)},
-                                                         {"trustedCommands", trusted},
                                                          {"conversationTree", QJsonObject{
                                                              {"groupBy", treeByDirectory_ ? "directory" : "agent"},
                                                              {"chatOrder", chatsByModified_ ? "modified" : "created"},
@@ -1374,40 +1360,6 @@ void MainWindow::showOptionsDialog()
     }
     if (codex_->models().isEmpty())
         layout->addWidget(new QLabel("Codex models appear here once the App Server is connected.", &dialog));
-    layout->addWidget(new QLabel("Commands that run without asking, by their first words (double-click to edit):", &dialog));
-    auto *trustedList = new QListWidget(&dialog);
-    trustedList->setObjectName("trustedCommands");
-    trustedList->setToolTip("A shell command runs without approval when it starts with a checked entry, also in a "
-                            "chain joined by &&, ||, ; or | where every command does. Redirections, $(...), variables "
-                            "and subshells always ask, and read-only chats never use this list.");
-    const auto addTrusted = [trustedList](const QString &command, bool enabled) {
-        auto *item = new QListWidgetItem(command, trustedList);
-        item->setFlags(item->flags() | Qt::ItemIsUserCheckable | Qt::ItemIsEditable);
-        item->setCheckState(enabled ? Qt::Checked : Qt::Unchecked);
-        return item;
-    };
-    for (const TrustedCommand &entry : trustedCommands_) addTrusted(entry.command, entry.enabled);
-    trustedList->setMaximumHeight(trustedList->sizeHintForRow(0) * 5 + 2 * trustedList->frameWidth() + 4);
-    auto *trustedButtons = new QHBoxLayout;
-    auto *addTrustedButton = new QPushButton("Add", &dialog);
-    auto *removeTrustedButton = new QPushButton("Remove", &dialog);
-    connect(addTrustedButton, &QPushButton::clicked, &dialog, [trustedList, addTrusted] {
-        QListWidgetItem *item = addTrusted(QString(), true);
-        trustedList->setCurrentItem(item);
-        trustedList->editItem(item);
-    });
-    connect(removeTrustedButton, &QPushButton::clicked, &dialog, [trustedList] {
-        // The selection moves to the entry that takes the removed one's place, or to the new last entry.
-        const int row = trustedList->currentRow();
-        if (row < 0) return;
-        delete trustedList->takeItem(row);
-        if (trustedList->count() > 0) trustedList->setCurrentRow(qMin(row, trustedList->count() - 1));
-    });
-    trustedButtons->addWidget(addTrustedButton);
-    trustedButtons->addWidget(removeTrustedButton);
-    trustedButtons->addStretch(1);
-    layout->addWidget(trustedList);
-    layout->addLayout(trustedButtons);
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
     layout->addWidget(buttons);
     connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
@@ -1416,18 +1368,6 @@ void MainWindow::showOptionsDialog()
     input_->setEnterPolicy(MessageInput::EnterPolicy(enterInput->currentData().toInt()));
     input_->setShortMessageLength(shortLength->value());
     undoAfterSend_ = undoAfterSend->isChecked();
-    trustedCommands_.clear();
-    for (int i = 0; i < trustedList->count(); ++i) {
-        const QString command = trustedList->item(i)->text().simplified();
-        if (command.isEmpty()) continue;
-        const QString forbidden = forbiddenTrustedCommand(command);
-        if (!forbidden.isEmpty()) {
-            appendLine("[Not added to the commands allowed without asking: \"" + command + "\"; " + forbidden + "]");
-            continue;
-        }
-        trustedCommands_.append({command, trustedList->item(i)->checkState() == Qt::Checked});
-    }
-    applyTrustedCommands();
     setExperimentalAgentsEnabled(experimental->isChecked());
     for (const Row &row : rows) {
         QString model = row.model->currentData().toString();
@@ -1442,14 +1382,6 @@ void MainWindow::showOptionsDialog()
     saveSettings();
     modelControlsState_.clear();
     updateModelControls();
-}
-
-void MainWindow::applyTrustedCommands()
-{
-    QStringList enabled;
-    for (const TrustedCommand &entry : trustedCommands_)
-        if (entry.enabled) enabled.append(entry.command);
-    setTrustedCommands(enabled);
 }
 
 void MainWindow::showMuteState()
@@ -1666,144 +1598,367 @@ void MainWindow::showNotificationsDialog()
 }
 
 namespace {
-// The approvals dialog's groups keep their order whichever column and direction the lines are sorted by.
-class ApprovalGroupItem : public QTreeWidgetItem
-{
-public:
-    ApprovalGroupItem(QTreeWidget *tree, const QString &text, int order) : QTreeWidgetItem(tree, {text}), order_(order) {}
-    bool operator<(const QTreeWidgetItem &other) const override
-    {
-        const auto *group = dynamic_cast<const ApprovalGroupItem *>(&other);
-        if (!group) return QTreeWidgetItem::operator<(other);
-        const bool ascending = !treeWidget() || treeWidget()->header()->sortIndicatorOrder() == Qt::AscendingOrder;
-        return ascending ? order_ < group->order_ : order_ > group->order_;
-    }
+// A line of the approvals dialog: a pattern with its check box and Allow or Deny. The fixed denials have a
+// checked box that cannot be changed.
+constexpr int kFixedRuleRole = Qt::UserRole + 3;
 
-private:
-    int order_;
-};
+QTreeWidgetItem *addRuleItem(QTreeWidget *tree, const CommandRule &rule)
+{
+    const QString fixed = fixedDenial(rule.pattern);
+    auto *item = new QTreeWidgetItem({rule.pattern, commandDecisionName(fixed.isEmpty() ? rule.decision : CommandDecision::Deny)});
+    if (fixed.isEmpty()) {
+        item->setFlags(Qt::ItemIsSelectable | Qt::ItemIsEnabled | Qt::ItemIsUserCheckable | Qt::ItemIsEditable);
+        item->setCheckState(0, rule.enabled ? Qt::Checked : Qt::Unchecked);
+        item->setToolTip(0, "Double-click to edit the pattern; * matches any text and ? one character");
+        item->setToolTip(1, "Double-click to switch between Allow, Ask and Deny");
+    } else {
+        item->setFlags(Qt::ItemIsSelectable);
+        item->setCheckState(0, Qt::Checked);
+        item->setData(0, kFixedRuleRole, true);
+        item->setToolTip(0, "Always: " + fixed);
+        item->setToolTip(1, "Always: " + fixed);
+    }
+    tree->addTopLevelItem(item);
+    return item;
 }
 
-// Lists lasting "always" rules and the approvals given for the session in open chats, and removes
-// the selected ones where the agent allows it.
+QList<CommandRule> rulesOf(const QTreeWidget *tree)
+{
+    QList<CommandRule> rules;
+    for (int i = 0; i < tree->topLevelItemCount(); ++i) {
+        const QTreeWidgetItem *item = tree->topLevelItem(i);
+        const QString pattern = item->text(0).simplified();
+        if (pattern.isEmpty() || std::any_of(rules.cbegin(), rules.cend(), [&pattern](const CommandRule &rule) {
+                return rule.pattern == pattern; }))
+            continue;
+        rules.append({pattern, commandDecisionFromName(item->text(1)), item->checkState(0) == Qt::Checked});
+    }
+    return rules;
+}
+}
+
+namespace {
+// The fixed denials are listed at every load, whatever the file says; they also apply without it.
+void listFixedDenials(QList<CommandRule> &rules)
+{
+    for (const QString &pattern : fixedDeniedPatterns()) {
+        bool found = false;
+        for (CommandRule &rule : rules) {
+            if (rule.pattern != pattern) continue;
+            rule.decision = CommandDecision::Deny;
+            rule.enabled = true;
+            found = true;
+        }
+        if (!found) rules.append({pattern, CommandDecision::Deny, true});
+    }
+}
+
+QList<CommandRule> rulesFromJson(const QJsonArray &array)
+{
+    QList<CommandRule> rules;
+    for (const QJsonValue &value : array) {
+        const QJsonObject object = value.toObject();
+        const QString pattern = object.value("pattern").toString().simplified();
+        if (pattern.isEmpty() || std::any_of(rules.cbegin(), rules.cend(), [&pattern](const CommandRule &rule) {
+                return rule.pattern == pattern; }))
+            continue;
+        rules.append({pattern, commandDecisionFromName(object.value("decision").toString()), object.value("enabled").toBool(true)});
+    }
+    return rules;
+}
+}
+
+QString MainWindow::approvalsPath() const
+{
+    return QDir(dataDirectory_).filePath("approvals.json");
+}
+
+// The rules live in approvals.json; without it, as on the first start, it is written with the default rules,
+// and so it is when it is removed while agentin runs.
+void MainWindow::loadApprovals()
+{
+    QFile file(approvalsPath());
+    if (!file.open(QIODevice::ReadOnly)) {
+        QList<CommandRule> rules = defaultCommandRules();
+        listFixedDenials(rules);
+        setCommandRules(rules);
+        saveApprovals();
+        return;
+    }
+    const QJsonObject approvals = QJsonDocument::fromJson(file.readAll()).object();
+    file.close();
+    QList<CommandRule> rules = rulesFromJson(approvals.value("commandRules").toArray());
+    const int listed = int(rules.size());
+    listFixedDenials(rules);
+    setCommandRules(rules);
+    codexRulesKnown_ = approvals.value("knownCodexRules").isArray();
+    knownCodexRules_.clear();
+    for (const QJsonValue &value : approvals.value("knownCodexRules").toArray()) knownCodexRules_.append(value.toString());
+    keptCodexRules_.clear();
+    for (const QJsonValue &value : approvals.value("keptCodexRules").toArray()) keptCodexRules_.append(value.toString());
+    // A file without the fixed denials is completed at once.
+    if (rules.size() != listed) saveApprovals();
+    else watchApprovals();
+}
+
+void MainWindow::saveApprovals()
+{
+    QJsonArray rules;
+    for (const CommandRule &rule : commandRules())
+        rules.append(QJsonObject{{"pattern", rule.pattern}, {"decision", commandDecisionName(rule.decision)},
+                                 {"enabled", rule.enabled}});
+    QJsonObject approvals{{"version", 1}, {"commandRules", rules},
+                          {"keptCodexRules", QJsonArray::fromStringList(keptCodexRules_)}};
+    if (codexRulesKnown_) approvals.insert("knownCodexRules", QJsonArray::fromStringList(knownCodexRules_));
+    const QByteArray content = QJsonDocument(approvals).toJson(QJsonDocument::Indented);
+    if (!QDir().mkpath(dataDirectory_)) return;
+    QSaveFile file(approvalsPath());
+    if (!file.open(QIODevice::WriteOnly) || file.write(content) < 0 || !file.commit()) {
+        appendLine("[Could not save approvals.json: " + file.errorString() + "]");
+        return;
+    }
+    approvalsWritten_ = content;
+    watchApprovals();
+}
+
+// approvals.json is watched while agentin runs: an edit is read at once, and a removed file is written again
+// with the default rules.
+void MainWindow::watchApprovals()
+{
+    if (!approvalsWatcher_) {
+        approvalsWatcher_ = new QFileSystemWatcher(this);
+        const auto changed = [this] {
+            QFile file(approvalsPath());
+            if (!file.exists()) {
+                QList<CommandRule> rules = defaultCommandRules();
+                listFixedDenials(rules);
+                setCommandRules(rules);
+                keptCodexRules_.clear();
+                saveApprovals();
+                appendLine("[approvals.json was removed; its default rules were written again]");
+                return;
+            }
+            if (!file.open(QIODevice::ReadOnly)) return;
+            const QByteArray content = file.readAll();
+            file.close();
+            watchApprovals();
+            if (content == approvalsWritten_ || QJsonDocument::fromJson(content).isNull()) return;
+            approvalsWritten_ = content;
+            loadApprovals();
+            appendLine("[Read the changed approvals.json]");
+        };
+        connect(approvalsWatcher_, &QFileSystemWatcher::fileChanged, this, changed);
+        connect(approvalsWatcher_, &QFileSystemWatcher::directoryChanged, this, [this, changed] {
+            if (!QFileInfo::exists(approvalsPath()) || !approvalsWatcher_->files().contains(approvalsPath())) changed();
+        });
+    }
+    if (QFileInfo::exists(approvalsPath()) && !approvalsWatcher_->files().contains(approvalsPath()))
+        approvalsWatcher_->addPath(approvalsPath());
+    if (!approvalsWatcher_->directories().contains(dataDirectory_)) approvalsWatcher_->addPath(dataDirectory_);
+}
+
+QList<std::pair<ApprovalRule, QString>> MainWindow::codexRuleConflicts(const QList<CommandRule> &rules) const
+{
+    QStringList denies = fixedDeniedPatterns();
+    for (const CommandRule &rule : rules)
+        // Ask also conflicts: a Codex rule that allows a command keeps Codex from asking about it.
+        if (rule.enabled && rule.decision != CommandDecision::Allow && !denies.contains(rule.pattern))
+            denies.append(rule.pattern);
+    QList<std::pair<ApprovalRule, QString>> conflicts;
+    for (const ApprovalRule &codex : codexRules()) {
+        if (keptCodexRules_.contains(codex.stored.trimmed())) continue;
+        for (const QString &deny : denies) {
+            if (!patternOverlapsPrefix(deny, codex.words.join(' '))) continue;
+            conflicts.append({codex, deny});
+            break;
+        }
+    }
+    return conflicts;
+}
+
+// At every start: Codex rules added while agentin did not run are reported, and so are Codex rules that
+// allow what agentin denies, since Codex applies them without asking agentin.
+void MainWindow::checkCodexRules()
+{
+    QStringList stored;
+    for (const ApprovalRule &rule : codexRules()) stored.append(rule.stored.trimmed());
+    if (codexRulesKnown_) {
+        for (const QString &rule : stored)
+            if (!knownCodexRules_.contains(rule)) appendLine("[Codex added a rule while agentin was not running: " + rule + "]");
+    }
+    const bool changed = stored != knownCodexRules_ || !codexRulesKnown_;
+    knownCodexRules_ = stored;
+    codexRulesKnown_ = true;
+    keptCodexRules_.erase(std::remove_if(keptCodexRules_.begin(), keptCodexRules_.end(),
+                                         [&stored](const QString &rule) { return !stored.contains(rule); }),
+                          keptCodexRules_.end());
+    if (changed) saveApprovals();
+    const auto conflicts = codexRuleConflicts(commandRules());
+    if (!conflicts.isEmpty())
+        appendLine(QString("[%1 Codex %2 what agentin's rules deny; Codex applies %3 without asking agentin. "
+                           "See Settings → Approvals…]")
+                       .arg(conflicts.size()).arg(conflicts.size() == 1 ? "rule allows" : "rules allow")
+                       .arg(conflicts.size() == 1 ? "it" : "them"));
+}
+
+// agentin's rules for shell commands, with check boxes; they decide before the agents' own rules. Chat trust
+// for a session stays in memory and is not listed.
 void MainWindow::showApprovalsDialog()
 {
     QDialog dialog(this);
     dialog.setWindowTitle("Approvals");
-    dialog.resize(760, 420);
+    dialog.resize(760, 560);
     auto *layout = new QVBoxLayout(&dialog);
+    auto *intro = new QLabel("Shell commands that agents may run without asking (Allow), must always ask about (Ask), "
+                             "or that are declined with no way to agree (Deny). "
+                             "A pattern applies to each command of a command line; * matches any text and ? one "
+                             "character, and a trailing \" *\" also matches the command alone. Deny wins over Ask and Ask "
+                             "over Allow, and all win over the agents' own rules. Commands other than git that name a path in "
+                             ".git are always declined.", &dialog);
+    intro->setWordWrap(true);
+    layout->addWidget(intro);
     auto *tree = new QTreeWidget(&dialog);
     tree->setObjectName("approvalsTree");
-    tree->setHeaderLabels({"Agent", "Allowed", "Where"});
-    tree->setRootIsDecorated(true);
-    // A click on a column header sorts the lines within each group by it.
+    tree->setHeaderLabels({"Command pattern", "Decision"});
+    tree->setRootIsDecorated(false);
+    tree->setEditTriggers(QAbstractItemView::NoEditTriggers);
+    for (const CommandRule &rule : commandRules()) addRuleItem(tree, rule);
+    tree->setColumnWidth(0, 520);
+    // A click on a column header sorts by it.
     tree->setSortingEnabled(true);
     tree->sortByColumn(0, Qt::AscendingOrder);
-    layout->addWidget(tree);
-    // A line can be copied whole, its columns separated by tabs, or only what it allows.
+    layout->addWidget(tree, 1);
+    connect(tree, &QTreeWidget::itemDoubleClicked, &dialog, [tree](QTreeWidgetItem *item, int column) {
+        if (item->data(0, kFixedRuleRole).toBool()) return;
+        if (column == 0) tree->editItem(item, 0);
+        else item->setText(1, item->text(1) == "Allow" ? "Ask" : item->text(1) == "Ask" ? "Deny" : "Allow");
+    });
     tree->setContextMenuPolicy(Qt::CustomContextMenu);
     connect(tree, &QWidget::customContextMenuRequested, &dialog, [tree](const QPoint &position) {
         QTreeWidgetItem *item = tree->itemAt(position);
         if (!item) return;
-        QStringList columns;
-        for (int column = 0; column < tree->columnCount(); ++column)
-            if (!item->text(column).isEmpty()) columns.append(item->text(column));
         QMenu menu(tree);
-        menu.addAction("Copy line", [columns] { QGuiApplication::clipboard()->setText(columns.join('\t')); });
-        if (!item->text(1).isEmpty())
-            menu.addAction("Copy rule", [item] { QGuiApplication::clipboard()->setText(item->text(1)); });
+        menu.addAction("Copy line", [item] { QGuiApplication::clipboard()->setText(item->text(0) + '\t' + item->text(1)); });
+        menu.addAction("Copy pattern", [item] { QGuiApplication::clipboard()->setText(item->text(0)); });
+        if (!item->data(0, kFixedRuleRole).toBool()) {
+            menu.addSeparator();
+            for (const QString &name : {QString("Allow"), QString("Ask"), QString("Deny")})
+                if (item->text(1) != name) menu.addAction("Make " + name, [item, name] { item->setText(1, name); });
+        }
         menu.exec(tree->viewport()->mapToGlobal(position));
     });
-    auto *note = new QLabel("Chat command trust is withdrawn immediately. Codex may keep using a removed lasting rule "
-                            "until its App Server restarts. Codex cannot "
-                            "withdraw native App Server session approvals; they end when agentin closes. Withdrawing "
-                            "the session approvals of a Claude or GLM chat reconnects it and withdraws all of them.",
-                            &dialog);
-    note->setWordWrap(true);
-    layout->addWidget(note);
-    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Close, &dialog);
-    QPushButton *remove = buttons->addButton("Remove", QDialogButtonBox::ActionRole);
-    layout->addWidget(buttons);
-    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
-
-    QList<ApprovalRule> rules;
-    const auto fill = [this, tree, &rules] {
-        tree->clear();
-        QStringList projects{workingDirectory_};
-        projects += recentDirectories_;
-        for (int i = 0; i < tabs_->count(); ++i) {
-            if (const ChatTab *tab = chatTab(tabs_->widget(i))) projects.append(tab->workingDirectory());
-        }
-        rules = codexRules() + claudeRules(projects);
-        auto *lasting = new ApprovalGroupItem(tree, "Always allowed", 0);
-        for (int i = 0; i < rules.size(); ++i) {
-            auto *item = new QTreeWidgetItem(lasting, {rules.at(i).agent, rules.at(i).rule, rules.at(i).where});
-            item->setData(0, Qt::UserRole, i);
-            item->setToolTip(1, rules.at(i).rule);
-            item->setToolTip(2, rules.at(i).file);
-        }
-        auto *session = new ApprovalGroupItem(tree, "Allowed for this session", 1);
-        for (int i = 0; i < tabs_->count(); ++i) {
-            const ChatTab *tab = chatTab(tabs_->widget(i));
-            if (!tab) continue;
-            for (const QString &rule : tab->agent()->trustedSessionCommands()) {
-                auto *item = new QTreeWidgetItem(session, {tab->provider()->name(), rule,
-                    "chat \"" + tab->title().left(40) + "\" (managed by agentin)"});
-                item->setData(0, Qt::UserRole + 1, QVariant::fromValue<QObject *>(tabs_->widget(i)));
-                item->setData(0, Qt::UserRole + 2, rule);
-            }
-            for (const QString &approval : tab->sessionApprovals()) {
-                auto *item = new QTreeWidgetItem(session, {tab->provider()->name(), approval,
-                                                           "chat \"" + tab->title().left(40) + "\""});
-                item->setData(0, Qt::UserRole + 1, QVariant::fromValue<QObject *>(tabs_->widget(i)));
-                item->setToolTip(1, approval);
-            }
-        }
-        for (QTreeWidgetItem *group : {lasting, session}) {
-            group->setExpanded(true);
-            group->setFirstColumnSpanned(true);
-            if (group->childCount() == 0) new QTreeWidgetItem(group, {QString(), "(none)"});
-        }
-        tree->resizeColumnToContents(0);
-        tree->setColumnWidth(1, 380);
+    auto *ruleButtons = new QHBoxLayout;
+    auto *addAllow = new QPushButton("Add allow", &dialog);
+    auto *addAsk = new QPushButton("Add ask", &dialog);
+    auto *addDeny = new QPushButton("Add deny", &dialog);
+    auto *remove = new QPushButton("Remove", &dialog);
+    ruleButtons->addWidget(addAllow);
+    ruleButtons->addWidget(addAsk);
+    ruleButtons->addWidget(addDeny);
+    ruleButtons->addWidget(remove);
+    ruleButtons->addStretch(1);
+    layout->addLayout(ruleButtons);
+    const auto addRule = [tree](CommandDecision decision) {
+        tree->setSortingEnabled(false);
+        QTreeWidgetItem *item = addRuleItem(tree, {QString(), decision, true});
+        tree->setCurrentItem(item);
+        tree->editItem(item, 0);
     };
-    fill();
+    connect(addAllow, &QPushButton::clicked, &dialog, [addRule] { addRule(CommandDecision::Allow); });
+    connect(addAsk, &QPushButton::clicked, &dialog, [addRule] { addRule(CommandDecision::Ask); });
+    connect(addDeny, &QPushButton::clicked, &dialog, [addRule] { addRule(CommandDecision::Deny); });
     const auto updateRemove = [tree, remove] {
         const QTreeWidgetItem *item = tree->currentItem();
-        remove->setEnabled(item && (item->data(0, Qt::UserRole).isValid() || item->data(0, Qt::UserRole + 1).isValid()));
+        remove->setEnabled(item && !item->data(0, kFixedRuleRole).toBool());
     };
     connect(tree, &QTreeWidget::currentItemChanged, &dialog, updateRemove);
     updateRemove();
-    connect(remove, &QPushButton::clicked, &dialog, [this, tree, &rules, fill, updateRemove] {
-        const QTreeWidgetItem *item = tree->currentItem();
+
+    // Codex rules that allow what the list denies: Codex applies them without asking agentin.
+    auto *conflictsLabel = new QLabel("Codex's own rules that allow what this list denies or asks about; Codex applies "
+                                      "them without asking agentin:", &dialog);
+    conflictsLabel->setWordWrap(true);
+    auto *conflicts = new QTreeWidget(&dialog);
+    conflicts->setObjectName("codexConflicts");
+    conflicts->setHeaderLabels({"Codex rule", "Denied or asked by"});
+    conflicts->setRootIsDecorated(false);
+    conflicts->setColumnWidth(0, 520);
+    auto *conflictButtons = new QHBoxLayout;
+    auto *removeFromCodex = new QPushButton("Remove from Codex", &dialog);
+    auto *keepCodex = new QPushButton("Keep Codex's rule", &dialog);
+    keepCodex->setToolTip("Codex keeps allowing these commands; agentin stops reporting this rule");
+    conflictButtons->addWidget(removeFromCodex);
+    conflictButtons->addWidget(keepCodex);
+    conflictButtons->addStretch(1);
+    layout->addWidget(conflictsLabel);
+    layout->addWidget(conflicts);
+    layout->addLayout(conflictButtons);
+    QList<ApprovalRule> conflictRules;
+    const auto fillConflicts = [this, tree, conflicts, conflictsLabel, removeFromCodex, keepCodex, &conflictRules] {
+        conflicts->clear();
+        conflictRules.clear();
+        for (const auto &[codex, deny] : codexRuleConflicts(rulesOf(tree))) {
+            auto *item = new QTreeWidgetItem(conflicts, {codex.words.join(' '), deny});
+            item->setToolTip(0, codex.stored.trimmed() + "\n" + codex.file);
+            item->setData(0, Qt::UserRole, int(conflictRules.size()));
+            conflictRules.append(codex);
+        }
+        const bool any = conflicts->topLevelItemCount() > 0;
+        for (QWidget *widget : {static_cast<QWidget *>(conflictsLabel), static_cast<QWidget *>(conflicts),
+                                static_cast<QWidget *>(removeFromCodex), static_cast<QWidget *>(keepCodex)})
+            widget->setVisible(any);
+        if (any && !conflicts->currentItem()) conflicts->setCurrentItem(conflicts->topLevelItem(0));
+    };
+    fillConflicts();
+    connect(tree, &QTreeWidget::itemChanged, &dialog, fillConflicts);
+    connect(removeFromCodex, &QPushButton::clicked, &dialog, [this, conflicts, &conflictRules, fillConflicts] {
+        const QTreeWidgetItem *item = conflicts->currentItem();
         if (!item) return;
-        // The selection moves to the line that takes the removed one's place, or to the new last line.
-        const int group = item->parent() ? tree->indexOfTopLevelItem(item->parent()) : -1;
-        const int line = item->parent() ? item->parent()->indexOfChild(const_cast<QTreeWidgetItem *>(item)) : -1;
-        if (item->data(0, Qt::UserRole).isValid()) {
-            const ApprovalRule rule = rules.value(item->data(0, Qt::UserRole).toInt());
-            const QString error = removeApprovalRule(rule);
-            appendLine(error.isEmpty() ? "[Removed the " + rule.agent + " rule allowing " + rule.rule + "]"
-                                       : "[Could not remove the rule: " + error + "]");
-        } else if (auto *page = qobject_cast<QWidget *>(item->data(0, Qt::UserRole + 1).value<QObject *>())) {
-            ChatTab *tab = tabs_->indexOf(page) >= 0 ? chatTab(page) : nullptr;
-            if (tab && item->data(0, Qt::UserRole + 2).isValid()) {
-                tab->agent()->removeTrustedSessionCommand(item->data(0, Qt::UserRole + 2).toString());
-            } else if (tab && !tab->agent()->canResetSessionApprovals()) {
-                appendLine("[" + tab->provider()->name() + " cannot withdraw approvals given for a session.]");
-            } else if (tab && tab->agent()->isResponding()) {
-                appendLine("[Wait for " + tab->provider()->name() + " to finish before withdrawing its session approvals.]");
-            } else if (tab) {
-                tab->resetSessionApprovals();
-            }
-        }
-        fill();
-        if (QTreeWidgetItem *parent = group >= 0 ? tree->topLevelItem(group) : nullptr) {
-            if (parent->childCount() > 0) tree->setCurrentItem(parent->child(qMin(line, parent->childCount() - 1)));
-        }
-        updateRemove();
+        const ApprovalRule rule = conflictRules.value(item->data(0, Qt::UserRole).toInt());
+        const QString error = removeApprovalRule(rule);
+        appendLine(error.isEmpty() ? "[Removed the Codex rule allowing " + rule.rule + "; Codex applies it until its App Server restarts]"
+                                   : "[Could not remove the Codex rule: " + error + "]");
+        fillConflicts();
     });
-    dialog.exec();
+    connect(keepCodex, &QPushButton::clicked, &dialog, [this, conflicts, &conflictRules, fillConflicts] {
+        const QTreeWidgetItem *item = conflicts->currentItem();
+        if (!item) return;
+        keptCodexRules_.append(conflictRules.value(item->data(0, Qt::UserRole).toInt()).stored.trimmed());
+        saveApprovals();
+        fillConflicts();
+    });
+    connect(remove, &QPushButton::clicked, &dialog, [tree, updateRemove, fillConflicts] {
+        QTreeWidgetItem *item = tree->currentItem();
+        if (!item || item->data(0, kFixedRuleRole).toBool()) return;
+        // The selection moves to the line that takes the removed one's place, or to the new last line.
+        const int row = tree->indexOfTopLevelItem(item);
+        delete item;
+        if (tree->topLevelItemCount() > 0) tree->setCurrentItem(tree->topLevelItem(qMin(row, tree->topLevelItemCount() - 1)));
+        updateRemove();
+        fillConflicts();
+    });
+
+    auto *note = new QLabel("Chat trust given for a session is kept in memory and ends with the chat.", &dialog);
+    note->setWordWrap(true);
+    layout->addWidget(note);
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+    layout->addWidget(buttons);
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    if (dialog.exec() != QDialog::Accepted) return;
+    QList<CommandRule> rules;
+    for (const CommandRule &rule : rulesOf(tree)) {
+        if (rule.decision != CommandDecision::Deny && !fixedDenial(rule.pattern).isEmpty()) {
+            appendLine("[Not allowed: \"" + rule.pattern + "\"; " + fixedDenial(rule.pattern) + "]");
+            continue;
+        }
+        rules.append(rule);
+    }
+    for (const QString &pattern : fixedDeniedPatterns())
+        if (std::none_of(rules.cbegin(), rules.cend(), [&pattern](const CommandRule &rule) { return rule.pattern == pattern; }))
+            rules.append({pattern, CommandDecision::Deny, true});
+    setCommandRules(rules);
+    saveApprovals();
 }
 
 // Recently used working directories are shown in the directory chooser of the New chat dialog.

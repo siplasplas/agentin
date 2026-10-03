@@ -8,6 +8,13 @@
 #include <QDir>
 #include <QFileInfo>
 #include <QIcon>
+#include <QPushButton>
+#include <QGuiApplication>
+#include <QClipboard>
+#include <QMessageBox>
+#include <QJsonObject>
+#include <QJsonDocument>
+#include <QFile>
 #include <QStandardPaths>
 #include <backward.hpp>
 
@@ -65,6 +72,30 @@ int main(int argc, char *argv[])
         const QString installed = executableDirectory.filePath("../share/agentin/claude_bridge.py");
         if (!QFileInfo::exists(claudeScript) && QFileInfo::exists(installed))
             claudeScript = QFileInfo(installed).absoluteFilePath();
+    }
+    // Command rules moved from settings.json to approvals.json. Settings of an earlier version are not migrated:
+    // agentin stops and names the file, so that the old section or the whole file can be removed.
+    const QString settingsPath = QDir(QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation)).filePath("settings.json");
+    QFile settingsFile(settingsPath);
+    if (settingsFile.open(QIODevice::ReadOnly)) {
+        const QJsonObject settings = QJsonDocument::fromJson(settingsFile.readAll()).object();
+        QStringList old;
+        for (const QString &key : {QStringLiteral("trustedCommands"), QStringLiteral("commandRules")})
+            if (settings.contains(key)) old.append("\"" + key + "\"");
+        if (!old.isEmpty()) {
+            const QString text = "agentin cannot start: " + QDir::toNativeSeparators(settingsPath) + " contains the section "
+                + old.join(" and ") + " of an earlier version. Command rules are now kept in approvals.json next to it. "
+                "Remove that section from the file, or remove the whole file, and start agentin again.";
+            // The message can be selected, or copied whole, for example to find the file.
+            QMessageBox box(QMessageBox::Critical, "agentin", text, QMessageBox::Close);
+            box.setTextInteractionFlags(Qt::TextSelectableByMouse | Qt::TextSelectableByKeyboard);
+            QPushButton *copy = box.addButton("Copy", QMessageBox::ActionRole);
+            // Copy keeps the box open.
+            copy->disconnect();
+            QObject::connect(copy, &QPushButton::clicked, &box, [text] { QGuiApplication::clipboard()->setText(text); });
+            box.exec();
+            return 1;
+        }
     }
     MainWindow window(codexProgram, QDir(parser.value(cwdOption)).absolutePath(), claudePython, claudeScript,
                       parser.value(geminiOption), nullptr, {}, parser.value(antigravityOption));

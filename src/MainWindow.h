@@ -1,6 +1,8 @@
 #pragma once
 
 #include "FileOpener.h"
+#include "CommandApproval.h"
+#include "ApprovalRules.h"
 
 #include <QHash>
 #include <QJsonObject>
@@ -26,6 +28,7 @@ class QSplitter;
 class MruTabWidget;
 class QCheckBox;
 class QComboBox;
+class QFileSystemWatcher;
 class QLabel;
 class QLineEdit;
 class QPlainTextEdit;
@@ -203,14 +206,21 @@ private:
     QList<OpenRule> openRules_;
     // Conversations whose Fast mode was last switched on, so that it is on again when they reopen.
     QStringList fastChats_;
-    // Commands that run without asking, as their leading words; unchecked ones stay listed but do not apply.
-    struct TrustedCommand
-    {
-        QString command;
-        bool enabled = true;
-    };
-    QList<TrustedCommand> trustedCommands_;
-    void applyTrustedCommands();
+    // Codex rules seen at the last start, so that rules Codex added while agentin did not run are reported,
+    // and the Codex rules the user chose to keep although agentin's rules deny what they allow.
+    QStringList knownCodexRules_;
+    QStringList keptCodexRules_;
+    bool codexRulesKnown_ = false;
+    // Codex rules that allow what agentin denies and were not kept, with the deny pattern of each.
+    QList<std::pair<ApprovalRule, QString>> codexRuleConflicts(const QList<CommandRule> &rules) const;
+    // agentin's rules and the Codex rules above live in approvals.json, apart from settings.json.
+    QString approvalsPath() const;
+    void loadApprovals();
+    void saveApprovals();
+    void watchApprovals();
+    QFileSystemWatcher *approvalsWatcher_ = nullptr;
+    QByteArray approvalsWritten_;
+    void checkCodexRules();
     bool sessionEnabled_ = false;
     // Restored Codex chats that continue once the App Server is connected.
     QList<QPointer<QWidget>> continueWhenConnected_;

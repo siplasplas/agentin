@@ -38,6 +38,11 @@ try:
 except ImportError:  # SDKs without rate limit events
     RateLimitEvent = None
 
+try:
+    from claude_agent_sdk import HookMatcher
+except ImportError:  # SDKs without hooks; agentin's rules then answer approvals only
+    HookMatcher = None
+
 
 # File editing tools and the input field with the edited file.
 EDIT_TOOLS = {"Edit": "file_path", "MultiEdit": "file_path", "Write": "file_path", "NotebookEdit": "notebook_path"}
@@ -325,6 +330,9 @@ class Bridge:
                 return None
             if not self.path_is_allowed(target):
                 return None
+            # The repository's .git is changed only by git.
+            if ".git" in target.rstrip("/").split("/"):
+                return None
         return re.sub(r"^\s*sed\b", "sed --sandbox", command, count=1)
 
     async def connect(self, resume=False):
@@ -346,6 +354,9 @@ class Bridge:
         if self.provider == "glm":
             model = self.model or os.environ.get("GLM_MODEL", "glm-5.3")
             settings.update({"model": model, "setting_sources": ["project", "local"], "env": glm_environment(model)})
+        if HookMatcher is not None:
+            # agentin's rules decide on shell commands before Claude Code applies its own permission rules.
+            settings["hooks"] = {"PreToolUse": [HookMatcher(matcher="Bash", hooks=[self.check_command])]}
         options = ClaudeAgentOptions(**settings)
         self.client = ClaudeSDKClient(options=options)
         self.connected = False
@@ -354,6 +365,26 @@ class Bridge:
         await self.client.set_permission_mode("plan" if self.read_only else "default")
         self.connected = True
         send({"type": "ready"})
+
+    async def check_command(self, input_data, tool_use_id, context):
+        """Asks agentin whether its rules allow or deny a shell command; no answer leaves it to Claude Code."""
+        command = (input_data.get("tool_input") or {}).get("command") if isinstance(input_data, dict) else None
+        if not isinstance(command, str) or not command.strip():
+            return {}
+        request_id = self.next_id
+        self.next_id += 1
+        future = asyncio.get_running_loop().create_future()
+        self.pending[request_id] = future
+        send({"type": "command_check", "id": request_id, "command": command})
+        try:
+            answer = await future
+        finally:
+            self.pending.pop(request_id, None)
+        decision = answer.get("decision")
+        if decision not in ("allow", "deny"):
+            return {}
+        return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": decision,
+                                       "permissionDecisionReason": answer.get("reason") or "agentin's rules"}}
 
     async def can_use_tool(self, tool_name, input_data, context):
         if self.edit_is_allowed(tool_name, input_data):
@@ -624,7 +655,7 @@ class Bridge:
             elif model != self.model:
                 self.model = model
                 await self.client.set_model(model)
-        elif kind in ("approval_response", "question_response"):
+        elif kind in ("approval_response", "question_response", "command_check_response"):
             future = self.pending.get(command.get("id"))
             if future is not None and not future.done():
                 future.set_result(command)

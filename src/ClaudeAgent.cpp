@@ -567,7 +567,18 @@ void ClaudeAgent::answerApproval(int id, ApprovalDecision decision)
         : decision == ApprovalDecision::Cancel ? "cancel" : "decline";
     const bool allow = decision == ApprovalDecision::Accept || decision == ApprovalDecision::AcceptForSession
         || decision == ApprovalDecision::AcceptAlways;
-    send({{"type", "approval_response"}, {"id", id}, {"allow", allow}, {"decision", value}});
+    if (askedCommandChecks_.remove(id)) {
+        send({{"type", "command_check_response"}, {"id", id}, {"decision", allow ? "allow" : "deny"},
+              {"reason", allow ? "approved in agentin" : "declined in agentin"}});
+        if (decision == ApprovalDecision::Cancel) interrupt();
+    } else {
+        send({{"type", "approval_response"}, {"id", id}, {"allow", allow}, {"decision", value}});
+    }
+    // agentin's list decides before Claude Code's own rules, so Always also allows the command there.
+    const QString command = approvalCommands_.take(id);
+    if (decision == ApprovalDecision::AcceptAlways)
+        for (const QString &pattern : alwaysAllowPatterns(command))
+            if (addAllowRule(pattern)) emit message("[Added to agentin's rules: allow " + pattern + "]");
 }
 
 // Session rules live in the Claude Code process, so the bridge reconnects and resumes the session.
@@ -694,17 +705,45 @@ void ClaudeAgent::handleLine(const QByteArray &line)
         emit turnCompleted(event.value("status").toString(), event.value("details").toString());
         emit stateChanged();
         sendNextPrompt();
+    } else if (type == "command_check") {
+        // The bridge's hook asks before Claude Code applies its own permission rules, so agentin's rules win.
+        const CommandVerdict verdict = commandRuleVerdict(event.value("command").toString());
+        const int id = event.value("id").toInt();
+        const QString command = event.value("command").toString();
+        if (verdict.decision == CommandDecision::Ask) {
+            // Claude Code may run a command it deems read-only even when a hook asks, so agentin asks itself and
+            // answers the hook with the user's decision.
+            askedCommandChecks_.insert(id);
+            approvalCommands_.insert(id, command);
+            const QStringList patterns = alwaysAllowPatterns(command);
+            emit message("[Asking, as agentin's rules say: " + verdict.reason + "]");
+            emit approvalRequested(id, "Approve " + name_ + " action", "Bash\n\n" + command, false,
+                                   patterns.isEmpty() ? QString() : "Allow " + patterns.join(", ") + " in agentin's rules");
+            return;
+        }
+        QString decision;
+        if (verdict.decision == CommandDecision::Deny) decision = "deny";
+        else if (verdict.decision == CommandDecision::Allow && !readOnly_) decision = "allow";
+        send({{"type", "command_check_response"}, {"id", id}, {"decision", decision},
+              {"reason", decision.isEmpty() ? QString() : "agentin's rules: " + verdict.reason}});
+        if (!decision.isEmpty())
+            emit message(QString(decision == "deny" ? "[Declined by agentin's rules: " : "[Allowed by agentin's rules: ")
+                         + verdict.reason + "]");
     } else if (type == "approval") {
-        if (event.value("tool").toString() == "Bash" && !readOnly_) {
-            const QString command = event.value("input").toObject().value("command").toString();
-            const QString trusted = classifyCommandApproval(command).deniedReason.isEmpty()
-                ? trustedCommandRule(command) : QString();
-            if (!trusted.isEmpty()) {
-                send({{"type", "approval_response"}, {"id", event.value("id").toInt()}, {"allow", true}, {"decision", "accept"}});
-                emit message("[Allowed without asking, as the options say: " + trusted + "]");
+        // Without the hook, as with an older SDK, the same rules answer the approval.
+        if (event.value("tool").toString() == "Bash") {
+            const CommandVerdict verdict = commandRuleVerdict(event.value("input").toObject().value("command").toString());
+            const bool allow = verdict.decision == CommandDecision::Allow && !readOnly_;
+            if (verdict.decision == CommandDecision::Deny || allow) {
+                send({{"type", "approval_response"}, {"id", event.value("id").toInt()}, {"allow", allow},
+                      {"decision", allow ? "accept" : "decline"}});
+                emit message(QString(allow ? "[Allowed by agentin's rules: " : "[Declined by agentin's rules: ")
+                             + verdict.reason + "]");
                 return;
             }
         }
+        if (event.value("tool").toString() == "Bash")
+            approvalCommands_.insert(event.value("id").toInt(), event.value("input").toObject().value("command").toString());
         const QString details = QString::fromUtf8(QJsonDocument(event.value("input").toObject()).toJson(QJsonDocument::Indented));
         emit approvalRequested(event.value("id").toInt(), "Approve " + name_ + " action",
                                event.value("tool").toString() + "\n\n" + details.trimmed(),

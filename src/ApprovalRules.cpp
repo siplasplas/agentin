@@ -90,7 +90,7 @@ QList<ApprovalRule> codexRules()
             auto matches = word.globalMatch(pattern.match(trimmed).captured(1));
             while (matches.hasNext()) words.append(matches.next().captured(1));
             rules.append({"Codex", "commands starting with \"" + words.join(' ') + "\"",
-                          "Codex rules (" + info.fileName() + ")", info.filePath(), line});
+                          "Codex rules (" + info.fileName() + ")", info.filePath(), line, words});
         }
     }
     return rules;
