@@ -392,6 +392,14 @@ void ShellApprovalTest::suggestions()
     QCOMPARE(always("python3 -c \"print(1)\""), QStringList());
     QVERIFY(commandRuleVerdict("python3 -c \"print(1)\"", context).sessionRules().isEmpty());
     QCOMPARE(always("python3 tools/scan.py --all"), QStringList{"python3 tools/scan.py --all *"});
+    // Code read from the input is new each time as well.
+    QCOMPARE(always("/bin/bash -lc \"python3 - <<'PY'\nprint(1)\nPY\""), QStringList());
+    QCOMPARE(always("echo 'rm -rf x' | sh"), QStringList());
+    QCOMPARE(always("bash -s < script.sh"), QStringList());
+    QCOMPARE(always("node"), QStringList());
+    QCOMPARE(always("python3 -m json.tool"), QStringList{"python3 -m json.tool *"});
+    QCOMPARE(always("bash tools/run.sh --all"), QStringList{"bash tools/run.sh --all *"});
+    QVERIFY(commandRuleVerdict("python3 - < x.py", context).reason.contains("code given in the command or read from its input"));
 
     // A rule that Always added names the whole command, so it also covers the secret file the command reads.
     const QString secret = "head -5 ~/.ssh/id_rsa";

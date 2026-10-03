@@ -2295,6 +2295,14 @@ void MainWindow::showNewConversationDialog()
     for (const AgentProvider *listed : offered) providerInput->addItem(listed->name());
     if (tab) providerInput->setCurrentText(tab->provider()->name());
     layout->addWidget(providerInput);
+    // Codex starts a chat read-only in a directory it does not trust; the choice here decides instead.
+    layout->addWidget(new QLabel("Access:", &dialog));
+    auto *accessInput = new QComboBox(&dialog);
+    accessInput->setObjectName("newConversationAccess");
+    accessInput->addItem("Can change files", false);
+    accessInput->addItem("Read-only: reads and plans, changes nothing", true);
+    accessInput->setToolTip("The Read-only box above the message field switches it later");
+    layout->addWidget(accessInput);
     layout->addWidget(new QLabel("Working directory:", &dialog));
     auto *pathRow = new QHBoxLayout;
     auto *pathInput = new QLineEdit(currentPath, &dialog);
@@ -2326,11 +2334,11 @@ void MainWindow::showNewConversationDialog()
     if (dialog.exec() == QDialog::Accepted) {
         const QString path = QDir::cleanPath(pathInput->text().trimmed());
         rememberRecentDirectory(path);
-        newConversation(offered.value(providerInput->currentIndex()), path);
+        newConversation(offered.value(providerInput->currentIndex()), path, accessInput->currentData().toBool());
     }
 }
 
-void MainWindow::newConversation(AgentProvider *selected, const QString &path)
+void MainWindow::newConversation(AgentProvider *selected, const QString &path, std::optional<bool> readOnly)
 {
     const QFileInfo directory(path);
     if (!selected || !directory.isDir()) {
@@ -2339,6 +2347,8 @@ void MainWindow::newConversation(AgentProvider *selected, const QString &path)
     }
     const QString canonicalPath = directory.canonicalFilePath();
     QWidget *page = addChatTab(selected, canonicalPath);
+    AgentBackend *agent = chatTab(page)->agent();
+    if (readOnly && agent->supportsReadOnly()) agent->setReadOnly(*readOnly);
     if (!chatTab(page)->startNew(canonicalPath)) {
         tabs_->requestCloseTab(page);
         return;

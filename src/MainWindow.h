@@ -1,5 +1,7 @@
 #pragma once
 
+#include <optional>
+
 #include "FileOpener.h"
 #include "CommandApproval.h"
 #include "ApprovalRules.h"
@@ -91,7 +93,9 @@ private:
     void saveRecentDirectories();
     void rememberRecentDirectory(const QString &path);
     void showNewConversationDialog();
-    void newConversation(AgentProvider *provider, const QString &path);
+    // readOnly chooses the chat's access for agents that offer a read-only mode; without it the agent's own
+    // default applies.
+    void newConversation(AgentProvider *provider, const QString &path, std::optional<bool> readOnly = std::nullopt);
     void refreshConversationTree();
     QList<QJsonObject> treeChats(AgentProvider *provider) const;
     // Adds directory rows with their chats under root, or as top-level rows when root is null.

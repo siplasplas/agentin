@@ -192,6 +192,8 @@ Antigravity index to remain available.
 
 Use the **New chat…** button, Ctrl+T, **Conversations → New conversation in
 directory…**, or type `new` to start a chat. Ctrl+W closes the current tab. In the dialog, choose the agent,
+its **Access** (**Can change files**, the default, or **Read-only**, in which it
+reads and plans but changes nothing; the **Read-only** box switches it later),
 then enter a directory path or choose one with **Browse…**, which also lists
 recently used directories. The path starts as the directory selected in the
 conversation tree, or the directory of the selected chat; otherwise, for
@@ -245,7 +247,9 @@ A Codex chat can be switched to **Read-only** in its header. From the next
 message on, turns use Codex's read-only sandbox, so the agent can read files but
 not change them, also through shell commands. Switching it off restores the
 thread's own sandbox policy. The box also shows when a thread is read-only
-already, for example because Codex does not trust its directory. In Claude and
+already, for example because Codex does not trust its directory; a chat
+started from the New chat dialog with **Can change files** is not read-only,
+whether Codex trusts the directory or not. In Claude and
 GLM chats the box switches the session to Claude Code's plan mode, and Gemini
 and Antigravity turns get `--approval-mode plan` and `--mode plan`: the agent
 reads and plans but is told not to change files. Only Codex enforces this with a
@@ -858,7 +862,9 @@ the chat. A line that names the whole command also covers what asked about it,
 such as the secret file it reads or the protected path it writes; a broader line
 does not. Some commands offer nothing to remember and can only be allowed once:
 one whose argument has a value not known in advance (`curl "$U"` after
-`U=$(…)`), code given on the command line (`python3 -c "…"`, `node -e`), a redirection outside the writable directories or into a protected
+`U=$(…)`), code given on the command line or read from the input
+(`python3 -c "…"`, `node -e`, `python3 -` with a here-document, a script piped to
+`sh`), which would be new code each time, a redirection outside the writable directories or into a protected
 path, a variable of the list, a line too long to run within the time limit, and
 installing, such as `make install`, which writes to a place the command does not
 name (it can still be trusted for the chat).

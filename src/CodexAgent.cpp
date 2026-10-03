@@ -547,7 +547,7 @@ void CodexAgent::startThread()
     QJsonObject params{{"cwd", workingDirectory_}, {"serviceName", "agentin"}};
     const QString startModel = modelChosen_ ? model_ : connection_->defaultModel();
     if (!startModel.isEmpty()) params.insert("model", startModel);
-    if (sandboxChosen_ && readOnly_) params.insert("sandbox", "read-only");
+    if (sandboxChosen_) params.insert("sandbox", readOnly_ ? "read-only" : "workspace-write");
     if (ephemeral_) {
         params.insert("ephemeral", true);
         params.insert("approvalPolicy", "never");
@@ -835,6 +835,9 @@ void CodexAgent::handleServerRequest(const QString &method, const QJsonValue &id
                 description += "\n" + params.value("command").toString();
                 description += "\nDirectory: " + params.value("cwd").toString();
                 if (!verdict.findings.isEmpty()) description += "\n\n" + verdict.explanation();
+                // Say why agentin did not answer a command that its rules allow.
+                else if (verdict.decision == CommandDecision::Allow && isReadOnly())
+                    description += "\n\nagentin's rules allow this command, but this chat is read-only, so it asks.";
             }
         } else {
             QStringList files;

@@ -603,6 +603,22 @@ Allowed bestAllow(const QString &line, const QStringList &trusted, const Writabl
     return found;
 }
 
+// Whether an interpreter or a shell runs code that the command line gives, or that it reads from its input,
+// rather than a script file it names: python3 -c, python3 -, node -e, a shell fed by a pipe.
+bool runsCodeFromLine(const CommandUse &use, const QStringList &words)
+{
+    static const QStringList interpreters{"python", "python3", "python2", "node", "perl", "ruby", "php", "lua", "deno", "bun",
+                                          "bash", "sh", "dash", "zsh", "ksh"};
+    if (!interpreters.contains(use.program)) return false;
+    for (const QString &word : words.mid(1)) {
+        if (word == "-c" || word == "-e" || word == "--eval" || word == "-s" || word == "-") return true;
+        // A module, as in python3 -m json.tool, is named like a script.
+        if (word == "-m") return false;
+        if (!word.startsWith('-')) return false;
+    }
+    return true;
+}
+
 // Why a command changes or runs something outside the writable directories, one reason per place; its
 // redirections are judged on their own.
 QStringList places(const CommandUse &use, const QStringList &writable)
@@ -614,8 +630,10 @@ QStringList places(const CommandUse &use, const QStringList &writable)
         if (use.redirectionWrites.contains(path)) continue;
         if (const QString reason = outside(path, writable, verb); !reason.isEmpty()) reasons.append(reason);
     }
+    // A build tool runs the project's own code: its build files, tests or install scripts.
+    const char *runs = use.effect == Effect::Build ? "runs the project code in" : "runs";
     for (const QString &path : use.executes)
-        if (const QString reason = outside(path, writable, "runs"); !reason.isEmpty()) reasons.append(reason);
+        if (const QString reason = outside(path, writable, runs); !reason.isEmpty()) reasons.append(reason);
     return reasons;
 }
 
@@ -728,7 +746,9 @@ Judged judge(const CommandUse &use, const CommandContext &context, const QString
     } else {
         const bool plain = reasons.isEmpty() && problems.isEmpty();
         reasons += problems;
-        if (use.effect == Effect::Unknown && problems.isEmpty())
+        if (use.effect == Effect::Unknown && runsCodeFromLine(use, words))
+            reasons.append("it runs " + use.program + " code given in the command or read from its input, which agentin cannot judge");
+        else if (use.effect == Effect::Unknown && problems.isEmpty())
             reasons.append(use.program.isEmpty() ? QString("the program is not known") : use.program + " is not a program agentin knows");
         else if (use.effect == Effect::Network) reasons.append("it uses the network");
         else if (use.effect == Effect::Remove) reasons.append("it removes files");
@@ -750,10 +770,9 @@ Judged judge(const CommandUse &use, const CommandContext &context, const QString
     if (!coverable || unknownValue || implicitPlace) result.rule.clear();
     // The files xargs adds are not in the command's words, so a rule names the command as it is.
     result.exact = use.inputArguments;
-    // Code given on the command line, as in python3 -c, is new each time: no rule would match it again.
-    static const QStringList interpreters{"python", "python3", "python2", "node", "perl", "ruby", "php", "lua", "deno", "bun"};
-    if (interpreters.contains(use.program) && (words.contains("-c") || words.contains("-e") || words.contains("--eval")))
-        result.rule.clear();
+    // Code given on the command line or read from the input is new each time: a rule naming the command would
+    // allow any code.
+    if (runsCodeFromLine(use, words)) result.rule.clear();
     // Installing writes to a place the command does not name, so it should be decided each time.
     if (std::any_of(reasons.cbegin(), reasons.cend(), [](const QString &reason) { return reason.contains("outside the project"); })) {
         result.lasting = false;
