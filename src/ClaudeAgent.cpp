@@ -758,11 +758,40 @@ void ClaudeAgent::handleLine(const QByteArray &line)
         QString decision;
         if (verdict.decision == CommandDecision::Deny) decision = "deny";
         else if (verdict.decision == CommandDecision::Allow && !readOnly_) decision = "allow";
+        // What the rules allow runs sed with --sandbox, as a second guard behind agentin's reading of its script.
         send({{"type", "command_check_response"}, {"id", id}, {"decision", decision},
-              {"reason", decision.isEmpty() ? QString() : "agentin's rules: " + verdict.reason}});
+              {"reason", decision.isEmpty() ? QString() : "agentin's rules: " + verdict.reason}, {"sandboxSed", decision == "allow"}});
         if (!decision.isEmpty())
             emit message(QString(decision == "deny" ? "[Declined by agentin's rules: " : "[Allowed by agentin's rules: ")
                          + verdict.reason + "]");
+    } else if (type == "read_check") {
+        // Reading tools run without a question anywhere, except on files that may hold secrets, which agentin asks
+        // about itself. Glob only lists names.
+        const int id = event.value("id").toInt();
+        const QString tool = event.value("tool").toString();
+        const QJsonObject input = event.value("input").toObject();
+        QStringList paths;
+        if (tool == "Read") {
+            paths.append(input.value("file_path").toString());
+        } else if (tool == "NotebookRead") {
+            paths.append(input.value("notebook_path").toString());
+        } else if (tool == "Grep") {
+            const QString base = input.value("path").toString(".");
+            const QString glob = input.value("glob").toString();
+            paths.append(glob.isEmpty() ? base : base + (glob.contains('/') ? "/" : "/**/") + glob);
+        }
+        paths.removeAll(QString());
+        const CommandVerdict verdict = readVerdict(tool, paths, commandContext(event));
+        if (verdict.decision != CommandDecision::Ask) {
+            send({{"type", "command_check_response"}, {"id", id}, {"decision", "allow"}, {"reason", "agentin: " + verdict.reason}});
+            return;
+        }
+        askedCommandChecks_.insert(id);
+        approvalVerdicts_.insert(id, verdict);
+        QString details = tool + "\n\n" + paths.join('\n') + "\n";
+        for (const CommandFinding &finding : verdict.findings) details += "\nAsks because of " + finding.command + ": " + finding.reason;
+        emit message("[Asking, as the file may hold secrets: " + verdict.reason + "]");
+        emit approvalRequested(id, "Approve " + name_ + " action", details, false, QString());
     } else if (type == "approval") {
         // Without the hook, as with an older SDK, the same rules answer the approval.
         QStringList patterns;

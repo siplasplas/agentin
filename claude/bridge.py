@@ -47,149 +47,13 @@ except ImportError:  # SDKs without hooks; agentin's rules then answer approvals
 # File editing tools and the input field with the edited file.
 EDIT_TOOLS = {"Edit": "file_path", "MultiEdit": "file_path", "Write": "file_path", "NotebookEdit": "notebook_path"}
 
+# Tools that only read files, which agentin answers without a question unless they read a secret file.
+READ_TOOLS = "Read|Glob|Grep|NotebookRead"
+
 # Appended to Claude Code's system prompt: edits made with these tools can be approved by their path.
 EDIT_GUIDANCE = ("Change files with the Edit, MultiEdit and Write tools, not with shell commands such as scripts, "
                  "sed or output redirection. Edits of files in the working directory and the allowed directories "
                  "are approved automatically; shell commands that change files usually need the user's approval.")
-
-
-def shell_words(line):
-    """Splits a simple command line into words and ">"/">>" operators (as tuples).
-
-    Returns None for anything the shell would expand or treat as another operator, so that the words are
-    exactly what the command receives."""
-    words, current, quote, started = [], [], None, False
-    index = 0
-    while index < len(line):
-        char = line[index]
-        if quote == "'":
-            if char == "'":
-                quote = None
-            else:
-                current.append(char)
-        elif quote == '"':
-            if char == '"':
-                quote = None
-            elif char in "$`\\!":
-                return None
-            else:
-                current.append(char)
-        elif char in "'\"":
-            quote, started = char, True
-        elif char.isspace():
-            if started:
-                words.append("".join(current))
-                current, started = [], False
-        elif char == ">":
-            if started:
-                return None
-            operator = ">>" if line[index + 1:index + 2] == ">" else ">"
-            words.append((operator,))
-            index += len(operator)
-            continue
-        elif char in "$`\\;&|<>(){}[]*?~#!=":
-            return None
-        else:
-            current.append(char)
-            started = True
-        index += 1
-    if quote:
-        return None
-    if started:
-        words.append("".join(current))
-    return words
-
-
-def split_heredoc(command):
-    """Returns the command line without a quoted here-document, or None for any other multi-line shape.
-
-    A quoted delimiter keeps the shell from expanding the document, so it is plain data for the command."""
-    first, newline, body = command.partition("\n")
-    if not newline:
-        return first
-    match = re.search(r"<<-?\s*(['\"])([A-Za-z_][A-Za-z0-9_]*)\1", first)
-    if not match:
-        return None
-    lines = body.split("\n")
-    while lines and not lines[-1].strip():
-        lines.pop()
-    if not lines or lines[-1].strip() != match.group(2) or any(line.strip() == match.group(2) for line in lines[:-1]):
-        return None
-    return first[:match.start()] + first[match.end():]
-
-
-def file_command_targets(command):
-    """Returns the paths a simple file command writes, or None when the command is not one of them.
-
-    Only commands whose effect is fully given by their words count: cat, echo and printf writing through
-    output redirection, tee, touch, mkdir, cp (the destination), mv (every path) and sed -i."""
-    line = split_heredoc(command) if isinstance(command, str) else None
-    words = shell_words(line) if line is not None else None
-    if not words or not isinstance(words[0], str):
-        return None
-    targets, args = [], []
-    index = 1
-    while index < len(words):
-        word = words[index]
-        if isinstance(word, tuple):
-            if index + 1 >= len(words) or not isinstance(words[index + 1], str):
-                return None
-            targets.append(words[index + 1])
-            index += 2
-            continue
-        args.append(word)
-        index += 1
-    program = words[0]
-    options = [arg for arg in args if arg.startswith("-")]
-    operands = [arg for arg in args if not arg.startswith("-")]
-    if program == "cat":
-        if args:
-            return None
-    elif program in ("echo", "printf"):
-        pass
-    elif program == "tee":
-        if any(option not in ("-a", "--append") for option in options):
-            return None
-        targets += operands
-    elif program == "touch":
-        if options or not operands:
-            return None
-        targets += operands
-    elif program == "mkdir":
-        if any(option not in ("-p", "-v", "--parents") for option in options) or not operands:
-            return None
-        targets += operands
-    elif program in ("cp", "mv"):
-        allowed = r"-[rRafpvnu]+" if program == "cp" else r"-[fvnu]+"
-        if any(not re.fullmatch(allowed, option) for option in options) or len(operands) < 2:
-            return None
-        targets += operands[-1:] if program == "cp" else operands
-    elif program == "sed":
-        in_place, script, files = False, False, []
-        index = 0
-        while index < len(args):
-            arg = args[index]
-            if arg == "-e" and index + 1 < len(args):
-                script = True
-                index += 2
-                continue
-            if arg == "--in-place" or re.fullmatch(r"-[Ernsz]*i(\.[A-Za-z0-9_]+)?", arg):
-                in_place = True
-            elif re.fullmatch(r"-[Ernsz]+|--regexp-extended|--null-data|--separate", arg):
-                pass
-            elif arg.startswith("-"):
-                return None
-            elif not script:
-                script = True
-            else:
-                files.append(arg)
-            index += 1
-        if not in_place or not files:
-            return None
-        targets += files
-    else:
-        return None
-    return targets or None
 
 
 def describe_permission_updates(updates):
@@ -321,25 +185,6 @@ class Bridge:
         target = input_data.get(key) if key and isinstance(input_data, dict) else None
         return not self.read_only and isinstance(target, str) and bool(target) and self.path_is_allowed(target)
 
-    def allowed_file_command(self, input_data):
-        """Returns the command to run for a simple file command writing only in the allowed directories, else None.
-
-        The Bash tool may run in a subdirectory of the chat's directory, so relative paths must not go up.
-        sed gets --sandbox, which rejects its commands that would read, write or run other files."""
-        command = input_data.get("command") if isinstance(input_data, dict) else None
-        targets = None if self.read_only else file_command_targets(command)
-        if not targets:
-            return None
-        for target in targets:
-            if not os.path.isabs(target) and ".." in target.split("/"):
-                return None
-            if not self.path_is_allowed(target):
-                return None
-            # The repository's .git is changed only by git.
-            if ".git" in target.rstrip("/").split("/"):
-                return None
-        return re.sub(r"^\s*sed\b", "sed --sandbox", command, count=1)
-
     async def connect(self, resume=False):
         self.session_dirs = []
         settings = {
@@ -360,8 +205,10 @@ class Bridge:
             model = self.model or os.environ.get("GLM_MODEL", "glm-5.3")
             settings.update({"model": model, "setting_sources": ["project", "local"], "env": glm_environment(model)})
         if HookMatcher is not None:
-            # agentin's rules decide on shell commands before Claude Code applies its own permission rules.
-            settings["hooks"] = {"PreToolUse": [HookMatcher(matcher="Bash", hooks=[self.check_command])]}
+            # agentin's rules decide on shell commands and file reads before Claude Code applies its own
+            # permission rules.
+            settings["hooks"] = {"PreToolUse": [HookMatcher(matcher="Bash", hooks=[self.check_command]),
+                                                HookMatcher(matcher=READ_TOOLS, hooks=[self.check_read])]}
         options = ClaudeAgentOptions(**settings)
         self.client = ClaudeSDKClient(options=options)
         self.connected = False
@@ -371,37 +218,61 @@ class Bridge:
         self.connected = True
         send({"type": "ready"})
 
-    async def check_command(self, input_data, tool_use_id, context):
-        """Asks agentin whether its rules allow or deny a shell command; no answer leaves it to Claude Code."""
-        command = (input_data.get("tool_input") or {}).get("command") if isinstance(input_data, dict) else None
-        if not isinstance(command, str) or not command.strip():
-            return {}
+    async def ask_agentin(self, message):
+        """Sends a check to agentin and waits for its answer."""
         request_id = self.next_id
         self.next_id += 1
         future = asyncio.get_running_loop().create_future()
         self.pending[request_id] = future
-        # agentin judges where the command writes: it runs in the session's current directory, and writing is
-        # free in the directories where edits are.
-        cwd = input_data.get("cwd") if isinstance(input_data.get("cwd"), str) else None
-        send({"type": "command_check", "id": request_id, "command": command, "cwd": cwd or self.cwd,
-              "writable": self.writable_directories()})
+        send({**message, "id": request_id})
         try:
-            answer = await future
+            return await future
         finally:
             self.pending.pop(request_id, None)
+
+    @staticmethod
+    def hook_decision(answer, updated_input=None):
+        """The hook's answer for agentin's decision; no decision leaves the tool to Claude Code."""
         decision = answer.get("decision")
         if decision not in ("allow", "deny"):
             return {}
-        return {"hookSpecificOutput": {"hookEventName": "PreToolUse", "permissionDecision": decision,
-                                       "permissionDecisionReason": answer.get("reason") or "agentin's rules"}}
+        output = {"hookEventName": "PreToolUse", "permissionDecision": decision,
+                  "permissionDecisionReason": answer.get("reason") or "agentin's rules"}
+        if decision == "allow" and updated_input is not None:
+            output["updatedInput"] = updated_input
+        return {"hookSpecificOutput": output}
+
+    async def check_command(self, input_data, tool_use_id, context):
+        """Asks agentin whether its rules allow or deny a shell command; no answer leaves it to Claude Code."""
+        tool_input = (input_data.get("tool_input") or {}) if isinstance(input_data, dict) else {}
+        command = tool_input.get("command")
+        if not isinstance(command, str) or not command.strip():
+            return {}
+        # agentin judges where the command writes: it runs in the session's current directory, and writing is
+        # free in the directories where edits are.
+        cwd = input_data.get("cwd") if isinstance(input_data.get("cwd"), str) else None
+        answer = await self.ask_agentin({"type": "command_check", "command": command, "cwd": cwd or self.cwd,
+                                         "writable": self.writable_directories()})
+        # A sed command that agentin's rules allow runs with --sandbox, which rejects the sed commands that
+        # read, write or run other files, should agentin's reading of the script miss one.
+        updated = None
+        if answer.get("sandboxSed") and sys.platform.startswith("linux") and re.match(r"\s*sed\s", command):
+            updated = {**tool_input, "command": re.sub(r"^\s*sed\b", "sed --sandbox", command, count=1)}
+        return self.hook_decision(answer, updated)
+
+    async def check_read(self, input_data, tool_use_id, context):
+        """Asks agentin about a reading tool: it allows reading anywhere, and asks about secret files."""
+        tool_input = (input_data.get("tool_input") or {}) if isinstance(input_data, dict) else {}
+        tool = input_data.get("tool_name") if isinstance(input_data, dict) else None
+        if not isinstance(tool, str) or not isinstance(tool_input, dict):
+            return {}
+        cwd = input_data.get("cwd") if isinstance(input_data.get("cwd"), str) else None
+        answer = await self.ask_agentin({"type": "read_check", "tool": tool, "input": tool_input, "cwd": cwd or self.cwd})
+        return self.hook_decision(answer)
 
     async def can_use_tool(self, tool_name, input_data, context):
         if self.edit_is_allowed(tool_name, input_data):
             return PermissionResultAllow(updated_input=input_data)
-        if tool_name == "Bash":
-            command = self.allowed_file_command(input_data)
-            if command is not None:
-                return PermissionResultAllow(updated_input={**input_data, "command": command})
         request_id = self.next_id
         self.next_id += 1
         future = asyncio.get_running_loop().create_future()

@@ -694,7 +694,11 @@ session, in a directory listed in `permissions.additionalDirectories` of the
 Claude Code settings the session reads, or in the temporary directory (`/tmp`,
 or `TMPDIR`) are approved without asking. These directories are the
 *writable directories* of the chat; shell commands are judged by agentin's
-rules, described next.
+rules, described next. The reading tools (Read, Grep, Glob and NotebookRead)
+run without a question anywhere, also outside the project, except on a file of
+the **Secret files** list (see below), about which agentin asks; Glob only lists
+names, so it never asks. Such a question offers no lasting rule: remove the file
+from the list instead if it should be read freely.
 
 **Settings → Approvals…** holds agentin's own rules for shell commands: each a
 pattern with a check box and **Allow** (runs without asking), **Ask** (always
@@ -827,7 +831,10 @@ shell command before Claude Code applies its own permission rules, so agentin
 decides first, with the directory the command runs in and the chat's writable
 directories. When a command asks, agentin shows the approval itself, since Claude
 Code runs commands it deems read-only even when a hook asks. In a read-only chat
-the question is left to Claude Code's plan mode. Codex applies the rules in `~/.codex/rules` itself, without asking
+the question is left to Claude Code's plan mode. A `sed` command that the rules
+allow runs with `--sandbox` (on Linux), which rejects the sed commands that read,
+write or run other files, as a second guard behind agentin's reading of its
+script. Codex applies the rules in `~/.codex/rules` itself, without asking
 agentin, and commands it runs in its sandbox without asking, such as removals in
 the chat's directory, never reach agentin: agentin's lines answer Codex's
 questions, but an Ask or Deny line cannot stop a command that Codex does not ask

@@ -297,6 +297,35 @@ class ClaudeBridgeTest(unittest.IsolatedAsyncioTestCase):
             await bridge.handle({"type": "command_check_response", "id": events[-1]["id"], "decision": ""})
             self.assertEqual(await check, {})
 
+    async def test_read_check_and_sandboxed_sed(self):
+        events = []
+        with patch.object(bridge_module, "send", events.append):
+            bridge = bridge_module.Bridge("/tmp/project")
+            check = asyncio.create_task(bridge.check_read(
+                {"tool_name": "Read", "tool_input": {"file_path": "/home/x/.ssh/id_rsa"}, "cwd": "/tmp/project/sub"}, "tool-1", None))
+            await asyncio.sleep(0)
+            request = events[-1]
+            self.assertEqual(request["type"], "read_check")
+            self.assertEqual(request["tool"], "Read")
+            self.assertEqual(request["input"], {"file_path": "/home/x/.ssh/id_rsa"})
+            self.assertEqual(request["cwd"], "/tmp/project/sub")
+            await bridge.handle({"type": "command_check_response", "id": request["id"], "decision": "deny"})
+            self.assertEqual((await check)["hookSpecificOutput"]["permissionDecision"], "deny")
+
+            # A sed command allowed by the rules runs with --sandbox; one the user approved runs as written.
+            for sandbox, expected in ((True, "sed --sandbox -i s/a/b/ f"), (False, None)):
+                check = asyncio.create_task(bridge.check_command({"tool_input": {"command": "sed -i s/a/b/ f"}}, "tool-2", None))
+                await asyncio.sleep(0)
+                await bridge.handle({"type": "command_check_response", "id": events[-1]["id"], "decision": "allow",
+                                     "sandboxSed": sandbox})
+                output = (await check)["hookSpecificOutput"]
+                self.assertEqual(output["permissionDecision"], "allow")
+                if expected and sys.platform.startswith("linux"):
+                    self.assertEqual(output["updatedInput"]["command"], expected)
+                else:
+                    self.assertNotIn("updatedInput", output)
+            self.assertFalse(hasattr(bridge, "allowed_file_command"))
+
     async def test_glm_requires_zai_credentials(self):
         with patch.dict(bridge_module.os.environ, {}, clear=True):
             bridge = bridge_module.Bridge("/tmp/project", "glm")

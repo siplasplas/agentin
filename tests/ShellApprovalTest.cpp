@@ -29,6 +29,7 @@ private slots:
     void typedPatterns();
     void suggestions();
     void editableLists();
+    void readingTools();
     void corpusParses();
     void prefixesDoNotCrash();
     void evaluate_data();
@@ -381,6 +382,9 @@ void ShellApprovalTest::editableLists()
     QVERIFY(pathMatchesList("/p/.e*", {".env"}, "/h"));
     QVERIFY(!pathMatchesList("/p/src/*", {".env"}, "/h"));
     QVERIFY(pathMatchesList("/srv/keys/a.pem", {"/srv/keys/**/*.pem"}, "/h"));
+    QVERIFY(pathMatchesList("/h/.*/config", {"~/.ssh"}, "/h"));
+    QVERIFY(!pathMatchesList("/h/*/config", {"~/.ssh"}, "/h"));
+    QVERIFY(!pathMatchesList("/p/**/*.cpp", {".env", "~/.ssh"}, "/h"));
 
     QCOMPARE(decision("cat notes.txt"), CommandDecision::Allow);
     QCOMPARE(decision("touch .github/workflows/ci.yml"), CommandDecision::Allow);
@@ -401,6 +405,28 @@ void ShellApprovalTest::editableLists()
     QCOMPARE(commandRuleVerdict("touch .github/workflows/ci.yml", context).alwaysPatterns(),
              QStringList{"touch .github/workflows/ci.yml *"});
     QVERIFY(commandRuleVerdict("echo x > .github/workflows/ci.yml", context).alwaysPatterns().isEmpty());
+}
+
+// Reading tools run anywhere, except on files that may hold secrets, which ask without offering a rule.
+void ShellApprovalTest::readingTools()
+{
+    const CommandContext context{"/p", {"/p", "/tmp"}, {}, "/h"};
+    QCOMPARE(readVerdict("Read", {"/p/src/a.cpp"}, context).decision, CommandDecision::Allow);
+    QCOMPARE(readVerdict("Read", {"/usr/include/stdio.h"}, context).decision, CommandDecision::Allow);
+    QCOMPARE(readVerdict("Grep", {"/p"}, context).decision, CommandDecision::Allow);
+    QCOMPARE(readVerdict("Grep", {"/p/**/*.cpp"}, context).decision, CommandDecision::Allow);
+    QCOMPARE(readVerdict("Read", {}, context).decision, CommandDecision::Allow);
+    const CommandVerdict key = readVerdict("Read", {"/h/.ssh/id_rsa"}, context);
+    QCOMPARE(key.decision, CommandDecision::Ask);
+    QCOMPARE(key.findings.size(), 1);
+    QVERIFY(key.findings.first().reason.contains("secrets"));
+    QVERIFY(key.alwaysPatterns().isEmpty());
+    QVERIFY(key.sessionRules().isEmpty());
+    QCOMPARE(readVerdict("Read", {".env"}, context).decision, CommandDecision::Ask);
+    QCOMPARE(readVerdict("Read", {"~/.netrc"}, context).decision, CommandDecision::Ask);
+    QCOMPARE(readVerdict("Grep", {"/p/**/*.pem"}, context).decision, CommandDecision::Ask);
+    QCOMPARE(readVerdict("Grep", {"/h/.aws"}, context).decision, CommandDecision::Ask);
+    QCOMPARE(readVerdict("Grep", {"src"}, {{}, {}, {}, "/h"}).decision, CommandDecision::Allow);
 }
 
 void ShellApprovalTest::parse_data()

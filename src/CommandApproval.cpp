@@ -340,13 +340,13 @@ bool namesGitDirectory(const QString &path)
 }
 
 // Whether two names, either of which may hold glob characters, could be the same name. A glob that takes any
-// name, such as *, does not lead to a particular file as the last part of a path, no more than a recursive
-// search does.
-bool namesMeet(const QString &path, const QString &pattern, bool last)
+// name, such as * or **, does not lead to a particular file or directory, no more than a recursive search does;
+// nor would the shell's * match the leading dot of names such as .ssh.
+bool namesMeet(const QString &path, const QString &pattern)
 {
     if (path == pattern) return true;
     const bool pathGlob = hasGlob(path);
-    if (pathGlob && last)
+    if (pathGlob)
         for (const char *name : {"x", "file.txt", "data.json"})
             if (globMatches(path, name)) return false;
     if (pathGlob && hasGlob(pattern)) {
@@ -371,7 +371,7 @@ bool partsMeet(const QStringList &path, int i, const QStringList &pattern, int j
     if (j == pattern.size()) return true;
     if (pattern.at(j) == "**") return partsMeet(path, i, pattern, j + 1) || (i < path.size() && partsMeet(path, i + 1, pattern, j));
     if (i == path.size()) return false;
-    return namesMeet(path.at(i), pattern.at(j), i + 1 == path.size()) && partsMeet(path, i + 1, pattern, j + 1);
+    return namesMeet(path.at(i), pattern.at(j)) && partsMeet(path, i + 1, pattern, j + 1);
 }
 }
 
@@ -772,6 +772,33 @@ CommandVerdict commandRuleVerdict(const QString &command, const CommandContext &
     verdict.decision = CommandDecision::Ask;
     QStringList reasons;
     for (const CommandFinding &finding : verdict.findings) reasons.append(shortened(finding.command) + ": " + finding.reason);
+    verdict.reason = reasons.join(" | ");
+    return verdict;
+}
+
+CommandVerdict readVerdict(const QString &tool, const QStringList &paths, const CommandContext &context)
+{
+    const QString home = context.home.isEmpty() ? QDir::homePath() : context.home;
+    CommandVerdict verdict;
+    for (const QString &given : paths) {
+        QString path = given;
+        if (path == "~" || path.startsWith("~/")) path = home + path.mid(1);
+        if (!path.startsWith('/')) {
+            if (context.directory.isEmpty()) continue;
+            path = context.directory + '/' + path;
+        }
+        path = QDir::cleanPath(path);
+        if (!mayHoldSecrets(path, home) && !mayHoldSecrets(realPath(path), home)) continue;
+        verdict.findings.append({tool + ' ' + given, CommandDecision::Ask, "reads " + path + ", which may hold secrets", {}, false});
+    }
+    if (verdict.findings.isEmpty()) {
+        verdict.decision = CommandDecision::Allow;
+        verdict.reason = "reading is allowed";
+        return verdict;
+    }
+    verdict.decision = CommandDecision::Ask;
+    QStringList reasons;
+    for (const CommandFinding &finding : verdict.findings) reasons.append(finding.command + ": " + finding.reason);
     verdict.reason = reasons.join(" | ");
     return verdict;
 }

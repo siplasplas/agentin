@@ -129,3 +129,7 @@ bool pathMatchesList(const QString &path, const QStringList &patterns, const QSt
 // Paths are compared by where they really are: symbolic links that exist when the line is judged are followed.
 // None is the answer only for an empty line.
 CommandVerdict commandRuleVerdict(const QString &command, const CommandContext &context = {});
+// The decision about a tool that shows what is in files, such as Claude Code's Read or Grep: Allow, or Ask when
+// one of the paths, which may hold glob characters, may name a secret file. Relative paths are taken from
+// context.directory. Such an ask offers no rule: the file can be removed from the list of secret files instead.
+CommandVerdict readVerdict(const QString &tool, const QStringList &paths, const CommandContext &context);
