@@ -22,6 +22,7 @@ The conversation language does not change the English-language requirements for 
 
 - AI assistants may create local Git commits, but must never run `git push` or use another tool to push commits, branches or tags to a remote repository. A human performs all pushes.
 - Handoff notes (`HANDOFF-*.md`) are working notes between sessions: never commit them and never delete them; leave them untracked, and the user removes them when no longer needed.
+- Hand a turn's work over to the user, and commit it, only when the project builds (`cmake --build build` with no errors, also for the test targets when they are configured). If something out of the ordinary keeps the project from building, such as a missing system package or a broken toolchain, do not present the work as done: tell the user what fails and why.
 - The repository is public. Before every commit, check the staged changes (`git diff --cached`) for anything private: API keys, tokens or passwords, personal paths such as home directories, e-mail addresses, private notes, logs, settings files, or the content of the user's conversations. Leave such things out or replace them with neutral examples, and tell the user what was found.
 
 ## Building and running
