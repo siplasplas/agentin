@@ -2366,10 +2366,12 @@ ChatTab *MainWindow::currentTab() const
 namespace {
 // While a terminal has the focus, every key goes to its shell, also those the window uses as shortcuts, such
 // as Ctrl+W or Ctrl+Tab; only the terminal's own shortcut leaves it.
+// Ctrl+Shift+C copies and Ctrl+Shift+V or Shift+Insert pastes, as in other terminals; Ctrl+C and Ctrl+V stay
+// with the shell.
 class TerminalKeys : public QObject
 {
 public:
-    using QObject::QObject;
+    explicit TerminalKeys(QTermWidget *terminal) : QObject(terminal), terminal_(terminal) {}
 
 protected:
     bool eventFilter(QObject *watched, QEvent *event) override
@@ -2377,10 +2379,67 @@ protected:
         if (event->type() == QEvent::ShortcutOverride) {
             const auto *key = static_cast<QKeyEvent *>(event);
             if (QKeySequence(key->keyCombination()) != QKeySequence("Alt+F12")) event->accept();
+        } else if (event->type() == QEvent::KeyPress) {
+            const QKeySequence key(static_cast<QKeyEvent *>(event)->keyCombination());
+            if (key == QKeySequence("Ctrl+Shift+C")) {
+                terminal_->copyClipboard();
+                return true;
+            }
+            if (key == QKeySequence("Ctrl+Shift+V") || key == QKeySequence("Shift+Ins")) {
+                terminal_->pasteClipboard();
+                return true;
+            }
         }
         return QObject::eventFilter(watched, event);
     }
+
+private:
+    QTermWidget *terminal_;
 };
+
+// Selects everything the terminal keeps, also the lines scrolled above the screen. qtermwidget's own selection
+// calls are not painted, so this drags the mouse as a user would: from the top of the history, which is
+// scrolled into view, to the end of the screen.
+void selectAllTerminal(QTermWidget *terminal)
+{
+    QWidget *display = nullptr;
+    for (QWidget *child : terminal->findChildren<QWidget *>())
+        if (child->metaObject()->className() == QByteArray("Konsole::TerminalDisplay")) display = child;
+    QScrollBar *bar = terminal->findChild<QScrollBar *>();
+    if (!display || !bar) return;
+    const auto send = [display](QEvent::Type type, const QPoint &position, Qt::MouseButtons buttons) {
+        QMouseEvent event(type, position, display->mapToGlobal(position), type == QEvent::MouseMove ? Qt::NoButton : Qt::LeftButton,
+                          buttons, Qt::NoModifier);
+        QCoreApplication::sendEvent(display, &event);
+    };
+    const QPoint end(display->width() - 1, display->height() - 1);
+    bar->setValue(bar->minimum());
+    send(QEvent::MouseButtonPress, QPoint(1, 1), Qt::LeftButton);
+    send(QEvent::MouseMove, QPoint(2, 2), Qt::LeftButton);
+    bar->setValue(bar->maximum());
+    send(QEvent::MouseMove, end, Qt::LeftButton);
+    send(QEvent::MouseButtonRelease, end, Qt::NoButton);
+}
+
+// Selects the logical line at a point of the terminal, with its wrapped continuation, as a triple click does.
+void selectTerminalLine(QTermWidget *terminal, const QPoint &position)
+{
+    QWidget *display = terminal->childAt(position);
+    if (!display) return;
+    const QPointF local = display->mapFrom(terminal, position);
+    const QPointF global = terminal->mapToGlobal(position);
+    const auto send = [display, local, global](QEvent::Type type) {
+        QMouseEvent event(type, local, global, Qt::LeftButton, type == QEvent::MouseButtonRelease ? Qt::NoButton : Qt::LeftButton,
+                          Qt::NoModifier);
+        QCoreApplication::sendEvent(display, &event);
+    };
+    send(QEvent::MouseButtonPress);
+    send(QEvent::MouseButtonRelease);
+    send(QEvent::MouseButtonDblClick);
+    send(QEvent::MouseButtonRelease);
+    send(QEvent::MouseButtonPress);
+    send(QEvent::MouseButtonRelease);
+}
 }
 
 void MainWindow::showTerminal(bool focus)
@@ -2399,6 +2458,22 @@ void MainWindow::showTerminal(bool focus)
         auto *keys = new TerminalKeys(terminal);
         terminal->installEventFilter(keys);
         for (QWidget *child : terminal->findChildren<QWidget *>()) child->installEventFilter(keys);
+        terminal->setContextMenuPolicy(Qt::CustomContextMenu);
+        connect(terminal, &QWidget::customContextMenuRequested, this, [terminal](const QPoint &position) {
+            QMenu menu(terminal);
+            QAction *copy = menu.addAction("Copy", terminal, &QTermWidget::copyClipboard);
+            copy->setShortcut(QKeySequence("Ctrl+Shift+C"));
+            copy->setEnabled(!terminal->selectedText().isEmpty());
+            menu.addAction("Paste", terminal, &QTermWidget::pasteClipboard)->setShortcut(QKeySequence("Ctrl+Shift+V"));
+            menu.addSeparator();
+            menu.addAction("Select Line", terminal, [terminal, position] { selectTerminalLine(terminal, position); })
+                ->setToolTip("The line under the mouse, with its wrapped continuation");
+            menu.addAction("Select All", terminal, [terminal] { selectAllTerminal(terminal); });
+            menu.addSeparator();
+            menu.addAction("Clear", terminal, &QTermWidget::clear);
+            menu.setToolTipsVisible(true);
+            menu.exec(terminal->mapToGlobal(position));
+        });
         // A shell that ends, for example with exit, leaves room for a new one.
         connect(terminal, &QTermWidget::finished, this, [this, directory, terminal] {
             directoryTerminals_.remove(directory);
