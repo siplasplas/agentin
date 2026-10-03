@@ -451,6 +451,7 @@ bool ClaudeAgent::newConversation(const QString &workingDirectory)
     }
     workingDirectory_ = workingDirectory;
     sessionId_.clear();
+    trustedSessionCommands_.clear();
     firstPrompt_.clear();
     queuedPrompts_.clear();
     pendingResumeId_.clear();
@@ -472,6 +473,8 @@ bool ClaudeAgent::resumeConversation(const QString &id, const QString &workingDi
         return false;
     }
     workingDirectory_ = workingDirectory;
+    // Chat trust belongs to one conversation.
+    if (id != sessionId_) trustedSessionCommands_.clear();
     sessionId_ = id;
     firstPrompt_.clear();
     queuedPrompts_.clear();
@@ -567,7 +570,12 @@ void ClaudeAgent::answerApproval(int id, ApprovalDecision decision)
         : decision == ApprovalDecision::Cancel ? "cancel" : "decline";
     const bool allow = decision == ApprovalDecision::Accept || decision == ApprovalDecision::AcceptForSession
         || decision == ApprovalDecision::AcceptAlways;
+    const CommandVerdict verdict = approvalVerdicts_.take(id);
     if (askedCommandChecks_.remove(id)) {
+        if (decision == ApprovalDecision::AcceptForSession) {
+            for (const QString &rule : verdict.sessionRules()) trustedSessionCommands_.insert(rule);
+            emit message("[Trusted for this chat: " + verdict.sessionRules().join(", ") + "]");
+        }
         send({{"type", "command_check_response"}, {"id", id}, {"decision", allow ? "allow" : "deny"},
               {"reason", allow ? "approved in agentin" : "declined in agentin"}});
         if (decision == ApprovalDecision::Cancel) interrupt();
@@ -575,10 +583,34 @@ void ClaudeAgent::answerApproval(int id, ApprovalDecision decision)
         send({{"type", "approval_response"}, {"id", id}, {"allow", allow}, {"decision", value}});
     }
     // agentin's list decides before Claude Code's own rules, so Always also allows the command there.
-    const QString command = approvalCommands_.take(id);
     if (decision == ApprovalDecision::AcceptAlways)
-        for (const QString &pattern : alwaysAllowPatterns(command))
+        for (const QString &pattern : verdict.alwaysPatterns())
             if (addAllowRule(pattern)) emit message("[Added to agentin's rules: allow " + pattern + "]");
+}
+
+QStringList ClaudeAgent::trustedSessionCommands() const
+{
+    QStringList rules = trustedSessionCommands_.values();
+    rules.sort();
+    return rules;
+}
+
+bool ClaudeAgent::removeTrustedSessionCommand(const QString &rule)
+{
+    if (!trustedSessionCommands_.remove(rule)) return false;
+    emit message("[Removed chat trust: " + rule + "]");
+    return true;
+}
+
+CommandContext ClaudeAgent::commandContext(const QJsonObject &event) const
+{
+    CommandContext context;
+    context.directory = event.value("cwd").toString(workingDirectory_);
+    for (const QJsonValue &directory : event.value("writable").toArray()) context.writable.append(directory.toString());
+    // An older bridge does not say where writing is allowed.
+    if (context.writable.isEmpty()) context.writable = {workingDirectory_, "/tmp", QDir::tempPath()};
+    context.trusted = trustedSessionCommands_.values();
+    return context;
 }
 
 // Session rules live in the Claude Code process, so the bridge reconnects and resumes the session.
@@ -588,6 +620,7 @@ void ClaudeAgent::resetSessionApprovals()
         emit message("[Wait for " + name_ + " to finish before withdrawing its session approvals.]");
         return;
     }
+    trustedSessionCommands_.clear();
     if (!isRunning()) return;
     ready_ = false;
     send({{"type", "reset_permissions"}});
@@ -707,18 +740,24 @@ void ClaudeAgent::handleLine(const QByteArray &line)
         sendNextPrompt();
     } else if (type == "command_check") {
         // The bridge's hook asks before Claude Code applies its own permission rules, so agentin's rules win.
-        const CommandVerdict verdict = commandRuleVerdict(event.value("command").toString());
         const int id = event.value("id").toInt();
         const QString command = event.value("command").toString();
-        if (verdict.decision == CommandDecision::Ask) {
+        const CommandVerdict verdict = commandRuleVerdict(command, commandContext(event));
+        // A read-only chat is left to Claude Code's plan mode, which a hook decision would override.
+        if (verdict.decision == CommandDecision::Ask && !readOnly_) {
             // Claude Code may run a command it deems read-only even when a hook asks, so agentin asks itself and
             // answers the hook with the user's decision.
             askedCommandChecks_.insert(id);
-            approvalCommands_.insert(id, command);
-            const QStringList patterns = alwaysAllowPatterns(command);
+            approvalVerdicts_.insert(id, verdict);
+            const QStringList patterns = verdict.alwaysPatterns();
+            const QStringList trusted = verdict.sessionRules();
+            QString details = "Bash\n\n" + command + "\n";
+            for (const CommandFinding &finding : verdict.findings)
+                details += "\nAsks because of " + finding.command + ": " + finding.reason;
             emit message("[Asking, as agentin's rules say: " + verdict.reason + "]");
-            emit approvalRequested(id, "Approve " + name_ + " action", "Bash\n\n" + command, false,
-                                   patterns.isEmpty() ? QString() : "Allow " + patterns.join(", ") + " in agentin's rules");
+            emit approvalRequested(id, "Approve " + name_ + " action", details, !trusted.isEmpty(),
+                                   patterns.isEmpty() ? QString() : "Allow " + patterns.join(", ") + " in agentin's rules",
+                                   trusted.join(", "));
             return;
         }
         QString decision;
@@ -732,7 +771,8 @@ void ClaudeAgent::handleLine(const QByteArray &line)
     } else if (type == "approval") {
         // Without the hook, as with an older SDK, the same rules answer the approval.
         if (event.value("tool").toString() == "Bash") {
-            const CommandVerdict verdict = commandRuleVerdict(event.value("input").toObject().value("command").toString());
+            const CommandVerdict verdict = commandRuleVerdict(event.value("input").toObject().value("command").toString(),
+                                                              commandContext({}));
             const bool allow = verdict.decision == CommandDecision::Allow && !readOnly_;
             if (verdict.decision == CommandDecision::Deny || allow) {
                 send({{"type", "approval_response"}, {"id", event.value("id").toInt()}, {"allow", allow},
@@ -743,7 +783,9 @@ void ClaudeAgent::handleLine(const QByteArray &line)
             }
         }
         if (event.value("tool").toString() == "Bash")
-            approvalCommands_.insert(event.value("id").toInt(), event.value("input").toObject().value("command").toString());
+            approvalVerdicts_.insert(event.value("id").toInt(),
+                                     commandRuleVerdict(event.value("input").toObject().value("command").toString(),
+                                                        commandContext({})));
         const QString details = QString::fromUtf8(QJsonDocument(event.value("input").toObject()).toJson(QJsonDocument::Indented));
         emit approvalRequested(event.value("id").toInt(), "Approve " + name_ + " action",
                                event.value("tool").toString() + "\n\n" + details.trimmed(),

@@ -273,6 +273,30 @@ class ClaudeBridgeTest(unittest.IsolatedAsyncioTestCase):
                 await bridge.handle({"type": "approval_response", "id": request["id"], "decision": "acceptAlways"})
                 self.assertIsNone((await approval).updated_permissions)
 
+    async def test_command_check_reports_the_place_and_returns_the_decision(self):
+        events = []
+        with TemporaryDirectory() as directory, patch.object(bridge_module, "send", events.append):
+            project = str(Path(directory).resolve())
+            bridge = bridge_module.Bridge(project)
+            bridge.additional_dirs = ["/srv/shared"]
+            check = asyncio.create_task(bridge.check_command(
+                {"tool_input": {"command": "ls"}, "cwd": project + "/sub"}, "tool-1", None))
+            await asyncio.sleep(0)
+            request = events[-1]
+            self.assertEqual(request["type"], "command_check")
+            self.assertEqual(request["cwd"], project + "/sub")
+            self.assertEqual(request["writable"][:2], [project, "/srv/shared"])
+            self.assertIn("/tmp", request["writable"])
+            await bridge.handle({"type": "command_check_response", "id": request["id"], "decision": "deny", "reason": "no"})
+            answer = await check
+            self.assertEqual(answer["hookSpecificOutput"]["permissionDecision"], "deny")
+            # No decision leaves the command to Claude Code.
+            check = asyncio.create_task(bridge.check_command({"tool_input": {"command": "ls"}}, "tool-2", None))
+            await asyncio.sleep(0)
+            self.assertEqual(events[-1]["cwd"], project)
+            await bridge.handle({"type": "command_check_response", "id": events[-1]["id"], "decision": ""})
+            self.assertEqual(await check, {})
+
     async def test_glm_requires_zai_credentials(self):
         with patch.dict(bridge_module.os.environ, {}, clear=True):
             bridge = bridge_module.Bridge("/tmp/project", "glm")

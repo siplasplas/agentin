@@ -3,6 +3,7 @@
 #include "CodexConnection.h"
 #include "CommandApproval.h"
 
+#include <QDir>
 #include <QJsonArray>
 
 namespace {
@@ -368,7 +369,8 @@ void CodexAgent::answerApproval(int id, ApprovalDecision decision)
     if (!serverRequests_.contains(id)) return;
     const QJsonValue requestId = serverRequests_.take(id);
     const QJsonArray rule = proposedRules_.take(id);
-    const QString sessionRule = requestSessionRules_.take(id);
+    const QStringList sessionRules = requestSessionRules_.take(id);
+    const QString sessionRule = sessionRules.join(", ");
     if (requestId.isUndefined() || !connection_) return;
     if (permissionRequests_.contains(id)) {
         // The grant lasts for this turn or for the thread's session; Codex keeps it, nothing is saved.
@@ -389,7 +391,7 @@ void CodexAgent::answerApproval(int id, ApprovalDecision decision)
         return;
     }
     if (!sessionRule.isEmpty() && decision == ApprovalDecision::AcceptForSession) {
-        for (const QString &family : sessionRule.split(", ")) trustedSessionCommands_.insert(family);
+        for (const QString &family : sessionRules) trustedSessionCommands_.insert(family);
         trustedConversationId_ = threadId_;
         decision = ApprovalDecision::Accept;
         emit message("[Trusted for this chat: " + sessionRule + "]");
@@ -786,33 +788,33 @@ void CodexAgent::handleNotification(const QString &method, const QJsonObject &pa
 void CodexAgent::handleServerRequest(const QString &method, const QJsonValue &id, const QJsonObject &params)
 {
     if (method == "item/commandExecution/requestApproval" || method == "item/fileChange/requestApproval") {
-        QString sessionRule;
+        QStringList sessionRules;
+        CommandVerdict verdict;
         if (method == "item/commandExecution/requestApproval") {
-            // agentin's rules decide before chat trust and before asking; Codex's own rules acted already.
-            const CommandVerdict verdict = commandRuleVerdict(params.value("command").toString());
+            // agentin's rules decide before asking; Codex's own rules acted already. A request for network
+            // access needs its own decision, so neither the rules nor chat trust allow it.
+            const bool network = !params.value("networkApprovalContext").toObject().isEmpty();
+            CommandContext context;
+            context.directory = params.value("cwd").toString(workingDirectory_);
+            context.writable = writableDirectories() + QStringList{workingDirectory_, "/tmp", QDir::tempPath()};
+            if (!network) context.trusted = trustedSessionCommands_.values();
+            verdict = commandRuleVerdict(params.value("command").toString(), context);
             if (verdict.decision == CommandDecision::Deny) {
                 connection_->respond(id, {{"decision", "decline"}});
                 emit message("[Declined by agentin's rules: " + verdict.reason + "]");
                 return;
             }
-            if (params.value("networkApprovalContext").toObject().isEmpty()) {
+            if (!network) {
                 if (verdict.decision == CommandDecision::Allow && !isReadOnly()) {
                     connection_->respond(id, {{"decision", "accept"}});
                     emit message("[Allowed by agentin's rules: " + verdict.reason + "]");
                     return;
                 }
-                // Each command of a chain is a family of its own, trusted separately; Ask leaves no trust.
-                if (verdict.decision != CommandDecision::Ask)
-                    sessionRule = sessionCommandFamilies(params.value("command").toString()).join(", ");
-            }
-            const QString trusted = sessionRule.isEmpty()
-                ? QString() : trustedCommandRule(params.value("command").toString(), trustedSessionCommands_.values());
-            if (!trusted.isEmpty()) {
-                connection_->respond(id, {{"decision", "accept"}});
-                emit message("[Approval allowed by chat trust: " + trusted + "]");
-                return;
+                // Each command that asks can be trusted for the chat on its own.
+                sessionRules = verdict.sessionRules();
             }
         }
+        const QString sessionRule = sessionRules.join(", ");
         QString description = params.value("reason").toString();
         if (method == "item/commandExecution/requestApproval") {
             const QJsonObject network = params.value("networkApprovalContext").toObject();
@@ -822,6 +824,8 @@ void CodexAgent::handleServerRequest(const QString &method, const QJsonValue &id
             } else {
                 description += "\n" + params.value("command").toString();
                 description += "\nDirectory: " + params.value("cwd").toString();
+                for (const CommandFinding &finding : verdict.findings)
+                    description += "\nAsks because of " + finding.command + ": " + finding.reason;
             }
         } else {
             QStringList files;
@@ -849,9 +853,11 @@ void CodexAgent::handleServerRequest(const QString &method, const QJsonValue &id
         for (const QJsonValue &word : params.value("proposedExecpolicyAmendment").toArray()) proposed.append(word.toString());
         const QJsonArray rule = QJsonArray::fromStringList(lastingRulePrefix(proposed));
         QString alwaysRule;
-        if (!sessionRule.isEmpty()) requestSessionRules_.insert(requestId, sessionRule);
-        // Always is offered also for a command agentin's rules ask about: its more specific allow rule then wins.
-        if (!rule.isEmpty() && sessionRule.isEmpty()) {
+        if (!sessionRules.isEmpty()) requestSessionRules_.insert(requestId, sessionRules);
+        // No lasting rule for a command that should be decided each time, such as an install.
+        const bool lasting = std::none_of(verdict.findings.cbegin(), verdict.findings.cend(),
+                                          [](const CommandFinding &finding) { return !finding.rule.isEmpty() && !finding.lasting; });
+        if (!rule.isEmpty() && lasting) {
             proposedRules_.insert(requestId, rule);
             QStringList words;
             for (const QJsonValue &word : rule) words.append(word.toString());

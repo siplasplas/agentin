@@ -17,15 +17,13 @@
       "command": "cd /home/user/work/syntax-hi-lib && git ls-files | head -50 && wc -l lib/downloader.cpp lib/*.h 2>/dev/null | tail -20",
       "cwd": "P",
       "expect": "allow",
-      "pending": true,
       "note": "cd anywhere; reading; 2>/dev/null"
     },
     {
       "name": "list-and-read-cmake",
       "command": "cd /home/user/work/qcodeedit && git ls-files | grep -v -E '^tests/data|\\.xml$' | head -60 && cat CMakeLists.txt | head -60 && cat kate/CMakeLists.txt 2>/dev/null",
       "cwd": "P",
-      "expect": "allow",
-      "pending": true
+      "expect": "allow"
     },
     {
       "name": "ls-remote-tags",
@@ -35,37 +33,32 @@
       "asks": [
         "git ls-remote --tags https://invent.kde.org/frameworks/syntax-highlighting.git"
       ],
-      "pending": true,
       "note": "network; Always may add git ls-remote *"
     },
     {
       "name": "read-sources-with-semicolons",
       "command": "cd /home/user/work/syntax-hi-lib/lib && ls && wc -l downloader.* index.* 2>/dev/null; cat downloader.h; cat downloader.cpp",
       "cwd": "P",
-      "expect": "allow",
-      "pending": true
+      "expect": "allow"
     },
     {
       "name": "read-several-files-and-ranges",
       "command": "cd /home/user/work; cat syntax-hi-lib/lib/index.h syntax-hi-lib/lib/index.cpp; cat qcodeedit/kate/CMakeLists.txt; ls qcodeedit/kate/include/qce/kate qcodeedit/tests qcodeedit/docs; grep -n \"class\\|static\\|load\\|read\" qcodeedit/kate/include/qce/kate/*.h | head -50; sed -n 95,120p qcodeedit/demo/DemoWindow.cpp; sed -n 120,140p qcodeedit/tests/test_fold_pairing.cpp",
       "cwd": "P",
       "expect": "allow",
-      "pending": true,
       "note": "sed -n only reads"
     },
     {
       "name": "read-outside-project-data",
       "command": "cd /home/user/work/qcodeedit; cat kate/include/qce/kate/KateXmlReader.h; grep -n \"kateversion\\|##\\|IncludeRules\" kate/src/KateXmlReader.cpp | head -30; ls docs; ls /home/user/.local/share/org.kde.syntax-highlighting/ 2>/dev/null; ls /home/user/.local/share/org.kde.syntax-highlighting/syntax | wc -l; cat tests/CMakeLists.txt | head -40",
       "cwd": "P",
-      "expect": "allow",
-      "pending": true
+      "expect": "allow"
     },
     {
       "name": "build-in-temporary-directory",
       "command": "cmake -S . -B /tmp/qce-build -DQCE_BUILD_DEMO=OFF >/dev/null && cmake --build /tmp/qce-build -j16 2>&1 | grep -E \"error|warning|Error\" | head -30; cd /tmp/qce-build && ctest 2>&1 | tail -30",
       "cwd": "P",
       "expect": "allow",
-      "pending": true,
       "note": "writes and runs only in /tmp"
     },
     {
@@ -73,7 +66,6 @@
       "command": "for d in build cmake-build-debug cmake-build-release; do echo \"=== $d\"; grep -E \"CMAKE_BUILD_TYPE:|CMAKE_GENERATOR:|QCE_BUILD\" $d/CMakeCache.txt; done",
       "cwd": "P",
       "expect": "allow",
-      "pending": true,
       "note": "for over a literal list"
     },
     {
@@ -90,58 +82,50 @@
       "name": "stage-and-scan-for-private-data",
       "command": "git status --short && git diff && git add kate/CMakeLists.txt tests/CMakeLists.txt kate/src/KateSyntaxVersion.cpp && git diff --cached --stat && git diff --cached | grep -inE \"user|/home/|token|password|secret\" ; echo \"grep rc=$?\"",
       "cwd": "P",
-      "expect": "allow",
-      "pending": true
+      "expect": "allow"
     },
     {
       "name": "for-build-test-grep",
       "command": "for d in build cmake-build-debug cmake-build-release; do echo \"=== $d\"; cmake --build $d -j16 2>&1 | grep -E \"KatePaths|error|FAILED\" | grep -iE \"error|warning|FAILED\" | head; echo \"rc=${PIPESTATUS[0]}\"; (cd $d && ctest 2>&1 | grep -E \"kate_paths|tests passed|Failed\"); done",
       "cwd": "P",
-      "expect": "allow",
-      "pending": true
+      "expect": "allow"
     },
     {
       "name": "add-status-scan",
       "command": "git add kate/CMakeLists.txt tests/CMakeLists.txt kate/src/KatePaths.cpp tests/test_kate_paths.cpp && git status --short && git diff --cached | grep -inE \"user|/home/|token|password|secret|HANDOFF\"; echo \"grep rc=$?\"",
       "cwd": "P",
-      "expect": "allow",
-      "pending": true
+      "expect": "allow"
     },
     {
       "name": "two-cd-globs-and-dev-null",
       "command": "cd /home/user/work/syntax-hi-lib/lib && cat wildcardmatcher.cpp | sed -n 1,200p | grep -v \"^ *//\" | head -80; grep -n \"priority\\|definitionsForFileName\" -A3 repository.cpp | head -40; cd /home/user/.local/share/org.kde.syntax-highlighting/syntax && grep -l \"<!ENTITY\" *.xml | head -3; grep -h -o '<language[^>]*>' cpp.xml makefile.xml; grep -c \"\" /dev/null; ls /home/user/work/qcodeedit/tests/data",
       "cwd": "P",
-      "expect": "allow",
-      "pending": true
+      "expect": "allow"
     },
     {
       "name": "read-headers-of-data-files",
       "command": "cd /home/user/.local/share/org.kde.syntax-highlighting/syntax && grep -h -o '<language[^>]*>' cpp.xml makefile.xml ada.xml | head; grep -n \"ENTITY\" ada.xml | head -3; sed -n 60,70p /home/user/work/syntax-hi-lib/lib/repository.cpp; grep -n \"fileNameFromFilePath\" -A8 /home/user/work/syntax-hi-lib/lib/repository.cpp | head -12",
       "cwd": "P",
-      "expect": "allow",
-      "pending": true
+      "expect": "allow"
     },
     {
       "name": "build-and-run-test-with-environment",
       "command": "cmake --build cmake-build-debug -j16 2>&1 | grep -E \"error|warning: .*KateSyntaxIndex|FAILED\" | head -20; QCE_KATE_TEST_DATA_DIR=$HOME/.local/share/org.kde.syntax-highlighting cmake-build-debug/tests/test_kate_syntax_index 2>&1 | tail -25",
       "cwd": "P",
       "expect": "allow",
-      "pending": true,
       "note": "harmless environment prefix; project program in a writable directory"
     },
     {
       "name": "build-and-run-reader-test",
       "command": "cmake --build cmake-build-debug -j16 2>&1 | grep -E \"error|FAILED\" -A3 | head -30; cmake-build-debug/tests/test_kate_xml_reader 2>&1 | grep -E \"FAIL|crossLanguage|Totals|Loc:|Actual|Expected\"",
       "cwd": "P",
-      "expect": "allow",
-      "pending": true
+      "expect": "allow"
     },
     {
       "name": "for-build-test-and-real-data",
       "command": "for d in build cmake-build-debug cmake-build-release; do echo \"=== $d\"; cmake --build $d -j16 2>&1 | grep -E \"error|FAILED\" -A3 | head -20; echo \"rc=${PIPESTATUS[0]}\"; (cd $d && ctest 2>&1 | grep -E \"tests passed|Failed\"); done; QCE_KATE_TEST_DATA_DIR=$HOME/.local/share/org.kde.syntax-highlighting cmake-build-release/tests/test_kate_syntax_index 2>&1 | grep -E \"realData|Totals|FAIL\"",
       "cwd": "P",
-      "expect": "allow",
-      "pending": true
+      "expect": "allow"
     },
     {
       "name": "status-tag-log",
@@ -158,7 +142,6 @@
       "command": "echo \"DISPLAY=$DISPLAY WAYLAND=$WAYLAND_DISPLAY XDG_SESSION_TYPE=$XDG_SESSION_TYPE\"",
       "cwd": "P",
       "expect": "allow",
-      "pending": true,
       "note": "variables in an echo argument are harmless"
     },
     {
@@ -250,7 +233,6 @@
       "asks": [
         "make install"
       ],
-      "pending": true,
       "note": "installing writes outside the project, to a place the command does not name"
     },
     {
@@ -270,7 +252,6 @@
       "asks": [
         "cat ~/.ssh/id_ed25519"
       ],
-      "pending": true,
       "note": "secret path"
     },
     {
@@ -281,7 +262,6 @@
       "asks": [
         "cat ~/.zai-key"
       ],
-      "pending": true,
       "note": "secret path"
     },
     {
@@ -292,7 +272,6 @@
       "asks": [
         "grep KEY .env"
       ],
-      "pending": true,
       "note": "secret path"
     },
     {
@@ -300,7 +279,6 @@
       "command": "for d in a b; do rm -rf $d; done",
       "cwd": "P",
       "expect": "ask",
-      "pending": true,
       "note": "rm inside a for loop"
     },
     {
@@ -308,29 +286,25 @@
       "command": "cmake --build /usr/local/x",
       "cwd": "P",
       "expect": "ask",
-      "pending": true,
       "note": "not writable"
     },
     {
       "name": "sed-in-place-outside",
       "command": "sed -i s/a/b/ /etc/hosts",
       "cwd": "P",
-      "expect": "ask",
-      "pending": true
+      "expect": "ask"
     },
     {
       "name": "sort-output-outside",
       "command": "sort -o /etc/x y",
       "cwd": "P",
-      "expect": "ask",
-      "pending": true
+      "expect": "ask"
     },
     {
       "name": "curl-in-substitution",
       "command": "x=$(curl https://example.com); echo $x",
       "cwd": "P",
       "expect": "ask",
-      "pending": true,
       "note": "network"
     },
     {
@@ -338,15 +312,13 @@
       "command": "echo x > notes.txt",
       "cwd": "P",
       "expect": "allow",
-      "pending": true,
       "note": "writable directory"
     },
     {
       "name": "redirect-outside",
       "command": "echo x > /etc/x",
       "cwd": "P",
-      "expect": "ask",
-      "pending": true
+      "expect": "ask"
     },
     {
       "name": "redirect-into-git-hooks",
@@ -366,7 +338,6 @@
       "command": "LD_PRELOAD=./x.so ls",
       "cwd": "P",
       "expect": "ask",
-      "pending": true,
       "note": "environment deny list"
     },
     {
@@ -374,29 +345,25 @@
       "command": "PATH=. make",
       "cwd": "P",
       "expect": "ask",
-      "pending": true,
       "note": "environment deny list"
     },
     {
       "name": "reset-hard",
       "command": "git reset --hard HEAD~1",
       "cwd": "P",
-      "expect": "ask",
-      "pending": true
+      "expect": "ask"
     },
     {
       "name": "tag-force",
       "command": "git tag -f v1 HEAD",
       "cwd": "P",
-      "expect": "ask",
-      "pending": true
+      "expect": "ask"
     },
     {
       "name": "gh-pr-create",
       "command": "gh pr create --title x --body y",
       "cwd": "P",
       "expect": "deny",
-      "pending": true,
       "note": "changes a remote server"
     },
     {
@@ -404,7 +371,6 @@
       "command": "git send-pack origin main",
       "cwd": "P",
       "expect": "deny",
-      "pending": true,
       "note": "changes a remote server"
     },
     {
@@ -412,7 +378,6 @@
       "command": "gh pr view 5",
       "cwd": "P",
       "expect": "ask",
-      "pending": true,
       "note": "network"
     },
     {
@@ -420,7 +385,6 @@
       "command": "eval \"$cmd\"",
       "cwd": "P",
       "expect": "ask",
-      "pending": true,
       "note": "cannot judge"
     },
     {
@@ -428,7 +392,6 @@
       "command": "$prog arg",
       "cwd": "P",
       "expect": "ask",
-      "pending": true,
       "note": "cannot judge"
     },
     {
@@ -436,7 +399,6 @@
       "command": "source script.sh",
       "cwd": "P",
       "expect": "ask",
-      "pending": true,
       "note": "cannot judge"
     },
     {
@@ -444,7 +406,6 @@
       "command": "case $x in a) ls;; esac",
       "cwd": "P",
       "expect": "ask",
-      "pending": true,
       "unsupported": true,
       "note": "cannot judge"
     },
@@ -453,7 +414,6 @@
       "command": "git ls-files | xargs wc -l",
       "cwd": "P",
       "expect": "allow",
-      "pending": true,
       "note": "wc tells about files without showing what is in them"
     },
     {
@@ -464,7 +424,6 @@
       "asks": [
         "xargs cat"
       ],
-      "pending": true,
       "note": "the files come from the input, so a secret file could be shown"
     }
   ]

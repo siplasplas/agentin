@@ -299,16 +299,21 @@ class Bridge:
             directories.extend(entry for entry in entries or [] if isinstance(entry, str) and entry)
         return directories
 
-    def path_is_allowed(self, path):
-        """Whether path is in the chat's directory, a directory allowed for the session or in settings, or the
-        temporary directory, which agents use for scratch files as Codex does."""
-        target = os.path.realpath(os.path.join(self.cwd, os.path.expanduser(path)))
+    def writable_directories(self):
+        """The chat's directory, the directories allowed for the session or in settings, and the temporary
+        directory, which agents use for scratch files as Codex does."""
         roots = [self.cwd] + self.additional_dirs + self.session_dirs + self.settings_directories()
+        directories = []
         for root in roots + ["/tmp", tempfile.gettempdir()]:
             root = os.path.realpath(os.path.join(self.cwd, os.path.expanduser(root)))
-            if os.path.commonpath([target, root]) == root:
-                return True
-        return False
+            if root not in directories:
+                directories.append(root)
+        return directories
+
+    def path_is_allowed(self, path):
+        """Whether path is in one of the writable directories."""
+        target = os.path.realpath(os.path.join(self.cwd, os.path.expanduser(path)))
+        return any(os.path.commonpath([target, root]) == root for root in self.writable_directories())
 
     def edit_is_allowed(self, tool_name, input_data):
         """Edits in the allowed directories need no question."""
@@ -375,7 +380,11 @@ class Bridge:
         self.next_id += 1
         future = asyncio.get_running_loop().create_future()
         self.pending[request_id] = future
-        send({"type": "command_check", "id": request_id, "command": command})
+        # agentin judges where the command writes: it runs in the session's current directory, and writing is
+        # free in the directories where edits are.
+        cwd = input_data.get("cwd") if isinstance(input_data.get("cwd"), str) else None
+        send({"type": "command_check", "id": request_id, "command": command, "cwd": cwd or self.cwd,
+              "writable": self.writable_directories()})
         try:
             answer = await future
         finally:

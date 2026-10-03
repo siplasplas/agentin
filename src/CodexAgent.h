@@ -109,7 +109,7 @@ private:
     // The changes of file change items in the running turn, shown in their approvals.
     QHash<QString, QJsonArray> fileChanges_;
     QString trustedConversationId_;
-    QHash<int, QString> requestSessionRules_;
+    QHash<int, QStringList> requestSessionRules_;
     // Additional permissions Codex asked for, by approval request.
     QHash<int, QJsonObject> permissionRequests_;
     // Directories Codex may also write to after a permission request, for this turn or this thread.

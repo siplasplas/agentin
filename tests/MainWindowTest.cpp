@@ -53,8 +53,6 @@ private slots:
     void audioChooserPathsAndLastDirectory();
     void speakerStopsAudio();
     void piperStopsBeforePlayback();
-    void commandApproval_data();
-    void commandApproval();
     void codexCommandTrust();
     void codexExecutableFromEnvironment();
     void desktopExecutableWithoutPath();
@@ -782,63 +780,6 @@ sys.stdin.read()
     QCOMPARE(failures.size(), 0);
 }
 
-void MainWindowTest::commandApproval_data()
-{
-    QTest::addColumn<QString>("command");
-    QTest::addColumn<QString>("rule");
-    QTest::addColumn<bool>("denied");
-    QTest::newRow("add") << "git add file.cpp" << "git add" << false;
-    QTest::newRow("commit-message") << "git commit -m \"sudo git push; apt install\"" << "git commit" << false;
-    QTest::newRow("quoted-file") << "git add 'file with spaces'" << "git add" << false;
-    QTest::newRow("escaped-quote") << "git commit -m \"say \\\"hello\\\"\"" << "git commit" << false;
-    QTest::newRow("directory") << "git -C '/tmp/project path' add ." << "git add" << false;
-    QTest::newRow("shell") << "/bin/bash -lc 'git commit -m hello'" << "git commit" << false;
-    QTest::newRow("other-shell") << "/tmp/bash -lc 'git add .'" << "" << false;
-    QTest::newRow("shell-extra") << "bash -lc 'git add .' ignored" << "" << false;
-    QTest::newRow("compound") << "git add . && git commit -m hello" << "" << false;
-    QTest::newRow("pipeline") << "git add . | cat" << "" << false;
-    QTest::newRow("newline") << "git add .\ngit status" << "" << false;
-    QTest::newRow("redirect") << "git commit -m hello > log" << "" << false;
-    QTest::newRow("expansion") << "git add $FILES" << "" << false;
-    QTest::newRow("substitution") << "git commit -m \"$(date)\"" << "" << false;
-    QTest::newRow("literal-substitution") << "git commit -m '$(sudo foo)'" << "git commit" << false;
-    QTest::newRow("config") << "git -c core.hooksPath=/tmp commit -m hello" << "" << false;
-    QTest::newRow("env") << "GIT_CONFIG_COUNT=1 git add ." << "" << false;
-    QTest::newRow("other-git") << "/tmp/git add ." << "" << false;
-    QTest::newRow("unclosed-quote") << "git commit -m 'hello" << "" << false;
-    QTest::newRow("push") << "git -C /tmp push origin main" << "" << true;
-    QTest::newRow("compound-push") << "git add . && git push" << "" << true;
-    QTest::newRow("shell-push") << "bash -lc 'git add .; git push'" << "" << true;
-    QTest::newRow("sudo") << "sudo apt install something" << "" << true;
-    QTest::newRow("env-sudo") << "env LANG=C sudo true" << "" << true;
-    QTest::newRow("wrapper-sudo") << "exec env LANG=C sudo true" << "" << true;
-    QTest::newRow("nested-sudo") << "git commit -m \"$(sudo true)\"" << "" << true;
-    QTest::newRow("backtick-sudo") << "echo `sudo true`" << "" << true;
-    // Package changes are denied by removable rules of agentin's list, not by the classification.
-    QTest::newRow("apt") << "apt-get -y install something" << "" << false;
-    QTest::newRow("dnf") << "dnf install something" << "" << false;
-    QTest::newRow("pacman") << "pacman -Syu" << "" << false;
-    QTest::newRow("apt-show") << "apt show install" << "" << false;
-    QTest::newRow("echo") << "echo 'sudo git push'" << "" << false;
-    QTest::newRow("empty-wrapper") << "env" << "" << false;
-    QTest::newRow("lookup") << "command -v sudo" << "" << false;
-#ifdef Q_OS_WIN
-    QTest::newRow("cmd-push") << "cmd.exe /c \"git push\"" << "" << true;
-    QTest::newRow("winget") << "winget install package" << "" << true;
-    QTest::newRow("powershell") << "powershell -NoProfile -Command 'Install-Package package'" << "" << true;
-#endif
-}
-
-void MainWindowTest::commandApproval()
-{
-    QFETCH(QString, command);
-    QFETCH(QString, rule);
-    QFETCH(bool, denied);
-    const CommandApproval result = classifyCommandApproval(command);
-    QCOMPARE(result.sessionRule, rule);
-    QCOMPARE(!result.deniedReason.isEmpty(), denied);
-}
-
 void MainWindowTest::codexCommandTrust()
 {
     QTemporaryDir directory;
@@ -872,7 +813,7 @@ for line in sys.stdin:
     CodexAgent other(&connection, directory.path());
     QVERIFY(chat.newConversation(directory.path()));
     QTRY_COMPARE(chat.sessionId(), QString("test-thread"));
-    // Trust for one chat is tested without the commands the options allow everywhere.
+    // Trust for one chat is tested with commands that ask: the rules allow none, and they use the network.
     setCommandRules({});
     const auto restoreTrusted = qScopeGuard([] { setCommandRules(defaultCommandRules()); });
     QSignalSpy approvals(&chat, &AgentBackend::approvalRequested);
@@ -892,39 +833,39 @@ for line in sys.stdin:
         }
         return values;
     };
-    request(100, "git add once.cpp");
+    request(100, "git fetch once");
     QCOMPARE(approvals.size(), 1);
     chat.answerApproval(approvals.last().first().toInt(), ApprovalDecision::Accept);
     QTRY_COMPARE(responses().value(100), QString("accept"));
     QVERIFY(chat.trustedSessionCommands().isEmpty());
     approvals.clear();
-    request(101, "git add first.cpp");
+    request(101, "git fetch first");
     QCOMPARE(approvals.size(), 1);
-    QCOMPARE(approvals.last().at(4).toString(), QString());
-    QCOMPARE(approvals.last().at(5).toString(), QString("git add"));
+    QVERIFY(!approvals.last().at(4).toString().isEmpty());
+    QCOMPARE(approvals.last().at(5).toString(), QString("git fetch"));
     chat.answerApproval(approvals.last().first().toInt(), ApprovalDecision::AcceptForSession);
     QTRY_COMPARE(responses().value(101), QString("accept"));
-    QCOMPARE(chat.trustedSessionCommands(), QStringList{"git add"});
+    QCOMPARE(chat.trustedSessionCommands(), QStringList{"git fetch"});
     QVERIFY(other.trustedSessionCommands().isEmpty());
-    request(102, "git -C /tmp add second.cpp");
+    request(102, "git -C /tmp fetch second");
     QTRY_COMPARE(responses().value(102), QString("accept"));
     QCOMPARE(approvals.size(), 1);
-    request(103, "git add . && git push");
+    request(103, "git fetch . && git push");
     QTRY_COMPARE(responses().value(103), QString("decline"));
     QCOMPARE(approvals.size(), 1);
-    request(104, "git add .", true);
+    request(104, "git fetch .", true);
     QCOMPARE(approvals.size(), 2);
     QVERIFY(approvals.last().at(5).toString().isEmpty());
     chat.answerApproval(approvals.last().first().toInt(), ApprovalDecision::Decline);
-    QVERIFY(chat.removeTrustedSessionCommand("git add"));
-    QVERIFY(!chat.removeTrustedSessionCommand("git add"));
-    request(105, "git add third.cpp");
+    QVERIFY(chat.removeTrustedSessionCommand("git fetch"));
+    QVERIFY(!chat.removeTrustedSessionCommand("git fetch"));
+    request(105, "git fetch third");
     QCOMPARE(approvals.size(), 3);
     chat.answerApproval(approvals.last().first().toInt(), ApprovalDecision::AcceptForSession);
-    request(106, "git commit -m hello");
+    request(106, "git pull origin");
     QCOMPARE(approvals.size(), 4);
     chat.answerApproval(approvals.last().first().toInt(), ApprovalDecision::AcceptForSession);
-    request(107, "git commit -m 'different message'");
+    request(107, "git pull 'another remote'");
     QTRY_COMPARE(responses().value(107), QString("accept"));
     QCOMPARE(approvals.size(), 4);
     QCOMPARE(chat.trustedSessionCommands().size(), 2);
@@ -934,7 +875,7 @@ for line in sys.stdin:
     QVERIFY(chat.resumeConversation("different-thread", directory.path()));
     QVERIFY(chat.trustedSessionCommands().isEmpty());
     QTRY_COMPARE(chat.sessionId(), QString("different-thread"));
-    request(108, "git add again.cpp");
+    request(108, "git fetch again");
     QCOMPARE(approvals.size(), 5);
     chat.answerApproval(approvals.last().first().toInt(), ApprovalDecision::AcceptForSession);
     QVERIFY(chat.newConversation(directory.path()));

@@ -692,14 +692,9 @@ to change files with its editing tools. Their edits (Edit, MultiEdit, Write and
 NotebookEdit) of files in the chat's directory, in a directory allowed for the
 session, in a directory listed in `permissions.additionalDirectories` of the
 Claude Code settings the session reads, or in the temporary directory (`/tmp`,
-or `TMPDIR`) are approved without asking. So are
-shell commands that only write such files and whose effect their words fully
-show: `cat`, `echo` or `printf` with `>`/`>>`, `tee`, `touch`, `mkdir`, `cp`
-(its destination), `mv`, `rm`, `rmdir` and `sed -i`, which runs with `--sandbox`
-so that it cannot read, write or run other files. A path in `.git`, or the
-removal of a directory that holds a `.git`, always asks. Anything the shell would expand or
-chain, unquoted here-documents, relative paths going up with `..`, scripts and
-all other commands still ask.
+or `TMPDIR`) are approved without asking. These directories are the
+*writable directories* of the chat; shell commands are judged by agentin's
+rules, described next.
 
 **Settings → Approvals…** holds agentin's own rules for shell commands: each a
 pattern with a check box and **Allow** (runs without asking), **Ask** (always
@@ -717,8 +712,12 @@ context menu copies it or sets its decision. On the first start the list holds
 and `git show *` as Allow, `rm *` and `rmdir *` as Ask, and as Deny the installing and upgrading
 of system packages through apt, apt-get, dnf, yum, zypper, pacman, snap, flatpak
 and brew, which can be removed, unchecked or allowed. `git push *`, `sudo *`,
-`doas *`, `su *` and the removal of system packages through the same tools (such
-as `apt *remove *`, `apt *purge *` or `pacman -R*`) are listed as Deny at every
+`doas *`, `su *`, the removal of system packages through the same tools (such
+as `apt *remove *`, `apt *purge *` or `pacman -R*`), and the commands that change
+a remote server — `git send-pack`, `git lfs push`, `git svn dcommit`, and the
+writing commands of `gh`, `glab` and `hub` (creating, merging and closing pull
+requests, releases, repositories and issues, running workflows, setting
+secrets, and `gh api` with a writing request) — are listed as Deny at every
 start with a checked box that cannot be changed, and they apply whatever the
 settings say.
 
@@ -731,31 +730,76 @@ in `settings.json` (`trustedCommands` or `commandRules`); they are not migrated:
 agentin does not start with such a section and shows an error, which can be
 copied, naming the file, so that the section or the whole file can be removed.
 
-Deny wins over everything, and all of them win over the agents' own rules. A
-command line is denied when any of its commands matches a Deny line, also inside
-a substitution or a `bash -lc '…'` script. It asks when a command matches an Ask
-line and no more specific Allow line, judged by the text before the first
-wildcard: **Always allow** on a command that asks adds such a line, for example
-`rm -rf build *` beside `rm *`, so that this command no longer asks while other
-removals still do. A command that must ask gets no chat trust. It is allowed when it is plain — commands joined by
-`&&`, `||`, `;` or `|`, also inside a `bash -lc '…'` wrapper, with no
-redirections, other substitutions, variables or subshells — and each of its
-commands matches a checked Allow line. A plain line allowed only in part, such
-as `git status && git tag -fa v2.3.0 -m … && git log`, is asked about by agentin
-itself, naming the commands that are not allowed; agreeing runs the whole line,
-and **Always allow** adds only those commands, here `git tag *`. A line with no
-allowed command is left to the agent. A commit message given as
-`"$(cat <<'EOF' … EOF)"`, as Claude Code writes it, counts as plain text.
-Read-only chats are never allowed by the list, but its Deny lines apply. Any
-command other than `git` that names a path in `.git`, such as `rm -rf .git` or
-`cat .git/config`, is always declined: the repository is changed only through
-git. The log notes each command allowed or declined this way.
+agentin reads a command line as Bash and judges each command it could run, also
+those inside `$(…)`, loops, `if`, subshells, here-documents and `bash -c '…'`
+scripts, and behind wrappers such as `env`, `timeout`, `nice` and `xargs`. It
+follows `cd`, the variables the line sets and `for` loops over a list, so that
+`cd build && make` or `for d in a b; do cmake --build $d; done` are judged by
+where they really write. The decision is taken in this order:
+
+1. **Deny** — the line is declined when any command matches a Deny line or a
+   fixed denial, or writes into a `.git` directory other than through git
+   (`rm -rf .git`, `echo x > .git/hooks/pre-commit`); reading there is allowed.
+2. **Ask lines** — a command that matches an Ask line asks, unless an Allow
+   line is more specific, judged by the text before the first wildcard:
+   `rm -rf build *` beside `rm *` lets that one removal pass.
+3. **Allow lines** — a command that matches an Allow line passes.
+4. **What the command does**, when no line matches. Passing without a
+   question: commands that only read (`cat`, `grep`, `ls`, `sed -n`, `git log`,
+   `git diff` and the like, anywhere), and commands that write, build or run
+   programs only inside the writable directories (`touch`, `cp`, `sed -i`,
+   `git add`, `cmake`, `make`, `ctest`, a program of the project given by its
+   path, a redirection to a file there). Asking: commands that remove files, use
+   the network (`curl`, `git fetch`, `gh pr view`), write or run something
+   outside the writable directories, install (`make install`), are not known to
+   agentin (`python3`, `npm`), or whose arguments cannot be read from the line
+   (`cat $FILE` with an unknown value, `eval`, `source`, a script piped to `sh`).
+   Git commands that can lose work also ask: `git reset --hard`, `git rebase`,
+   `git restore`, `git checkout -- …`, `git clean`, `git tag -f`/`-d`,
+   `git branch -D`, `git stash drop`/`clear`, `git commit --amend`,
+   `git gc --prune`, `git reflog expire`.
+
+Some things ask whatever the Allow lines say: reading a file that may hold
+secrets (`~/.ssh`, `~/.gnupg`, `~/.netrc`, `~/.aws`, `~/.config/gh`, `.env`
+files, `*.pem`, `id_rsa*`, `id_ed25519*`, `*credentials*`), a redirection to a
+file outside the writable directories, a variable that changes what programs
+run (`PATH`, `LD_PRELOAD`, `IFS`, `GIT_EDITOR`, `GIT_SSH_COMMAND` and similar),
+a command that an Allow line covers but that is known to write a file or run a
+program through an option (`git diff --output=…`), and a line that cannot be
+parsed or followed (a `case`, a function, a command run in the background with
+`&`). Through `xargs`, programs that describe files without showing them (`wc`,
+`ls`, `stat`, `du`, checksums) run freely, while `xargs cat` or `xargs grep`
+ask, as the files come from the input and one of them could be a secret.
+
+A line is allowed only when every command of it is. When it asks, agentin names
+the commands that need the question and why; agreeing runs the whole line.
+**Always allow** adds an Allow line for each named command: `git fetch *` for a
+Git command, `git tag -f *` for one that can lose work, and the command itself
+with ` *` otherwise, which also covers what asked about it, such as the secret
+file it reads. **Trust … for this chat** allows the same commands until the
+conversation changes, without saving anything. A redirection outside the
+writable directories and a dangerous variable can only be allowed once.
+Installing, such as `make install`, writes to a place the command does not
+name, so it is not offered a lasting line: allow it once, or trust it for the
+chat.
+
+Read-only chats are never allowed by the list, but its Deny lines apply. The
+log notes each command allowed or declined this way.
+
+This is a guard against mistakes, not a sandbox: programs of the project run
+without a question, so a script the agent writes into the project can do
+anything the agent could not do directly. A path counts by where it really is:
+symbolic links that exist when the line is judged are followed, so writing
+through a link that leaves the project asks. A link made earlier in the same
+line is not seen that way, which is why `ln` to a place outside the writable
+directories asks itself.
 
 For Claude and GLM, a `PreToolUse` hook of the bridge asks agentin about every
-shell command before Claude Code applies its own permission rules, so the list
-decides first. For an Ask line agentin shows the approval itself, since Claude
-Code runs commands it deems read-only even when a hook asks; its **Always allow**
-adds the command's line to agentin's list. Codex applies the rules in `~/.codex/rules` itself, without asking
+shell command before Claude Code applies its own permission rules, so agentin
+decides first, with the directory the command runs in and the chat's writable
+directories. When a command asks, agentin shows the approval itself, since Claude
+Code runs commands it deems read-only even when a hook asks. In a read-only chat
+the question is left to Claude Code's plan mode. Codex applies the rules in `~/.codex/rules` itself, without asking
 agentin, and commands it runs in its sandbox without asking, such as removals in
 the chat's directory, never reach agentin: agentin's lines answer Codex's
 questions, but an Ask or Deny line cannot stop a command that Codex does not ask
@@ -766,15 +810,10 @@ restarts), and **Keep Codex's rule**, after which agentin stops reporting it.
 At every start agentin reports, in the log, Codex rules added while it was not
 running and the conflicts not yet resolved.
 
-For Codex command approval requests, **Trust git add for this chat** and
-**Trust git commit for this chat** remember the command family in agentin's
-memory, without writing a lasting Codex rule. A chain such as
-`git add … && git commit -m …` offers both families, each trusted on its own.
-Matching commands receive `accept` (allow once), even when their files and
-messages change, also in a chain of trusted families. Normal shell `-c`/`-lc`
-wrappers and Git directory options are recognized; other commands in a chain,
-shell expansions, configuration overrides, and unknown syntax are never
-automatically trusted.
+Codex asks about far fewer commands, as it runs most of them in its sandbox;
+those it does ask about are judged the same way. Chat trust is kept in agentin's
+memory, without writing a lasting Codex rule; a chain such as
+`git fetch … && git pull` offers each command, trusted on its own.
 
 A lasting **Always allow** rule that Codex proposes for a Git command is saved
 without its files or message, as `git add`, `git commit -m` or `git` with the
@@ -797,13 +836,12 @@ for the running turn when no other chat holds them; otherwise the chat and the
 log say that the directory is also used by that chat. Patterns and special
 locations, such as the temporary directory, are granted but not locked.
 
-Incoming Codex command approval requests for `git push`, `sudo`, `doas` and `su`
-are automatically declined, and so are system package changes while their Deny
-lines are checked. On Windows, runas and recognized
-winget/choco/scoop changes and PowerShell installation commands are also declined.
-These checks apply to recognized commands in approval requests, not commands
-executed by the agent without requesting approval; unknown shell syntax still
-requires a human decision. Quoted argument text does not count as a command.
+These checks apply to the commands Codex asks about, not to commands it runs in
+its sandbox without a request. Quoted argument text does not count as a command:
+`echo 'sudo git push'` only prints. A line that cannot be parsed as Bash is still
+declined when one of its commands starts with `sudo`, `doas`, `su` or is a
+`git push`; on Windows, where command lines are not Bash, the same holds for
+`runas` and for winget, choco and scoop changes.
 
 Question options are listed with numbers and descriptions: choose
 them in the panel (several where the question allows it) or type their numbers

@@ -503,6 +503,18 @@ private:
 
     void applyRedirections(const NodePtr &node, Scope &scope, CommandUse &use)
     {
+        CommandUse redirected;
+        redirected.directories = use.directories;
+        collectRedirections(node, scope, redirected);
+        for (const QString &path : std::as_const(redirected.reads)) appendUnique(use.reads, path);
+        for (const QString &path : std::as_const(redirected.writes)) appendUnique(use.writes, path);
+        for (const QString &problem : std::as_const(redirected.problems)) appendUnique(use.problems, problem);
+        use.redirectionWrites = redirected.writes;
+        use.redirectionProblems = redirected.problems;
+    }
+
+    void collectRedirections(const NodePtr &node, Scope &scope, CommandUse &use)
+    {
         using Kind = Redirection::Kind;
         for (const Redirection &redirection : node->redirections) {
             if (redirection.kind == Kind::HereDocument) {

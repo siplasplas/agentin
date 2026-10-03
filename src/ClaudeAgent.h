@@ -1,6 +1,7 @@
 #pragma once
 
 #include "AgentBackend.h"
+#include "CommandApproval.h"
 #include "ConversationIndex.h"
 
 #include <QJsonObject>
@@ -141,6 +142,8 @@ public:
     void answerApproval(int id, ApprovalDecision decision) override;
     bool canResetSessionApprovals() const override { return true; }
     void resetSessionApprovals() override;
+    QStringList trustedSessionCommands() const override;
+    bool removeTrustedSessionCommand(const QString &rule) override;
     void answerQuestions(int id, const QHash<QString, QStringList> &answers) override;
 
 private:
@@ -174,10 +177,15 @@ private:
     // The API error the CLI is retrying after, until the turn makes progress or ends.
     QString retry_;
     QHash<int, int> pendingQuestionCounts_;
-    // Shell commands of pending approvals, for the allow rules that Always adds to agentin's list.
-    QHash<int, QString> approvalCommands_;
-    // Hook checks that agentin's Ask rules turned into approvals; they are answered as hook decisions.
+    // What agentin's rules said about the shell commands of pending approvals, for the allow rules that
+    // Always adds to agentin's list and the commands a chat can trust.
+    QHash<int, CommandVerdict> approvalVerdicts_;
+    // Hook checks that agentin's rules turned into approvals; they are answered as hook decisions.
     QSet<int> askedCommandChecks_;
+    // Command prefixes trusted for this conversation; they count as Allow rules.
+    QSet<QString> trustedSessionCommands_;
+    // The place a shell command runs in, as the bridge reports it with the command.
+    CommandContext commandContext(const QJsonObject &event) const;
     HistoryPages history_;
     quint64 historyGeneration_ = 0;
     bool ready_ = false;

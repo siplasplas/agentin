@@ -46,6 +46,12 @@ add_executable(agentin
     src/AgentBackend.h
     src/CommandApproval.cpp
     src/CommandApproval.h
+    src/shell/BashParser.cpp
+    src/shell/CommandCatalog.cpp
+    src/shell/CommandCatalog.h
+    src/shell/ShellAst.h
+    src/shell/ShellEvaluator.cpp
+    src/shell/ShellEvaluator.h
     src/ApprovalRules.cpp
     src/ApprovalRules.h
     src/ChatView.cpp
@@ -123,6 +129,12 @@ if(BUILD_TESTING)
         src/AgentBackend.h
         src/CommandApproval.cpp
         src/CommandApproval.h
+        src/shell/BashParser.cpp
+        src/shell/CommandCatalog.cpp
+        src/shell/CommandCatalog.h
+        src/shell/ShellAst.h
+        src/shell/ShellEvaluator.cpp
+        src/shell/ShellEvaluator.h
         src/ApprovalRules.cpp
         src/ApprovalRules.h
         src/ChatView.cpp

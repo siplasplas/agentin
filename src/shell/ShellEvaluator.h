@@ -42,6 +42,10 @@ struct CommandUse
     bool inputArguments = false;
     // Why the command cannot be judged in full; such a command must not run without a question.
     QStringList problems;
+    // The part of writes and problems that comes from the command's redirections, which a rule about the
+    // command does not cover.
+    QStringList redirectionWrites;
+    QStringList redirectionProblems;
 };
 
 // What is known before the line runs.
