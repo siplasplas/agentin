@@ -30,6 +30,7 @@ private slots:
     void suggestions();
     void editableLists();
     void readingTools();
+    void timeLimit();
     void corpusParses();
     void prefixesDoNotCrash();
     void evaluate_data();
@@ -427,6 +428,32 @@ void ShellApprovalTest::readingTools()
     QCOMPARE(readVerdict("Grep", {"/p/**/*.pem"}, context).decision, CommandDecision::Ask);
     QCOMPARE(readVerdict("Grep", {"/h/.aws"}, context).decision, CommandDecision::Ask);
     QCOMPARE(readVerdict("Grep", {"src"}, {{}, {}, {}, "/h"}).decision, CommandDecision::Allow);
+}
+
+// The optional time limit asks about a line its tool may run longer, whatever the rules say; it is off at first.
+void ShellApprovalTest::timeLimit()
+{
+    setCommandRules(defaultCommandRules());
+    const auto restore = qScopeGuard([] { setCommandTimeLimit(0); });
+    const auto verdict = [](int timeout, const QString &command = "make -j8") {
+        CommandContext context{"/p", {"/p", "/tmp"}, {}, "/h"};
+        context.timeoutSeconds = timeout;
+        return commandRuleVerdict(command, context);
+    };
+    QCOMPARE(verdict(3600).decision, CommandDecision::Allow);
+    QCOMPARE(verdict(-1).decision, CommandDecision::Allow);
+    setCommandTimeLimit(10);
+    QCOMPARE(verdict(600).decision, CommandDecision::Allow);
+    QCOMPARE(verdict(0).decision, CommandDecision::Allow);
+    const CommandVerdict longRun = verdict(1200);
+    QCOMPARE(longRun.decision, CommandDecision::Ask);
+    QVERIFY2(longRun.reason.contains("20 minutes"), qPrintable(longRun.reason));
+    QVERIFY(longRun.alwaysPatterns().isEmpty());
+    QVERIFY(longRun.sessionRules().isEmpty());
+    QVERIFY(verdict(-1).reason.contains("background"));
+    QCOMPARE(verdict(1200, "git push").decision, CommandDecision::Deny);
+    // A rule allowing the command does not cover the time.
+    QCOMPARE(verdict(1200, "git status").decision, CommandDecision::Ask);
 }
 
 void ShellApprovalTest::parse_data()

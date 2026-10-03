@@ -732,6 +732,14 @@ secrets, and `gh api` with a writing request) — are listed as Deny at every
 start with a checked box that cannot be changed, and they apply whatever the
 settings say.
 
+Below the list, **Ask when a Claude or GLM shell command may run longer than …**
+(off at first, 10 minutes when turned on) makes a line ask, whatever the rules
+say, when its tool may run it longer than the limit. Claude Code gives a command
+2 minutes unless it asks for more, at most 10 unless `BASH_MAX_TIMEOUT_MS` raises
+that, so a lower limit catches long builds; a command run in the background has
+no limit and always asks while the check is on. Codex does not say how long a
+command may run, so the check does not apply to it.
+
 The dialog has three more pages, each an editable list with **Add**, **Remove**
 and **Restore defaults**: **Secret files** (paths whose contents a command may
 not show without a question), **Protected paths** (places where writing by a
@@ -846,7 +854,9 @@ At every start agentin reports, in the log, Codex rules added while it was not
 running and the conflicts not yet resolved.
 
 Codex asks about far fewer commands, as it runs most of them in its sandbox;
-those it does ask about are judged the same way. **Always allow…** on such a
+those it does ask about are judged the same way. Input that Codex wants to send
+to a command that runs already is always shown, as that command may be a shell
+reading it as commands. **Always allow…** on such a
 command adds only agentin's lines and no Codex rule, so that Codex keeps asking
 and agentin's rules, with their denials, keep answering. Chat trust is kept in
 agentin's memory; a chain such as `git fetch … && git pull` offers each command,

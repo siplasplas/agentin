@@ -267,6 +267,24 @@ ApprovalLists approvalLists()
     return lists();
 }
 
+namespace {
+int &timeLimit()
+{
+    static int minutes = 0;
+    return minutes;
+}
+}
+
+int commandTimeLimit()
+{
+    return timeLimit();
+}
+
+void setCommandTimeLimit(int minutes)
+{
+    timeLimit() = qMax(0, minutes);
+}
+
 void setApprovalLists(const ApprovalLists &value)
 {
     lists() = value;
@@ -764,6 +782,13 @@ CommandVerdict commandRuleVerdict(const QString &command, const CommandContext &
     }
     if (!evaluation.judged)
         verdict.findings.append({shortened(command), CommandDecision::Ask, "the line cannot be judged: " + evaluation.reason, {}, false});
+    // A long run is a question of its own: no rule about the commands covers it.
+    if (timeLimit() > 0 && (context.timeoutSeconds < 0 || context.timeoutSeconds > timeLimit() * 60)) {
+        const QString reason = context.timeoutSeconds < 0
+            ? QString("it runs in the background, with no time limit")
+            : QString("it may run %1 minutes, longer than the limit of %2").arg(QString::number(context.timeoutSeconds / 60.0, 'g', 3)).arg(timeLimit());
+        verdict.findings.append({shortened(command), CommandDecision::Ask, reason, {}, false});
+    }
     if (verdict.findings.isEmpty()) {
         verdict.decision = CommandDecision::Allow;
         verdict.reason = allowedBy.isEmpty() ? QString("it reads, or writes only inside the writable directories") : allowedBy.join(", ");

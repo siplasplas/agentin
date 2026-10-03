@@ -606,6 +606,9 @@ CommandContext ClaudeAgent::commandContext(const QJsonObject &event) const
     // An older bridge does not say where writing is allowed.
     if (context.writable.isEmpty()) context.writable = {workingDirectory_, "/tmp", QDir::tempPath()};
     context.trusted = trustedSessionCommands_.values();
+    // Without a timeout Claude Code gives a command two minutes.
+    if (event.value("background").toBool()) context.timeoutSeconds = -1;
+    else if (event.contains("command")) context.timeoutSeconds = event.value("timeout").isDouble() ? event.value("timeout").toInt() / 1000 : 120;
     return context;
 }
 

@@ -1727,6 +1727,7 @@ void MainWindow::loadApprovals()
         listFixedDenials(rules);
         setCommandRules(rules);
         setApprovalLists(defaultApprovalLists());
+        setCommandTimeLimit(0);
         saveApprovals();
         return;
     }
@@ -1736,6 +1737,7 @@ void MainWindow::loadApprovals()
     setApprovalLists({listFromJson(approvals, "secretPaths", defaults.secretPaths),
                       listFromJson(approvals, "protectedPaths", defaults.protectedPaths),
                       listFromJson(approvals, "askVariables", defaults.askVariables)});
+    setCommandTimeLimit(approvals.value("commandTimeLimitMinutes").toInt(0));
     QList<CommandRule> rules = rulesFromJson(approvals.value("commandRules").toArray());
     const int listed = int(rules.size());
     listFixedDenials(rules);
@@ -1761,6 +1763,7 @@ void MainWindow::saveApprovals()
                           {"secretPaths", QJsonArray::fromStringList(lists.secretPaths)},
                           {"protectedPaths", QJsonArray::fromStringList(lists.protectedPaths)},
                           {"askVariables", QJsonArray::fromStringList(lists.askVariables)},
+                          {"commandTimeLimitMinutes", commandTimeLimit()},
                           {"keptCodexRules", QJsonArray::fromStringList(keptCodexRules_)}};
     if (codexRulesKnown_) approvals.insert("knownCodexRules", QJsonArray::fromStringList(knownCodexRules_));
     const QByteArray content = QJsonDocument(approvals).toJson(QJsonDocument::Indented);
@@ -1787,6 +1790,7 @@ void MainWindow::watchApprovals()
                 listFixedDenials(rules);
                 setCommandRules(rules);
                 setApprovalLists(defaultApprovalLists());
+                setCommandTimeLimit(0);
                 keptCodexRules_.clear();
                 saveApprovals();
                 appendLine("[approvals.json was removed; its default rules were written again]");
@@ -1926,6 +1930,25 @@ void MainWindow::showApprovalsDialog()
     ruleButtons->addWidget(remove);
     ruleButtons->addStretch(1);
     layout->addLayout(ruleButtons);
+    // The optional check of long runs; Codex says nothing about how long a command may run.
+    auto *timeRow = new QHBoxLayout;
+    auto *timeCheck = new QCheckBox("Ask when a Claude or GLM shell command may run longer than", &dialog);
+    timeCheck->setObjectName("commandTimeLimit");
+    timeCheck->setToolTip("Claude Code gives a command 2 minutes unless it asks for more, at most 10 unless "
+                          "BASH_MAX_TIMEOUT_MS raises that; a command run in the background has no limit and asks "
+                          "whenever this is on");
+    auto *timeMinutes = new QSpinBox(&dialog);
+    timeMinutes->setObjectName("commandTimeLimitMinutes");
+    timeMinutes->setRange(1, 600);
+    timeMinutes->setSuffix(" min");
+    timeMinutes->setValue(commandTimeLimit() > 0 ? commandTimeLimit() : 10);
+    timeCheck->setChecked(commandTimeLimit() > 0);
+    timeMinutes->setEnabled(timeCheck->isChecked());
+    connect(timeCheck, &QCheckBox::toggled, timeMinutes, &QWidget::setEnabled);
+    timeRow->addWidget(timeCheck);
+    timeRow->addWidget(timeMinutes);
+    timeRow->addStretch(1);
+    layout->addLayout(timeRow);
     const auto addRule = [tree](CommandDecision decision) {
         tree->setSortingEnabled(false);
         QTreeWidgetItem *item = addRuleItem(tree, {QString(), decision, true});
@@ -2119,6 +2142,7 @@ void MainWindow::showApprovalsDialog()
         return values;
     };
     setApprovalLists({valuesOf(secrets), valuesOf(protectedPaths), valuesOf(variables)});
+    setCommandTimeLimit(timeCheck->isChecked() ? timeMinutes->value() : 0);
     for (const auto &[agent, rule] : revoked)
         if (agent) agent->removeTrustedSessionCommand(rule);
     QList<CommandRule> rules;

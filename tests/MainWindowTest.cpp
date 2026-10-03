@@ -853,6 +853,15 @@ for line in sys.stdin:
     request(102, "git -C /tmp fetch second");
     QTRY_COMPARE(responses().value(102), QString("accept"));
     QCOMPARE(approvals.size(), 1);
+    // Input for a running command is never answered by the rules or by trust, as the command may be a shell.
+    chat.handleServerRequest("item/commandExecution/requestApproval", 109,
+                             QJsonObject{{"command", "git fetch origin\n"}, {"cwd", directory.path()}, {"kind", "writeStdin"}});
+    QCOMPARE(approvals.size(), 2);
+    QVERIFY(approvals.last().at(5).toString().isEmpty());
+    QVERIFY(approvals.last().at(6).toStringList().isEmpty());
+    chat.answerApproval(approvals.last().first().toInt(), ApprovalDecision::Decline);
+    QTRY_COMPARE(responses().value(109), QString("decline"));
+    approvals.removeLast();
     request(103, "git fetch . && git push");
     QTRY_COMPARE(responses().value(103), QString("decline"));
     QCOMPARE(approvals.size(), 1);
@@ -922,6 +931,7 @@ void MainWindowTest::approvalsFileVersions()
     saved.insert("secretPaths", QJsonArray{"notes.txt"});
     saved.insert("protectedPaths", QJsonArray{".github/workflows"});
     saved.insert("askVariables", QJsonArray());
+    saved.insert("commandTimeLimitMinutes", 5);
     write(saved);
     MainWindow window("/nonexistent/codex", directory.path(), "/nonexistent/python", "/nonexistent/bridge",
                       "/nonexistent/gemini", nullptr, directory.filePath("index.json"), "/nonexistent/agy",
@@ -929,6 +939,8 @@ void MainWindowTest::approvalsFileVersions()
     QCOMPARE(approvalLists().secretPaths, QStringList{"notes.txt"});
     QCOMPARE(approvalLists().protectedPaths, QStringList{".github/workflows"});
     QVERIFY(approvalLists().askVariables.isEmpty());
+    QCOMPARE(commandTimeLimit(), 5);
+    setCommandTimeLimit(0);
 }
 
 // Starts a chat through the New chat dialog, choosing the agent and working directory there.

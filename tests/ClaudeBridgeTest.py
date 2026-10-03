@@ -312,6 +312,15 @@ class ClaudeBridgeTest(unittest.IsolatedAsyncioTestCase):
             await bridge.handle({"type": "command_check_response", "id": request["id"], "decision": "deny"})
             self.assertEqual((await check)["hookSpecificOutput"]["permissionDecision"], "deny")
 
+            # agentin learns how long a command may run.
+            check = asyncio.create_task(bridge.check_command(
+                {"tool_input": {"command": "make", "timeout": 600000, "run_in_background": True}}, "tool-3", None))
+            await asyncio.sleep(0)
+            self.assertEqual(events[-1]["timeout"], 600000)
+            self.assertTrue(events[-1]["background"])
+            await bridge.handle({"type": "command_check_response", "id": events[-1]["id"], "decision": ""})
+            self.assertEqual(await check, {})
+
             # A sed command allowed by the rules runs with --sandbox; one the user approved runs as written.
             for sandbox, expected in ((True, "sed --sandbox -i s/a/b/ f"), (False, None)):
                 check = asyncio.create_task(bridge.check_command({"tool_input": {"command": "sed -i s/a/b/ f"}}, "tool-2", None))

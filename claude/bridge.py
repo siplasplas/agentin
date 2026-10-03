@@ -251,8 +251,11 @@ class Bridge:
         # agentin judges where the command writes: it runs in the session's current directory, and writing is
         # free in the directories where edits are.
         cwd = input_data.get("cwd") if isinstance(input_data.get("cwd"), str) else None
+        # How long the command may run: Claude Code's timeout in milliseconds, or none in the background.
+        timeout = tool_input.get("timeout") if isinstance(tool_input.get("timeout"), (int, float)) else None
         answer = await self.ask_agentin({"type": "command_check", "command": command, "cwd": cwd or self.cwd,
-                                         "writable": self.writable_directories()})
+                                         "writable": self.writable_directories(), "timeout": timeout,
+                                         "background": bool(tool_input.get("run_in_background"))})
         # A sed command that agentin's rules allow runs with --sandbox, which rejects the sed commands that
         # read, write or run other files, should agentin's reading of the script miss one.
         updated = None

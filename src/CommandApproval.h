@@ -42,6 +42,9 @@ struct CommandContext
     QStringList trusted;
     // The home directory; the user's own when empty.
     QString home;
+    // How long the command may run, in seconds, as the agent's tool says: 0 when it is not known, -1 for a
+    // command that runs in the background, without a limit.
+    int timeoutSeconds = 0;
 };
 
 // One command of a line that asks or is declined.
@@ -109,6 +112,10 @@ struct ApprovalLists
     QStringList askVariables;
 };
 ApprovalLists defaultApprovalLists();
+// The optional check of how long a command may run: a line whose tool may run it longer than this many
+// minutes asks, whatever the rules say. 0, the default, turns it off.
+int commandTimeLimit();
+void setCommandTimeLimit(int minutes);
 ApprovalLists approvalLists();
 void setApprovalLists(const ApprovalLists &lists);
 // Whether a path, which may hold glob characters, could name a file that a pattern of the list covers.

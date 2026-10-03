@@ -789,21 +789,23 @@ void CodexAgent::handleServerRequest(const QString &method, const QJsonValue &id
         QStringList sessionRules;
         CommandVerdict verdict;
         const bool command = method == "item/commandExecution/requestApproval";
-        // A request for network access needs its own decision, so neither the rules nor chat trust allow it.
+        // A request for network access needs its own decision, so neither the rules nor chat trust allow it;
+        // nor does input for a command that runs already, which may be a shell reading it as commands.
         const bool network = command && !params.value("networkApprovalContext").toObject().isEmpty();
+        const bool input = command && params.value("kind").toString() == "writeStdin";
         if (command) {
             // agentin's rules decide before asking; Codex's own rules acted already.
             CommandContext context;
             context.directory = params.value("cwd").toString(workingDirectory_);
             context.writable = writableDirectories() + QStringList{workingDirectory_, "/tmp", QDir::tempPath()};
-            if (!network) context.trusted = trustedSessionCommands_.values();
+            if (!network && !input) context.trusted = trustedSessionCommands_.values();
             verdict = commandRuleVerdict(params.value("command").toString(), context);
             if (verdict.decision == CommandDecision::Deny) {
                 connection_->respond(id, {{"decision", "decline"}});
                 emit message("[Declined by agentin's rules: " + verdict.reason + "]");
                 return;
             }
-            if (!network) {
+            if (!network && !input) {
                 if (verdict.decision == CommandDecision::Allow && !isReadOnly()) {
                     connection_->respond(id, {{"decision", "accept"}});
                     emit message("[Allowed by agentin's rules: " + verdict.reason + "]");
@@ -820,6 +822,8 @@ void CodexAgent::handleServerRequest(const QString &method, const QJsonValue &id
             if (!network.isEmpty()) {
                 description += "\nNetwork access: " + network.value("protocol").toString()
                     + "://" + network.value("host").toString();
+            } else if (input) {
+                description += "\nInput for a running command:\n" + params.value("command").toString();
             } else {
                 description += "\n" + params.value("command").toString();
                 description += "\nDirectory: " + params.value("cwd").toString();
@@ -862,7 +866,7 @@ void CodexAgent::handleServerRequest(const QString &method, const QJsonValue &id
             alwaysRule = "Allow commands starting with \"" + words.join(' ') + "\" without asking";
         }
         emit approvalRequested(requestId, "Approve Codex action", description.trimmed(), true, alwaysRule, sessionRule,
-                               network ? QStringList() : verdict.alwaysPatterns());
+                               network || input ? QStringList() : verdict.alwaysPatterns());
     } else if (method == "item/permissions/requestApproval") {
         const QJsonObject permissions = params.value("permissions").toObject();
         QStringList lines{params.value("reason").toString()};
