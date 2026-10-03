@@ -20,8 +20,8 @@ CommandApproval classifyCommandApproval(const QString &command);
 // other commands keep the proposal. Empty when no lasting rule may be offered: privilege escalation and
 // git push.
 QStringList lastingRulePrefix(const QStringList &proposed);
-// The allow patterns that Always adds to agentin's list for a plain command line, one per command, such as
-// "git add *" and "rm -rf build *"; empty for a line that is not plain.
+// The allow patterns that Always adds to agentin's list for a plain command line, one per command the rules do
+// not allow yet, such as "git tag *" or "rm -rf build *"; empty for a line that is not plain.
 QStringList alwaysAllowPatterns(const QString &command);
 
 // agentin's own rules: a pattern with * and ? matched against each command of a command line, after Git's
@@ -46,7 +46,8 @@ struct CommandVerdict
     QString reason;
 };
 
-// The rules of a first start: git add * and git commit -m * as Allow, rm * and rmdir * as Ask, and the
+// The rules of a first start: git add, git commit with -m and git's read-only status, log, diff and show as
+// Allow, rm * and rmdir * as Ask, and the
 // fixed denials and changes to system packages as Deny.
 QList<CommandRule> defaultCommandRules();
 // Always denied, whatever the rules say: git push, privilege escalation and removing system packages.
@@ -65,7 +66,7 @@ bool commandPatternMatches(const QString &pattern, const QString &command);
 bool patternOverlapsPrefix(const QString &pattern, const QString &prefix);
 // Deny when any command of the line, also in substitutions, matches a deny rule or a fixed denial, or when a
 // command other than git names a path in .git; ask when any command matches an ask rule and no more specific
-// allow rule (judged by the text before the first wildcard); allow
+// allow rule (judged by the text before the first wildcard), or when a plain line is allowed only in part; allow
 // when the line is plain (commands joined by &&, ||, ; or |, also inside a shell -c wrapper, without
 // redirections, substitutions or variables) and each command matches an enabled allow rule.
 CommandVerdict commandRuleVerdict(const QString &command);

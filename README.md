@@ -705,8 +705,9 @@ options. **Add allow**, **Add ask** and **Add deny** add a line, a double-click
 edits its pattern or switches its decision, **Remove** deletes it, an unchecked line stays
 listed without effect, a click on a column header sorts the list, and a line's
 context menu copies it or sets its decision. On the first start the list holds
-`git add *` and `git commit -m *` as Allow (or the commands an earlier version
-allowed), `rm *` and `rmdir *` as Ask, and as Deny the installing and upgrading
+`git add *`, `git commit *-m *` (which also covers options before `-m`, such as
+`git commit -q -m`), and git's read-only `git status *`, `git log *`, `git diff *`
+and `git show *` as Allow, `rm *` and `rmdir *` as Ask, and as Deny the installing and upgrading
 of system packages through apt, apt-get, dnf, yum, zypper, pacman, snap, flatpak
 and brew, which can be removed, unchecked or allowed. `git push *`, `sudo *`,
 `doas *`, `su *` and the removal of system packages through the same tools (such
@@ -732,7 +733,11 @@ wildcard: **Always allow** on a command that asks adds such a line, for example
 removals still do. A command that must ask gets no chat trust. It is allowed when it is plain — commands joined by
 `&&`, `||`, `;` or `|`, also inside a `bash -lc '…'` wrapper, with no
 redirections, other substitutions, variables or subshells — and each of its
-commands matches a checked Allow line. A commit message given as
+commands matches a checked Allow line. A plain line allowed only in part, such
+as `git status && git tag -fa v2.3.0 -m … && git log`, is asked about by agentin
+itself, naming the commands that are not allowed; agreeing runs the whole line,
+and **Always allow** adds only those commands, here `git tag *`. A line with no
+allowed command is left to the agent. A commit message given as
 `"$(cat <<'EOF' … EOF)"`, as Claude Code writes it, counts as plain text.
 Read-only chats are never allowed by the list, but its Deny lines apply. Any
 command other than `git` that names a path in `.git`, such as `rm -rf .git` or

@@ -329,7 +329,10 @@ QList<QStringList> anyCommands(const QString &command, int depth = 0)
 
 QList<CommandRule> defaultCommandRules()
 {
-    QList<CommandRule> rules{{"git add *", CommandDecision::Allow, true}, {"git commit -m *", CommandDecision::Allow, true},
+    // "git commit *-m *" also covers options before -m, such as the -q Claude Code writes.
+    QList<CommandRule> rules{{"git add *", CommandDecision::Allow, true}, {"git commit *-m *", CommandDecision::Allow, true},
+                             {"git status *", CommandDecision::Allow, true}, {"git log *", CommandDecision::Allow, true},
+                             {"git diff *", CommandDecision::Allow, true}, {"git show *", CommandDecision::Allow, true},
                              {"rm *", CommandDecision::Ask, true}, {"rmdir *", CommandDecision::Ask, true}};
     for (const QString &pattern : fixedDeniedPatterns()) rules.append({pattern, CommandDecision::Deny, true});
     // Installing and upgrading system packages; "*" before an operation also covers its options and variants
@@ -439,6 +442,28 @@ bool patternOverlapsPrefix(const QString &pattern, const QString &prefix)
     return literal.trimmed().isEmpty() || start.startsWith(literal) || literal.startsWith(start);
 }
 
+namespace {
+// Between Allow and Ask the more specific pattern wins, judged by its text before the first wildcard, so that
+// "rm -rf build *", allowed with Always, passes while "rm *" still asks about other removals.
+int specificity(const QString &pattern)
+{
+    static const QRegularExpression wildcard(R"([*?\[])");
+    const qsizetype first = pattern.simplified().indexOf(wildcard);
+    return int(first < 0 ? pattern.simplified().size() + 1 : first);
+}
+
+// The most specific enabled rule of the decision that matches the command, or an empty string.
+QString bestRule(const QString &line, CommandDecision decision)
+{
+    QString found;
+    for (const CommandRule &rule : ruleList())
+        if (rule.enabled && rule.decision == decision && commandPatternMatches(rule.pattern, line)
+            && (found.isEmpty() || specificity(rule.pattern) > specificity(found)))
+            found = rule.pattern;
+    return found;
+}
+}
+
 CommandVerdict commandRuleVerdict(const QString &command)
 {
     const CommandApproval classified = classifyCommandApproval(command);
@@ -459,21 +484,7 @@ CommandVerdict commandRuleVerdict(const QString &command)
         for (const CommandRule &rule : denies)
             if (commandPatternMatches(rule.pattern, line)) return {CommandDecision::Deny, rule.pattern};
     }
-    // Between Allow and Ask the more specific pattern wins, judged by its text before the first wildcard, so
-    // that "rm -rf build *", allowed with Always, passes while "rm *" still asks about other removals.
-    const auto specificity = [](const QString &pattern) {
-        static const QRegularExpression wildcard(R"([*?\[])");
-        const qsizetype first = pattern.simplified().indexOf(wildcard);
-        return first < 0 ? pattern.simplified().size() + 1 : first;
-    };
-    const auto best = [&specificity](const QString &line, CommandDecision decision) {
-        QString found;
-        for (const CommandRule &rule : ruleList())
-            if (rule.enabled && rule.decision == decision && commandPatternMatches(rule.pattern, line)
-                && (found.isEmpty() || specificity(rule.pattern) > specificity(found)))
-                found = rule.pattern;
-        return found;
-    };
+    const auto best = bestRule;
     for (const QStringList &args : all) {
         const QString line = args.join(' ');
         const QString ask = best(line, CommandDecision::Ask);
@@ -484,12 +495,17 @@ CommandVerdict commandRuleVerdict(const QString &command)
     const std::optional<QList<QStringList>> commands = plainCommands(command);
     if (!commands) return {};
     QStringList patterns;
+    QStringList missing;
     for (const QStringList &args : *commands) {
         const QString matched = best(args.join(' '), CommandDecision::Allow);
-        if (matched.isEmpty()) return {};
-        if (!patterns.contains(matched)) patterns.append(matched);
+        if (matched.isEmpty()) missing.append(args.join(' '));
+        else if (!patterns.contains(matched)) patterns.append(matched);
     }
-    return {CommandDecision::Allow, patterns.join(", ")};
+    if (missing.isEmpty()) return {CommandDecision::Allow, patterns.join(", ")};
+    // A chain that the rules allow only in part is asked about here, naming the rest, so that agreeing runs the
+    // whole chain and Always adds only what was missing; with nothing allowed, the agent decides.
+    if (missing.size() < commands->size()) return {CommandDecision::Ask, "not in agentin's rules: " + missing.join("; ")};
+    return {};
 }
 
 QStringList sessionCommandFamilies(const QString &command)
@@ -532,6 +548,11 @@ QStringList alwaysAllowPatterns(const QString &command)
     const std::optional<QList<QStringList>> commands = plainCommands(command);
     if (!commands) return patterns;
     for (const QStringList &args : *commands) {
+        // Commands the rules allow already need no line of their own.
+        if (!bestRule(args.join(' '), CommandDecision::Allow).isEmpty()) continue;
+        if (std::any_of(patterns.cbegin(), patterns.cend(), [&args](const QString &pattern) {
+                return commandPatternMatches(pattern, args.join(' ')); }))
+            continue;
         const QStringList prefix = lastingRulePrefix(args);
         if (!prefix.isEmpty() && !patterns.contains(prefix.join(' ') + " *")) patterns.append(prefix.join(' ') + " *");
     }
