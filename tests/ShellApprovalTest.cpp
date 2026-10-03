@@ -165,7 +165,8 @@ void ShellApprovalTest::decisions_data()
           "git diff --output=/etc/x", "git log -p --ext-diff", "sed -i s/a/b/ ~/.bashrc", "echo x >> ~/.bashrc",
           "HOME=/x git status", "export HOME=/x; build/tests/t; git status", "PATH=. /usr/local/bin/x", "HOME=/x /opt/tool",
           "g++ main.cpp -o /usr/local/bin/x", "g++ -fplugin=./x.so main.cpp", "gcc @opts main.c", "g++ -B/tmp/x main.cpp",
-          "g++ -Xclang -load -Xclang x.so main.cpp", "cmake --install build", "cmake --install build --prefix /usr/local",
+          "g++ -Xclang -load -Xclang x.so main.cpp", "cd /srv/other && git add a.cpp && git commit -m x",
+          "git -C /srv/other commit -m x", "cmake --build /usr/local/x -j4", "cmake --install build", "cmake --install build --prefix /usr/local",
           "PKG_CONFIG_PATH=./pc g++ -c x.cpp", "g++ -c x.cpp $(pkg-config --cflags $(cat f))", "cd /etc && g++ -c x.cpp"})
         row("ask", command);
     for (const char *command :
@@ -253,7 +254,9 @@ void ShellApprovalTest::rulesAndTrust()
     rules({{"git diff *", Decision::Allow, true}, {"cat *", Decision::Allow, true}, {"touch *", Decision::Allow, true}});
     QCOMPARE(verdict("git diff --stat").decision, Decision::Allow);
     QCOMPARE(verdict("git diff --output=/etc/x").decision, Decision::Ask);
-    QCOMPARE(verdict("touch /etc/x").decision, Decision::Allow);
+    // A rule names a kind of command, not the places it may change.
+    QCOMPARE(verdict("touch /p/x").decision, Decision::Allow);
+    QCOMPARE(verdict("touch /etc/x").decision, Decision::Ask);
     asked = verdict("cat ~/.ssh/id_rsa");
     QCOMPARE(asked.decision, Decision::Ask);
     QCOMPARE(asked.alwaysPatterns(), QStringList{"cat /h/.ssh/id_rsa *"});
@@ -378,6 +381,11 @@ void ShellApprovalTest::suggestions()
     // A command that asks for another reason as well keeps its own rule.
     QCOMPARE(always("npm test > /etc/x"), QStringList());
     QCOMPARE(always("make install"), QStringList());
+    // A place the command does not name cannot be part of a rule.
+    QCOMPARE(always("cd /srv/other && git commit -m x"), QStringList());
+    QCOMPARE(always("git -C /srv/other add a"), QStringList());
+    QCOMPARE(always("cd /srv/other && g++ -c a.cpp"), QStringList());
+    QCOMPARE(always("g++ -c a.cpp -o /srv/out/a.o"), QStringList{"g++ -c a.cpp -o /srv/out/a.o *"});
     QCOMPARE(always("python3 -c \"print(1)\""), QStringList());
     QVERIFY(commandRuleVerdict("python3 -c \"print(1)\"", context).sessionRules().isEmpty());
     QCOMPARE(always("python3 tools/scan.py --all"), QStringList{"python3 tools/scan.py --all *"});

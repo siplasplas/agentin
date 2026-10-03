@@ -778,7 +778,13 @@ where they really write. The decision is taken in this order:
 2. **Ask lines** — a command that matches an Ask line asks, unless an Allow
    line is more specific, judged by the text before the first wildcard:
    `rm -rf build *` beside `rm *` lets that one removal pass.
-3. **Allow lines** — a command that matches an Allow line passes.
+3. **Allow lines** — a command that matches an Allow line passes, as long as
+   it changes and runs things only inside the writable directories: a line
+   names a kind of command, not the places it may change, so with `git add *`
+   and `git commit *` a commit in another repository, after `cd` to it, still
+   asks. Only a line that names the whole command, as Always adds it, also
+   covers a place outside; a command whose place is not in its words, such as
+   the repository git works in, gets no such line and can only be allowed once.
 4. **What the command does**, when no line matches. Passing without a
    question: commands that only read (`cat`, `grep`, `ls`, `sed -n`, `git log`,
    `git diff` and the like, anywhere), and commands that write, build or run

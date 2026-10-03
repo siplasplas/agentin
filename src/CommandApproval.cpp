@@ -603,6 +603,22 @@ Allowed bestAllow(const QString &line, const QStringList &trusted, const Writabl
     return found;
 }
 
+// Why a command changes or runs something outside the writable directories, one reason per place; its
+// redirections are judged on their own.
+QStringList places(const CommandUse &use, const QStringList &writable)
+{
+    QStringList reasons;
+    // Git writes into the repository of the directory it runs in.
+    const char *verb = use.effect == Effect::GitWrite ? "changes the repository in" : "writes";
+    for (const QString &path : use.writes) {
+        if (use.redirectionWrites.contains(path)) continue;
+        if (const QString reason = outside(path, writable, verb); !reason.isEmpty()) reasons.append(reason);
+    }
+    for (const QString &path : use.executes)
+        if (const QString reason = outside(path, writable, "runs"); !reason.isEmpty()) reasons.append(reason);
+    return reasons;
+}
+
 struct Judged
 {
     CommandDecision decision = CommandDecision::Allow;
@@ -675,6 +691,12 @@ Judged judge(const CommandUse &use, const CommandContext &context, const QString
 
     Judged result;
     result.rule = ruleText(words);
+    const QStringList outsidePlaces = places(use, context.writable);
+    // A place the command does not name, such as the repository git works in or the directory a compiler
+    // writes into by default, cannot be part of a rule: one naming the command would allow it anywhere.
+    bool implicitPlace = use.effect == Effect::GitWrite && !outsidePlaces.isEmpty();
+    for (const QString &path : use.writes + use.executes)
+        if (use.directories.contains(path) && !inside(realPath(path), context.writable)) implicitPlace = true;
     const GitAsk git = gitAsk(use, words);
     if (!ask.isEmpty() && allowed <= specificity(ask)) {
         reasons.prepend("agentin's rule " + ask);
@@ -682,15 +704,14 @@ Judged judge(const CommandUse &use, const CommandContext &context, const QString
         reasons.append(git.reason);
         result.rule = git.rule;
     } else if (!allow.isEmpty()) {
+        // A rule names a kind of command, such as "git add *", not the places it may change: those stay the
+        // writable directories, as without a rule, unless the rule names the whole command.
         if (!exact) {
             reasons += problems;
-            // A rule for a fetching command names a server, not where the command may write.
-            if (use.effect == Effect::Network) {
+            reasons += outsidePlaces;
+            // A rule for a fetching command names a server.
+            if (use.effect == Effect::Network)
                 for (const QString &url : urlsOutside(allow, use.urls)) reasons.append("fetches " + url + ", which " + allow + " does not name");
-                for (const QString &path : use.writes)
-                    if (!use.redirectionWrites.contains(path))
-                        if (const QString reason = outside(path, context.writable, "writes"); !reason.isEmpty()) reasons.append(reason);
-            }
         }
         result.allowedBy = allow;
     } else {
@@ -700,18 +721,11 @@ Judged judge(const CommandUse &use, const CommandContext &context, const QString
             reasons.append(use.program.isEmpty() ? QString("the program is not known") : use.program + " is not a program agentin knows");
         else if (use.effect == Effect::Network) reasons.append("it uses the network");
         else if (use.effect == Effect::Remove) reasons.append("it removes files");
-        QStringList places;
-        for (const QString &path : use.writes) {
-            if (use.redirectionWrites.contains(path)) continue;
-            if (const QString reason = outside(path, context.writable, "writes"); !reason.isEmpty()) places.append(reason);
-        }
-        for (const QString &path : use.executes)
-            if (const QString reason = outside(path, context.writable, "runs"); !reason.isEmpty()) places.append(reason);
-        reasons += places;
+        reasons += outsidePlaces;
         // A rule for a Git command covers its other files and messages too, and one for a command that asks only
         // as it is not known or uses the network covers the same kind of work with other arguments.
         if (plain && words.value(0) == "git") result.rule = lastingRulePrefix(words).join(' ');
-        else if (plain && places.isEmpty() && (use.effect == Effect::Network || use.effect == Effect::Unknown))
+        else if (plain && outsidePlaces.isEmpty() && (use.effect == Effect::Network || use.effect == Effect::Unknown))
             result.rule = commandFamily(words, use.urls);
     }
     if (reasons.isEmpty()) return result;
@@ -722,7 +736,7 @@ Judged judge(const CommandUse &use, const CommandContext &context, const QString
     // as written would allow it whatever it turns out to be.
     const bool unknownValue = std::any_of(problems.cbegin(), problems.cend(),
                                           [](const QString &problem) { return problem.contains(" not known"); });
-    if (!coverable || unknownValue) result.rule.clear();
+    if (!coverable || unknownValue || implicitPlace) result.rule.clear();
     // The files xargs adds are not in the command's words, so a rule names the command as it is.
     result.exact = use.inputArguments;
     // Code given on the command line, as in python3 -c, is new each time: no rule would match it again.
