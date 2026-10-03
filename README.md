@@ -22,6 +22,24 @@ installed and authenticated Gemini CLI. Antigravity requires an installed and
 authenticated `agy` CLI. The optional test also requires Qt 6
 Test and Python 3.
 
+The terminal below the chat uses qtermwidget for Qt 6, which links utf8proc.
+Their development packages are named differently by each distribution:
+
+```sh
+# Debian, Ubuntu
+sudo apt install libqtermwidget6-2-dev libutf8proc-dev
+# Fedora
+sudo dnf install qtermwidget-devel utf8proc-devel
+# Arch Linux
+sudo pacman -S qtermwidget libutf8proc
+```
+
+On Ubuntu, `libqtermwidget6-2-dev` does not pull in `libutf8proc-dev`, so the
+link fails on a missing `libutf8proc.so` until it is installed. Elsewhere, look
+for the Qt 6 build of qtermwidget (version 2 or newer), or build it from
+[lxqt/qtermwidget](https://github.com/lxqt/qtermwidget) with
+[lxqt-build-tools](https://github.com/lxqt/lxqt-build-tools).
+
 ```sh
 cmake -S . -B build
 cmake --build build
@@ -476,6 +494,17 @@ process-local configuration override. Blocking questions end with their turn;
 nonblocking questions remain visible and answerable until answered or resolved by
 the server. A question written only as ordinary chat text does not create a form.
 
+The bottom of the window, as in CLion, holds the **Log** and a **Terminal**,
+switched by their tabs below them. The terminal is a shell (`$SHELL`, or
+`/bin/bash`) in the current chat's directory, for example for `git status` or
+`git push` without leaving agentin. Each directory has its own shell, which two
+chats in the same directory share; switching chats shows the shell of the chat's
+directory, and every shell keeps running while agentin runs. **View → Terminal**
+(Alt+F12) opens it and gives it the focus; pressed in the terminal, it goes back
+to the message field. While the terminal has the focus, every key goes to the
+shell, also Ctrl+W, Ctrl+Tab and the other keys agentin uses, except Alt+F12. A
+shell that ends, for example with `exit`, leaves a button that starts a new one.
+
 **View → Reasoning** toggles a read-only panel beneath the conversation tree.
 It is hidden by default, and the visibility preference is saved. Drag the divider
 between the tree and the panel to adjust their heights. The panel follows the
@@ -782,6 +811,15 @@ The Codex client uses JSONL over stdin/stdout (`codex app-server --stdio`). See 
 for the protocol. The Claude bridge also uses JSONL over stdin/stdout and calls
 [`ClaudeSDKClient`](https://code.claude.com/docs/en/agent-sdk/python) in the
 Python SDK.
+
+## License
+
+agentin is licensed under the GNU General Public License, version 3 only
+(GPL-3.0-only); see `LICENSE`. It links qtermwidget, which is under
+GPL-2.0-or-later, and uses Qt under the LGPL-3.0. As section 14 of the GPL-3.0
+allows, its author, Andrzej Borucki, or a person he names publicly, is the proxy
+who may accept a later version of the GPL for agentin; `CONTRIBUTING.md`
+describes this and how contributions are licensed.
 
 ## Working on agentin with coding agents
 

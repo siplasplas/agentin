@@ -42,6 +42,7 @@
 #include <QLineEdit>
 #include <QListWidget>
 #include <QActionGroup>
+#include <QApplication>
 #include <QMenu>
 #include <QMenuBar>
 #include <QMessageBox>
@@ -55,6 +56,10 @@
 #include <QStyle>
 #include <QToolButton>
 #include <QTimer>
+#include <QKeyEvent>
+#include <QTabWidget>
+#include <QStackedWidget>
+#include <qtermwidget.h>
 #include <QShortcut>
 #include <QSignalBlocker>
 #include <QSpinBox>
@@ -251,6 +256,10 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     usageVisibleAction_->setObjectName("showUsageLimits");
     usageVisibleAction_->setCheckable(true);
     usageVisibleAction_->setChecked(true);
+    terminalAction_ = viewMenu->addAction("Terminal");
+    terminalAction_->setShortcut(QKeySequence("Alt+F12"));
+    terminalAction_->setToolTip("Show a shell in the current chat's directory below the chat, or go back to the message field");
+    connect(terminalAction_, &QAction::triggered, this, &MainWindow::toggleTerminal);
     reasoningVisibleAction_ = viewMenu->addAction("Reasoning");
     reasoningVisibleAction_->setObjectName("showReasoning");
     reasoningVisibleAction_->setCheckable(true);
@@ -559,7 +568,28 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     chatSplitter->setSizes({260, 590});
     auto *logSplitter = new QSplitter(Qt::Vertical, this);
     logSplitter->addWidget(chatSplitter);
-    logSplitter->addWidget(log_);
+    // The log and the terminal share the bottom, switched by their tabs below them.
+    bottomTabs_ = new QTabWidget(this);
+    bottomTabs_->setObjectName("bottomTabs");
+    bottomTabs_->setTabPosition(QTabWidget::South);
+    bottomTabs_->setDocumentMode(true);
+    bottomTabs_->addTab(log_, "Log");
+    terminals_ = new QStackedWidget(bottomTabs_);
+    terminals_->setObjectName("terminals");
+    auto *start = new QPushButton("Start a shell in the chat's directory", terminals_);
+    connect(start, &QPushButton::clicked, this, [this] { showTerminal(true); });
+    noTerminal_ = new QWidget(terminals_);
+    auto *noTerminalLayout = new QVBoxLayout(noTerminal_);
+    noTerminalLayout->addStretch(1);
+    noTerminalLayout->addWidget(start, 0, Qt::AlignCenter);
+    noTerminalLayout->addStretch(1);
+    terminals_->addWidget(noTerminal_);
+    bottomTabs_->addTab(terminals_, "Terminal");
+    bottomTabs_->setTabToolTip(1, "A shell in the current chat's directory (Alt+F12)");
+    connect(bottomTabs_, &QTabWidget::currentChanged, this, [this](int index) {
+        if (index == 1) showTerminal(true);
+    });
+    logSplitter->addWidget(bottomTabs_);
     logSplitter->setStretchFactor(0, 1);
     logSplitter->setSizes({450, 150});
     setCentralWidget(logSplitter);
@@ -2333,8 +2363,72 @@ ChatTab *MainWindow::currentTab() const
     return chatTab(tabs_->currentWidget());
 }
 
+namespace {
+// While a terminal has the focus, every key goes to its shell, also those the window uses as shortcuts, such
+// as Ctrl+W or Ctrl+Tab; only the terminal's own shortcut leaves it.
+class TerminalKeys : public QObject
+{
+public:
+    using QObject::QObject;
+
+protected:
+    bool eventFilter(QObject *watched, QEvent *event) override
+    {
+        if (event->type() == QEvent::ShortcutOverride) {
+            const auto *key = static_cast<QKeyEvent *>(event);
+            if (QKeySequence(key->keyCombination()) != QKeySequence("Alt+F12")) event->accept();
+        }
+        return QObject::eventFilter(watched, event);
+    }
+};
+}
+
+void MainWindow::showTerminal(bool focus)
+{
+    const ChatTab *tab = currentTab();
+    const QString directory = tab ? tab->workingDirectory() : QString();
+    QTermWidget *terminal = directory.isEmpty() ? nullptr : directoryTerminals_.value(directory);
+    if (!terminal && !directory.isEmpty() && QFileInfo(directory).isDir()) {
+        terminal = new QTermWidget(0, terminals_);
+        terminal->setObjectName("terminal");
+        terminal->setWorkingDirectory(directory);
+        terminal->setShellProgram(qEnvironmentVariable("SHELL", "/bin/bash"));
+        terminal->setColorScheme(palette().color(QPalette::Base).lightness() < 128 ? "Linux" : "BlackOnWhite");
+        terminal->setTerminalFont(chatView_->font());
+        terminal->setScrollBarPosition(QTermWidget::ScrollBarRight);
+        auto *keys = new TerminalKeys(terminal);
+        terminal->installEventFilter(keys);
+        for (QWidget *child : terminal->findChildren<QWidget *>()) child->installEventFilter(keys);
+        // A shell that ends, for example with exit, leaves room for a new one.
+        connect(terminal, &QTermWidget::finished, this, [this, directory, terminal] {
+            directoryTerminals_.remove(directory);
+            if (terminals_->currentWidget() == terminal) terminals_->setCurrentWidget(noTerminal_);
+            terminal->deleteLater();
+        });
+        terminals_->addWidget(terminal);
+        directoryTerminals_.insert(directory, terminal);
+        terminal->startShellProgram();
+    }
+    terminals_->setCurrentWidget(terminal ? static_cast<QWidget *>(terminal) : noTerminal_);
+    if (focus && terminal) terminal->setFocus();
+}
+
+// Alt+F12 opens the terminal and focuses it; pressed in the terminal, it goes back to the message field.
+void MainWindow::toggleTerminal()
+{
+    QWidget *terminal = terminals_->currentWidget();
+    if (bottomTabs_->currentIndex() == 1 && terminal && terminal != noTerminal_ && terminal->isAncestorOf(QApplication::focusWidget())) {
+        input_->setFocus();
+        return;
+    }
+    if (bottomTabs_->currentIndex() != 1) bottomTabs_->setCurrentIndex(1);
+    else showTerminal(true);
+}
+
 void MainWindow::showCurrentTab()
 {
+    // The terminal follows the chat's directory while it is shown.
+    if (bottomTabs_ && bottomTabs_->currentIndex() == 1) showTerminal(false);
     QWidget *page = tabs_->currentWidget();
     ChatTab *tab = chatTab(page);
     input_->setHistory(tab ? tab->userMessages() : QStringList());

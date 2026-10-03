@@ -29,6 +29,9 @@ class MruTabWidget;
 class QCheckBox;
 class QComboBox;
 class QFileSystemWatcher;
+class QTermWidget;
+class QStackedWidget;
+class QTabWidget;
 class QLabel;
 class QLineEdit;
 class QPlainTextEdit;
@@ -148,6 +151,15 @@ private:
     // Which request the panel shows; rebuilding it would drop the options the user ticked.
     QString requestPanelState_;
     QPlainTextEdit *log_;
+    // Below the chat, as in CLion: the log and a terminal in the current chat's directory, one terminal per
+    // directory, kept while agentin runs.
+    QTabWidget *bottomTabs_ = nullptr;
+    QStackedWidget *terminals_ = nullptr;
+    QWidget *noTerminal_ = nullptr;
+    QHash<QString, QPointer<QTermWidget>> directoryTerminals_;
+    QAction *terminalAction_ = nullptr;
+    void showTerminal(bool focus);
+    void toggleTerminal();
     QPlainTextEdit *reasoning_;
     QComboBox *modelInput_;
     QComboBox *effortInput_;

@@ -16,6 +16,8 @@ find_package(qt-extra 2.1 REQUIRED)
 # libgit2 reads the Git baseline of the files a turn changes.
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(LIBGIT2 REQUIRED IMPORTED_TARGET libgit2)
+# The terminal below the chat; qtermwidget is GPL-2.0-or-later, which is why agentin is under the GPL (3.0 only).
+find_package(qtermwidget6 REQUIRED)
 configure_file(claude/bridge.py ${CMAKE_CURRENT_BINARY_DIR}/claude_bridge.py COPYONLY)
 
 # backward-cpp writes a stack trace after a crash; it declares compatibility with older CMake releases.
@@ -85,7 +87,7 @@ add_executable(agentin
     src/FileOpener.cpp
     src/FileOpener.h
 )
-target_link_libraries(agentin PRIVATE Qt6::Widgets qt-extra Backward::Object diffcore::diffcore PkgConfig::LIBGIT2)
+target_link_libraries(agentin PRIVATE Qt6::Widgets qt-extra Backward::Object diffcore::diffcore PkgConfig::LIBGIT2 qtermwidget6)
 # The window icon; Qt draws it with its SVG image format plugin.
 qt_add_resources(agentin icons PREFIX "/" FILES icons/agentin.svg)
 target_include_directories(agentin PRIVATE src)
@@ -162,7 +164,7 @@ if(BUILD_TESTING)
         src/FileOpener.cpp
         src/FileOpener.h
     )
-    target_link_libraries(agentin_test PRIVATE Qt6::Widgets Qt6::Test qt-extra diffcore::diffcore PkgConfig::LIBGIT2)
+    target_link_libraries(agentin_test PRIVATE Qt6::Widgets Qt6::Test qt-extra diffcore::diffcore PkgConfig::LIBGIT2 qtermwidget6)
     target_include_directories(agentin_test PRIVATE src)
     add_test(NAME agentin_test COMMAND agentin_test)
     set_tests_properties(agentin_test PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
