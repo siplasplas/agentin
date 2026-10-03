@@ -47,6 +47,18 @@ struct CommandContext
     int timeoutSeconds = 0;
 };
 
+// What the user may choose for one command that asks: running it once, trusting it for the chat, or adding a
+// rule. trust and pattern are empty when that choice is not offered.
+struct ApprovalChoice
+{
+    QString command;
+    QString reason;
+    // The prefix a chat trusts, matched as "<trust> *".
+    QString trust;
+    // The line Always adds to agentin's rules, which the user may edit.
+    QString pattern;
+};
+
 // One command of a line that asks or is declined.
 struct CommandFinding
 {
@@ -59,6 +71,9 @@ struct CommandFinding
     QString rule;
     // Whether the rule may be kept for good; installing asks each session at least.
     bool lasting = true;
+    // Whether the rule allows the command only as it is, without further arguments: for a command that takes
+    // its arguments from xargs, which no rule can name. Such a command cannot be trusted for the chat.
+    bool exact = false;
 };
 
 struct CommandVerdict
@@ -74,6 +89,11 @@ struct CommandVerdict
     // The prefixes a chat can trust for its session, or nothing when some command of the line cannot be
     // trusted, as trusting the others would not let the line run.
     QStringList sessionRules() const;
+    // What can be chosen for each command that asks, one per command.
+    QList<ApprovalChoice> choices() const;
+    // One line per finding for the approval panel, with long commands shortened, as the panel shows the
+    // whole command line above them.
+    QString explanation() const;
 };
 
 // The rules of a first start: git add, git commit with -m and git's read-only status, log, diff and show as

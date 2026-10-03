@@ -114,7 +114,7 @@ const Entry kEntries[] = {
     // The mode of chmod counts as a file of its directory, which costs nothing and never misses a file.
     {"tee chmod", Effect::Write, Operands::Write, "", "", ""},
     {"rm rmdir unlink", Effect::Remove, Operands::Write, "", "", ""},
-    {"curl wget ssh scp sftp rsync gh glab hub", Effect::Network, Operands::Text, "", "", ""},
+    {"ssh scp sftp rsync gh glab hub", Effect::Network, Operands::Text, "", "", ""},
 };
 
 Classification classifyEntry(const Entry &entry, const QList<Argument> &arguments)
@@ -884,6 +884,134 @@ Classification classifyMake(const QString &program, const QList<Argument> &argum
     return result;
 }
 
+// The options of a program that fetches: those followed by a value, and among them those that name a file it
+// writes or reads. Options not listed here cannot be judged, as some of them name files.
+struct FetchOptions
+{
+    QString valueLetters;
+    QStringList plain;
+    QStringList valued;
+    QStringList writes;
+    QStringList reads;
+    QStringList blocked;
+};
+
+// curl and wget: where they write and what they read, as their options say, and the addresses they fetch.
+Classification classifyFetch(const QString &program, const QList<Argument> &arguments)
+{
+    const bool curl = program == "curl";
+    static const FetchOptions curlOptions{
+        "AbcCdDeEFHKmoPQrTtuUwxXyYz",
+        split("-s -S -L -f -k -v -i -I -G -N -n -l -q -j -J -R -O -Z -0 -1 -2 -3 -4 -6 -# --silent --show-error --location "
+              "--location-trusted --fail --fail-with-body --fail-early --insecure --verbose --include --head --get --compressed "
+              "--globoff --create-dirs --remote-time --remote-name --remote-name-all --remote-header-name --raw --no-buffer "
+              "--no-progress-meter --progress-bar --http1.0 --http1.1 --http2 --http2-prior-knowledge --http3 --ipv4 --ipv6 "
+              "--netrc --netrc-optional --no-keepalive --tcp-nodelay --path-as-is --ssl-reqd --tlsv1.2 --tlsv1.3 --styled-output "
+              "--no-styled-output --parallel --list-only --append --disable-eprt --disable-epsv --digest --basic --ntlm "
+              "--negotiate --anyauth --junk-session-cookies"),
+        split("-A -C -e -H -m -P -Q -r -t -u -U -x -X -y -Y -z --user-agent --continue-at --referer --header --max-time "
+              "--connect-timeout --retry --retry-delay --retry-max-time --max-redirs --range --request --user --proxy --proxy-user "
+              "--limit-rate --speed-limit --speed-time --resolve --connect-to --url --max-filesize --interface --dns-servers "
+              "--parallel-max --expect100-timeout --keepalive-time --time-cond --data-raw --oauth2-bearer --json"),
+        split("-o -D -c --output --dump-header --cookie-jar --trace --trace-ascii --stderr --libcurl --etag-save --hsts --alt-svc"),
+        split("-T --upload-file --cacert --cert --key --capath --netrc-file --etag-compare --proxy-cacert"),
+        split("-K --config --output-dir")};
+    static const FetchOptions wgetOptions{
+        "OoaPiDUTtwQBlARIXe",
+        split("-q -v -nv -c -N -r -p -k -K -S -x -nd -nH -np -E -H -L -F -4 -6 --quiet --verbose --no-verbose --continue "
+              "--timestamping --recursive --page-requisites --convert-links --backup-converted --server-response "
+              "--force-directories --no-directories --no-host-directories --no-parent --adjust-extension --span-hosts "
+              "--relative --spider --no-check-certificate --content-disposition --no-clobber --inet4-only --inet6-only "
+              "--show-progress --no-cookies --trust-server-names --ignore-case --mirror -m --https-only --no-cache"),
+        split("-D -U -T -t -w -Q -B -l -A -R -I -X --domains --user-agent --timeout --tries --wait --quota --base --level "
+              "--accept --reject --include-directories --exclude-directories --header --method --max-redirect --limit-rate "
+              "--user --password --referer --post-data --body-data --dns-timeout --connect-timeout --read-timeout "
+              "--waitretry --random-wait"),
+        split("-O -o -a -P --output-document --output-file --append-output --directory-prefix --save-cookies"),
+        split("-i --input-file --post-file --body-file --load-cookies --ca-certificate --certificate --private-key"),
+        split("-e --execute --config")};
+    const FetchOptions &options = curl ? curlOptions : wgetOptions;
+    Classification result;
+    result.effect = Effect::Network;
+    bool stdoutOnly = false;
+    bool remoteName = false;
+    QString directory;
+    const auto value = [&](const QString &option, const Argument &argument) {
+        const QString text = argument.text;
+        if (!argument.known) {
+            if (options.writes.contains(option) || options.reads.contains(option)) notKnown(result, argument);
+            return;
+        }
+        if (options.writes.contains(option)) {
+            if (text == "-") stdoutOnly = stdoutOnly || option == "-O" || option == "--output-document";
+            else if (option == "-P" || option == "--directory-prefix") directory = text;
+            else result.writes.append(text);
+        } else if (options.reads.contains(option)) {
+            result.reads.append(text);
+        } else if (curl && QStringList{"-d", "--data", "--data-binary", "--data-urlencode", "-F", "--form", "-w", "--write-out",
+                                       "-b", "--cookie"}.contains(option)) {
+            // Data and forms read a file named after @ or <, a format after @, and cookies from a file without =.
+            const qsizetype at = text.indexOf(QRegularExpression("[@<]"));
+            if ((option == "-b" || option == "--cookie") && !text.contains('=')) result.reads.append(text);
+            else if (at >= 0 && (at == 0 || option != "-w")) result.reads.append(text.mid(at + 1).section(';', 0, 0));
+        } else if (option == "--url") {
+            result.urls.append(text);
+        }
+    };
+    const QStringList curlData{"-d", "--data", "--data-binary", "--data-urlencode", "-F", "--form", "-w", "--write-out", "-b", "--cookie"};
+    for (int i = 0; i < arguments.size(); ++i) {
+        const Argument &argument = arguments.at(i);
+        const QString &text = argument.text;
+        if (!argument.known) {
+            notKnown(result, argument);
+            continue;
+        }
+        if (text == "-" || !text.startsWith('-')) {
+            result.urls.append(text);
+            continue;
+        }
+        if (text.startsWith("--")) {
+            const QString name = longName(text);
+            const bool attached = text.contains('=');
+            if (options.blocked.contains(name)) {
+                block(result, "the option " + name + " cannot be judged");
+            } else if (options.plain.contains(name)) {
+                if (name == "--remote-name" || name == "--remote-name-all") remoteName = true;
+                if (name == "--netrc" || name == "--netrc-optional") result.homeReads.append(".netrc");
+            } else if (options.valued.contains(name) || options.writes.contains(name) || options.reads.contains(name)
+                       || (curl && curlData.contains(name))) {
+                if (attached) value(name, {text.section('=', 1), true});
+                else if (i + 1 < arguments.size()) value(name, arguments.at(++i));
+            } else {
+                block(result, "the option " + name + " cannot be judged");
+            }
+            continue;
+        }
+        if (!curl && options.plain.contains(text)) continue;
+        // Short options written together; one that takes a value ends the group.
+        for (int j = 1; j < text.size(); ++j) {
+            const QString option = QString('-') + text.at(j);
+            if (options.valueLetters.contains(text.at(j))) {
+                if (options.blocked.contains(option)) block(result, "the option " + option + " cannot be judged");
+                else if (j + 1 < text.size()) value(option, {text.mid(j + 1), true});
+                else if (i + 1 < arguments.size()) value(option, arguments.at(++i));
+                break;
+            }
+            if (!options.plain.contains(option)) {
+                block(result, "the option " + option + " cannot be judged");
+                break;
+            }
+            if (option == "-O") remoteName = true;
+            if (option == "-n") result.homeReads.append(".netrc");
+        }
+    }
+    // curl -O and wget without -O save under the name of the address, in the current or chosen directory.
+    if ((curl && remoteName) || (!curl && !stdoutOnly && result.writes.isEmpty()))
+        result.writes.append(directory.isEmpty() ? QString(".") : directory);
+    if (!curl && !directory.isEmpty() && !result.writes.contains(directory)) result.writes.append(directory);
+    return result;
+}
+
 // set with the options that only change how the shell reports and stops.
 Classification classifySet(const QList<Argument> &arguments)
 {
@@ -937,6 +1065,7 @@ const QHash<QString, Classifier> &classifiers()
         add("ctest", plain(classifyCTest));
         add("make gmake ninja", classifyMake);
         add("set", plain(classifySet));
+        add("curl wget", classifyFetch);
         return entries;
     }();
     return table;

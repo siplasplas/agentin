@@ -845,7 +845,10 @@ for line in sys.stdin:
     // Always adds agentin's line, which the tab may let the user edit; Codex gets no rule of its own.
     QVERIFY(approvals.last().at(4).toString().isEmpty());
     QCOMPARE(approvals.last().at(5).toString(), QString("git fetch"));
-    QCOMPARE(approvals.last().at(6).toStringList(), QStringList{"git fetch *"});
+    const auto choices = qvariant_cast<QList<ApprovalChoice>>(approvals.last().at(6));
+    QCOMPARE(choices.size(), 1);
+    QCOMPARE(choices.first().trust, QString("git fetch"));
+    QCOMPARE(choices.first().pattern, QString("git fetch *"));
     chat.answerApproval(approvals.last().first().toInt(), ApprovalDecision::AcceptForSession);
     QTRY_COMPARE(responses().value(101), QString("accept"));
     QCOMPARE(chat.trustedSessionCommands(), QStringList{"git fetch"});
@@ -858,7 +861,7 @@ for line in sys.stdin:
                              QJsonObject{{"command", "git fetch origin\n"}, {"cwd", directory.path()}, {"kind", "writeStdin"}});
     QCOMPARE(approvals.size(), 2);
     QVERIFY(approvals.last().at(5).toString().isEmpty());
-    QVERIFY(approvals.last().at(6).toStringList().isEmpty());
+    QVERIFY(qvariant_cast<QList<ApprovalChoice>>(approvals.last().at(6)).isEmpty());
     chat.answerApproval(approvals.last().first().toInt(), ApprovalDecision::Decline);
     QTRY_COMPARE(responses().value(109), QString("decline"));
     approvals.removeLast();

@@ -55,6 +55,7 @@ public:
     void cancelHistory() override;
     void answerApproval(int id, ApprovalDecision decision) override;
     QStringList trustedSessionCommands() const override;
+    void trustSessionCommands(const QStringList &rules) override;
     bool removeTrustedSessionCommand(const QString &rule) override;
     void answerQuestions(int id, const QHash<QString, QStringList> &answers) override;
 

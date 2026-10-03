@@ -18,6 +18,7 @@
 #include <QButtonGroup>
 #include <QCloseEvent>
 #include <QComboBox>
+#include <QGridLayout>
 #include <QGuiApplication>
 #include <QClipboard>
 #include <QFrame>
@@ -2160,39 +2161,70 @@ void MainWindow::showApprovalsDialog()
     saveApprovals();
 }
 
-// The lines that Always adds to agentin's rules, as the user edits them; false when the user cancels.
-bool MainWindow::editAlwaysPatterns(QStringList &patterns)
+// What to keep for each command of an approval: once, trusted for the chat, or a line of agentin's rules that
+// the user may edit. On return a choice keeps only what was chosen; false when the user cancels.
+bool MainWindow::chooseApprovals(QList<ApprovalChoice> &choices, bool always)
 {
     QDialog dialog(this);
-    dialog.setObjectName("alwaysPatternsDialog");
-    dialog.setWindowTitle("Always allow");
-    dialog.resize(640, 320);
+    dialog.setObjectName("approvalChoicesDialog");
+    dialog.setWindowTitle("Allow and remember");
+    dialog.resize(760, 140 + 70 * int(choices.size()));
     auto *layout = new QVBoxLayout(&dialog);
-    auto *intro = new QLabel("These lines are added to agentin's rules as Allow, one per line. Edit them to allow more or "
-                             "less: * matches any text and ? one character, a trailing \" *\" also matches the command "
-                             "alone, <int> matches digits, <path> any one argument and <writable> a path inside the "
-                             "chat's writable directories. The command runs once whatever you keep.", &dialog);
+    auto *intro = new QLabel("The whole command line runs now. Choose for each command what agentin remembers: nothing "
+                             "(once), trust for this chat until its conversation changes, or a line of agentin's rules "
+                             "(always), which you can edit first. In a line * matches any text and ? one character, a "
+                             "trailing \" *\" also matches the command alone, <int> matches digits, <path> any one "
+                             "argument and <writable> a path inside the chat's writable directories.", &dialog);
     intro->setWordWrap(true);
     layout->addWidget(intro);
-    auto *lines = new QPlainTextEdit(&dialog);
-    lines->setObjectName("alwaysPatterns");
-    lines->setPlainText(patterns.join('\n'));
-    layout->addWidget(lines, 1);
+    auto *grid = new QGridLayout;
+    grid->setColumnStretch(1, 1);
+    layout->addLayout(grid);
+    QList<QComboBox *> combos;
+    QList<QLineEdit *> lines;
+    for (int i = 0; i < choices.size(); ++i) {
+        const ApprovalChoice &choice = choices.at(i);
+        QString command = choice.command.simplified();
+        if (command.size() > 90) command = command.left(87) + "…";
+        auto *label = new QLabel(command + "\n" + choice.reason, &dialog);
+        label->setWordWrap(true);
+        label->setToolTip(choice.command);
+        auto *combo = new QComboBox(&dialog);
+        combo->setObjectName(QString("approvalChoice%1").arg(i));
+        combo->addItem("Once", 0);
+        if (!choice.trust.isEmpty()) combo->addItem("For this chat", 1);
+        if (!choice.pattern.isEmpty()) combo->addItem("Always", 2);
+        combo->setToolTip(choice.trust.isEmpty() ? QString() : "For this chat: " + choice.trust + " *");
+        auto *line = new QLineEdit(choice.pattern, &dialog);
+        line->setObjectName(QString("approvalPattern%1").arg(i));
+        line->setVisible(!choice.pattern.isEmpty());
+        // The button that opened the dialog chooses the start: Always or For this chat where offered, else Once.
+        combo->setCurrentIndex(qMax(0, combo->findData(always ? 2 : 1)));
+        const auto update = [combo, line] { line->setEnabled(combo->currentData().toInt() == 2); };
+        connect(combo, &QComboBox::currentIndexChanged, &dialog, update);
+        update();
+        grid->addWidget(label, 2 * i, 0, 1, 2);
+        grid->addWidget(combo, 2 * i + 1, 0);
+        grid->addWidget(line, 2 * i + 1, 1);
+        combos.append(combo);
+        lines.append(line);
+    }
+    layout->addStretch(1);
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
-    buttons->button(QDialogButtonBox::Ok)->setText("Allow and add");
+    buttons->button(QDialogButtonBox::Ok)->setText("Allow");
     layout->addWidget(buttons);
     connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
     connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
     if (dialog.exec() != QDialog::Accepted) return false;
-    patterns.clear();
-    for (const QString &line : lines->toPlainText().split('\n')) {
-        const QString pattern = line.simplified();
-        if (pattern.isEmpty() || patterns.contains(pattern)) continue;
-        if (!fixedDenial(pattern).isEmpty()) {
-            appendLine("[Not allowed: \"" + pattern + "\"; " + fixedDenial(pattern) + "]");
-            continue;
+    for (int i = 0; i < choices.size(); ++i) {
+        ApprovalChoice &choice = choices[i];
+        const int chosen = combos.at(i)->currentData().toInt();
+        if (chosen != 1) choice.trust.clear();
+        choice.pattern = chosen == 2 ? lines.at(i)->text().simplified() : QString();
+        if (!choice.pattern.isEmpty() && !fixedDenial(choice.pattern).isEmpty()) {
+            appendLine("[Not allowed: \"" + choice.pattern + "\"; " + fixedDenial(choice.pattern) + "]");
+            choice.pattern.clear();
         }
-        patterns.append(pattern);
     }
     return true;
 }
@@ -3008,8 +3040,10 @@ void MainWindow::updateRequestPanel()
         title->setText("<b>" + request->title.toHtmlEscaped() + "</b>" + waiting.toHtmlEscaped());
         QString description = request->alwaysRule.isEmpty()
             ? request->description : request->description + "\n\nAlways allow: " + request->alwaysRule;
-        if (!request->alwaysPatterns.isEmpty())
-            description += "\n\nAlways allow adds to agentin's rules: " + request->alwaysPatterns.join(", ");
+        QStringList offered;
+        for (const ApprovalChoice &choice : request->choices)
+            if (!choice.pattern.isEmpty()) offered.append(choice.pattern);
+        if (!offered.isEmpty()) description += "\n\nAlways allow… offers these lines for agentin's rules:\n  " + offered.join("\n  ");
         // A long command, such as a whole script, scrolls in a field of limited height, so that the buttons below
         // always stay on the screen.
         layout->removeWidget(text);
@@ -3018,6 +3052,8 @@ void MainWindow::updateRequestPanel()
         details->setObjectName("approvalDetails");
         details->setReadOnly(true);
         details->setLineWrapMode(QPlainTextEdit::WidgetWidth);
+        // Commands and URLs without spaces wrap too, so that the panel never widens the window.
+        details->setWordWrapMode(QTextOption::WrapAtWordBoundaryOrAnywhere);
         details->setPlainText(description);
         const int line = details->fontMetrics().lineSpacing();
         const int maximum = qMax(6 * line, height() * 35 / 100);
@@ -3057,24 +3093,35 @@ void MainWindow::updateRequestPanel()
             connect(button, &QPushButton::clicked, this, [tab, decision] { tab->answerApproval(decision); });
         };
         addButton("Allow once", ApprovalDecision::Accept, "Allow only this action");
-        if (request->canAcceptForSession)
-            addButton(request->sessionRule.isEmpty() ? "Allow for this session"
-                      : "Trust " + request->sessionRule + " for this chat", ApprovalDecision::AcceptForSession,
-                      request->sessionRule.isEmpty() ? "Also allow the same kind of action for the rest of this session"
-                      : "Run " + request->sessionRule + " with any arguments without asking until this chat's conversation "
-                        "changes; remove it in Settings → Approvals… → Chat trust");
-        if (!request->alwaysPatterns.isEmpty()) {
-            // The lines can be edited first, for example to widen "gh run list *" or narrow "npm *".
-            auto *always = new QPushButton("Always allow…", requestPanel_);
-            always->setToolTip("Edit and add to agentin's rules: " + request->alwaysPatterns.join(", "));
-            buttons->addWidget(always);
-            connect(always, &QPushButton::clicked, this, [this, tab, patterns = request->alwaysPatterns] {
-                QStringList edited = patterns;
-                if (editAlwaysPatterns(edited)) tab->answerApproval(ApprovalDecision::AcceptAlways, edited);
+        // For commands that agentin's rules ask about, the choices open a dialog with a choice per command;
+        // a single short command can be trusted at once.
+        const auto choose = [this, tab, buttons, choices = request->choices](const QString &label, const QString &tip, bool always) {
+            auto *button = new QPushButton(label, requestPanel_);
+            button->setToolTip(tip);
+            buttons->addWidget(button);
+            connect(button, &QPushButton::clicked, this, [this, tab, choices, always] {
+                QList<ApprovalChoice> chosen = choices;
+                if (chooseApprovals(chosen, always)) tab->answerApproval(ApprovalDecision::Accept, chosen);
             });
-        } else if (!request->alwaysRule.isEmpty()) {
-            addButton("Always allow", ApprovalDecision::AcceptAlways, request->alwaysRule);
+        };
+        const bool trustable = std::any_of(request->choices.cbegin(), request->choices.cend(),
+                                           [](const ApprovalChoice &choice) { return !choice.trust.isEmpty(); });
+        const bool lasting = std::any_of(request->choices.cbegin(), request->choices.cend(),
+                                         [](const ApprovalChoice &choice) { return !choice.pattern.isEmpty(); });
+        if (!request->choices.isEmpty()) {
+            if (request->choices.size() == 1 && trustable && request->choices.first().trust.size() <= 40)
+                addButton("Trust " + request->choices.first().trust + " for this chat", ApprovalDecision::AcceptForSession,
+                          "Run it with any further arguments without asking until this chat's conversation changes; "
+                          "remove it in Settings → Approvals… → Chat trust");
+            else if (trustable)
+                choose("Trust for this chat…", "Choose the commands this chat may run without asking until its conversation changes", false);
+            if (lasting) choose("Always allow…", "Choose and edit the lines added to agentin's rules", true);
+        } else if (request->canAcceptForSession) {
+            addButton(request->sessionRule.isEmpty() ? "Allow for this session" : "Trust " + request->sessionRule + " for this chat",
+                      ApprovalDecision::AcceptForSession, "Also allow the same kind of action for the rest of this session");
         }
+        if (request->choices.isEmpty() && !request->alwaysRule.isEmpty())
+            addButton("Always allow", ApprovalDecision::AcceptAlways, request->alwaysRule);
         addButton("Decline", ApprovalDecision::Decline, "The agent continues without this action");
         addButton("Decline and stop", ApprovalDecision::Cancel, "Decline and end the agent's turn");
         buttons->addStretch(1);

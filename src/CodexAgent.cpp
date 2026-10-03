@@ -418,6 +418,13 @@ QStringList CodexAgent::trustedSessionCommands() const
     return rules;
 }
 
+void CodexAgent::trustSessionCommands(const QStringList &rules)
+{
+    for (const QString &rule : rules) trustedSessionCommands_.insert(rule);
+    trustedConversationId_ = threadId_;
+    emit message("[Trusted for this chat: " + rules.join(", ") + "]");
+}
+
 bool CodexAgent::removeTrustedSessionCommand(const QString &rule)
 {
     if (!trustedSessionCommands_.remove(rule)) return false;
@@ -827,8 +834,7 @@ void CodexAgent::handleServerRequest(const QString &method, const QJsonValue &id
             } else {
                 description += "\n" + params.value("command").toString();
                 description += "\nDirectory: " + params.value("cwd").toString();
-                for (const CommandFinding &finding : verdict.findings)
-                    description += "\nAsks because of " + finding.command + ": " + finding.reason;
+                if (!verdict.findings.isEmpty()) description += "\n\n" + verdict.explanation();
             }
         } else {
             QStringList files;
@@ -866,7 +872,7 @@ void CodexAgent::handleServerRequest(const QString &method, const QJsonValue &id
             alwaysRule = "Allow commands starting with \"" + words.join(' ') + "\" without asking";
         }
         emit approvalRequested(requestId, "Approve Codex action", description.trimmed(), true, alwaysRule, sessionRule,
-                               network || input ? QStringList() : verdict.alwaysPatterns());
+                               network || input ? QList<ApprovalChoice>() : verdict.choices());
     } else if (method == "item/permissions/requestApproval") {
         const QJsonObject permissions = params.value("permissions").toObject();
         QStringList lines{params.value("reason").toString()};

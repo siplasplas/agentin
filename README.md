@@ -807,21 +807,45 @@ parsed or followed (a `case`, a function, a command run in the background with
 ask, as the files come from the input and one of them could be a secret.
 
 A line is allowed only when every command of it is. When it asks, agentin names
-the commands that need the question and why; agreeing runs the whole line.
-**Always allow…** opens the lines it would add to agentin's rules, one per named
-command, to edit before they are saved: `git fetch *` for a Git command,
-`git tag -f *` for one that can lose work, the program with the words that name
-what it does for a command agentin does not know or that uses the network
-(`gh run list *`, `npm test *`), and the command itself otherwise, with numbers
-as `<int>` (`cmake --build /opt/x -j<int> *`). A line that names the whole command
-also covers what asked about it, such as the secret file it reads or the
-protected path it writes; a broader line does not. **Trust … for this chat**
-allows the same commands until the conversation changes, without saving
-anything. A redirection outside the writable directories or into a protected
-path and a variable of the list can only be allowed once.
-Installing, such as `make install`, writes to a place the command does not
-name, so it is not offered a lasting line: allow it once, or trust it for the
-chat.
+the commands that need the question and why, and the panel offers:
+
+- **Allow once** runs the whole line now and remembers nothing; the next such
+  command asks again.
+- **Trust … for this chat** runs the line and lets this chat run the same
+  commands, with any further arguments, without asking until its conversation
+  changes or agentin exits. Nothing is saved, and **Settings → Approvals… → Chat
+  trust** lists it and can withdraw it. For a single short command the button
+  trusts it at once; otherwise **Trust for this chat…** opens a list with a
+  choice per command.
+- **Always allow…** runs the line and adds Allow lines to agentin's rules, so
+  that the commands never ask again. It opens the same list, where each command
+  can be kept once, trusted for the chat, or added as a line, which can be
+  edited first.
+- **Decline** runs nothing of the line; the agent is told that agentin declined
+  it and usually tries another way or asks you. **Decline and stop** also ends
+  its turn.
+
+What is trusted or added depends on why the command asked. A Git command gets
+its subcommand (`git fetch *`, `git fetch` for the chat), one that can lose work
+the words up to the risky option (`git tag -f *`). A command that agentin does
+not know or that uses the network gets the program with the words that name what
+it does (`gh run list *`, `npm test *`). `curl` and `wget` get the server they
+fetch from, `curl *https://invent.kde.org/* *`: such a line allows any options
+and paths on that server, but asks when the command also talks to another
+address, writes outside the writable directories (with `-o` or `-O`), or sends a
+secret file (`-d @~/.ssh/id_rsa`). Any other command gets itself, with numbers
+as `<int>` (`cmake --build /opt/x -j<int> *`, `rm -rf /tmp/qce-nodl *`); edit
+such a line to widen it, for example to `rm -rf /tmp/qce-* *`. A command that
+takes its files from `xargs` gets a line without the trailing ` *`, as in `rm`
+for `ls | xargs rm`, which allows it only as it is, and cannot be trusted for
+the chat. A line that names the whole command also covers what asked about it,
+such as the secret file it reads or the protected path it writes; a broader line
+does not. Some commands offer nothing to remember and can only be allowed once:
+one whose argument has a value not known in advance (`curl "$U"` after
+`U=$(…)`), a redirection outside the writable directories or into a protected
+path, a variable of the list, a line too long to run within the time limit, and
+installing, such as `make install`, which writes to a place the command does not
+name (it can still be trusted for the chat).
 
 Read-only chats are never allowed by the list, but its Deny lines apply. The
 log notes each command allowed or declined this way.

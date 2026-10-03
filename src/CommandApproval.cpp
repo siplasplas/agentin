@@ -216,8 +216,9 @@ namespace {
 // "rm -rf build *", allowed with Always, passes while "rm *" still asks about other removals.
 int specificity(const QString &pattern)
 {
+    // A pattern without wildcards beats one that adds " *" to the same text.
     const qsizetype first = firstWildcard(pattern.simplified());
-    return int(first < 0 ? pattern.simplified().size() + 1 : first);
+    return int(first < 0 ? pattern.simplified().size() + 2 : first);
 }
 
 using Writable = std::function<bool(const QString &)>;
@@ -436,10 +437,47 @@ QString ruleText(const QStringList &words)
     return parts.join(' ');
 }
 
+// The scheme and host an address starts with, such as "https://example.com/", or an empty string; an address
+// without a scheme is taken as http, as curl does.
+QString urlBase(const QString &url)
+{
+    static const QRegularExpression base("^([A-Za-z][A-Za-z0-9+.-]*://[^/?#\\s]+)");
+    const QRegularExpressionMatch match = base.match(url.contains("://") ? url : "http://" + url);
+    return match.hasMatch() ? match.captured(1).toLower() + '/' : QString();
+}
+
+// The address part of a rule, such as "https://example.com/" in "curl *https://example.com/*", or an empty string.
+QString ruleUrl(const QString &pattern)
+{
+    static const QRegularExpression address("[A-Za-z][A-Za-z0-9+.-]*://[^*?\\[ ]*");
+    const QRegularExpressionMatch match = address.match(pattern);
+    return match.hasMatch() ? match.captured(0).toLower() : QString();
+}
+
+// The addresses a rule for a fetching command does not cover: all of them must start with the address the
+// rule names, so that one address it allows does not let the command send to another.
+QStringList urlsOutside(const QString &pattern, const QStringList &urls)
+{
+    const QString allowed = ruleUrl(pattern);
+    QStringList outside;
+    if (allowed.isEmpty()) return outside;
+    for (const QString &url : urls) {
+        const QString full = (url.contains("://") ? url : "http://" + url).toLower();
+        if (!full.startsWith(allowed)) outside.append(url);
+    }
+    return outside;
+}
+
 // The rule for a command that asks only because agentin does not know it or it uses the network: its program
 // with the words that name what it does, such as "gh run list" or "npm test", when there are any.
-QString commandFamily(const QStringList &words)
+QString commandFamily(const QStringList &words, const QStringList &urls = {})
 {
+    // A fetching command is allowed for the one server it talks to.
+    if (!urls.isEmpty()) {
+        const QString base = urlBase(urls.first());
+        const bool same = !base.isEmpty() && std::all_of(urls.cbegin(), urls.cend(), [&base](const QString &url) { return urlBase(url) == base; });
+        if (same) return words.first() + " *" + base + '*';
+    }
     static const QRegularExpression plain("^[A-Za-z][A-Za-z0-9._+-]*$");
     int count = 0;
     while (count < words.size() && plain.match(words.at(count)).hasMatch()) ++count;
@@ -571,6 +609,7 @@ struct Judged
     QString rule;
     bool lasting = true;
     QString allowedBy;
+    bool exact = false;
 };
 
 Judged judge(const CommandUse &use, const CommandContext &context, const QString &home)
@@ -642,7 +681,16 @@ Judged judge(const CommandUse &use, const CommandContext &context, const QString
         reasons.append(git.reason);
         result.rule = git.rule;
     } else if (!allow.isEmpty()) {
-        if (!exact) reasons += problems;
+        if (!exact) {
+            reasons += problems;
+            // A rule for a fetching command names a server, not where the command may write.
+            if (use.effect == Effect::Network) {
+                for (const QString &url : urlsOutside(allow, use.urls)) reasons.append("fetches " + url + ", which " + allow + " does not name");
+                for (const QString &path : use.writes)
+                    if (!use.redirectionWrites.contains(path))
+                        if (const QString reason = outside(path, context.writable, "writes"); !reason.isEmpty()) reasons.append(reason);
+            }
+        }
         result.allowedBy = allow;
     } else {
         const bool plain = reasons.isEmpty() && problems.isEmpty();
@@ -663,13 +711,19 @@ Judged judge(const CommandUse &use, const CommandContext &context, const QString
         // as it is not known or uses the network covers the same kind of work with other arguments.
         if (plain && words.value(0) == "git") result.rule = lastingRulePrefix(words).join(' ');
         else if (plain && places.isEmpty() && (use.effect == Effect::Network || use.effect == Effect::Unknown))
-            result.rule = commandFamily(words);
+            result.rule = commandFamily(words, use.urls);
     }
     if (reasons.isEmpty()) return result;
     reasons.removeDuplicates();
     result.decision = CommandDecision::Ask;
     result.allowedBy.clear();
-    if (!coverable) result.rule.clear();
+    // A value that is not known, such as "$U" from a substitution, cannot be named by a rule: one naming it
+    // as written would allow it whatever it turns out to be.
+    const bool unknownValue = std::any_of(problems.cbegin(), problems.cend(),
+                                          [](const QString &problem) { return problem.contains(" not known"); });
+    if (!coverable || unknownValue) result.rule.clear();
+    // The files xargs adds are not in the command's words, so a rule names the command as it is.
+    result.exact = use.inputArguments;
     // Installing writes to a place the command does not name, so it should be decided each time.
     if (std::any_of(reasons.cbegin(), reasons.cend(), [](const QString &reason) { return reason.contains("outside the project"); })) {
         result.lasting = false;
@@ -713,7 +767,7 @@ QStringList CommandVerdict::alwaysPatterns() const
 {
     QStringList patterns;
     for (const CommandFinding &finding : findings) {
-        const QString pattern = finding.rule + " *";
+        const QString pattern = finding.exact ? finding.rule : finding.rule + " *";
         if (finding.decision == CommandDecision::Ask && finding.lasting && !finding.rule.isEmpty() && fixedDenial(pattern).isEmpty()
             && !patterns.contains(pattern))
             patterns.append(pattern);
@@ -726,10 +780,35 @@ QStringList CommandVerdict::sessionRules() const
     QStringList rules;
     for (const CommandFinding &finding : findings) {
         if (finding.decision != CommandDecision::Ask) continue;
-        if (finding.rule.isEmpty()) return {};
+        if (finding.rule.isEmpty() || finding.exact) return {};
         if (!rules.contains(finding.rule)) rules.append(finding.rule);
     }
     return rules;
+}
+
+QList<ApprovalChoice> CommandVerdict::choices() const
+{
+    QList<ApprovalChoice> result;
+    for (const CommandFinding &finding : findings) {
+        if (finding.decision != CommandDecision::Ask) continue;
+        ApprovalChoice choice{finding.command, finding.reason, {}, {}};
+        if (!finding.rule.isEmpty() && !finding.exact) choice.trust = finding.rule;
+        const QString pattern = finding.exact ? finding.rule : finding.rule + " *";
+        if (!finding.rule.isEmpty() && finding.lasting && fixedDenial(pattern).isEmpty()) choice.pattern = pattern;
+        result.append(choice);
+    }
+    return result;
+}
+
+QString CommandVerdict::explanation() const
+{
+    QStringList lines;
+    for (const CommandFinding &finding : findings) {
+        QString command = finding.command.simplified();
+        if (command.size() > 100) command = command.left(97) + "…";
+        lines.append("Asks because of " + command + ": " + finding.reason);
+    }
+    return lines.join('\n');
 }
 
 CommandVerdict commandRuleVerdict(const QString &command, const CommandContext &context)
@@ -775,7 +854,7 @@ CommandVerdict commandRuleVerdict(const QString &command, const CommandContext &
             if (!judged.allowedBy.isEmpty() && !allowedBy.contains(judged.allowedBy)) allowedBy.append(judged.allowedBy);
             continue;
         }
-        const CommandFinding finding{use.text, CommandDecision::Ask, reasons.join("; "), judged.rule, judged.lasting};
+        const CommandFinding finding{use.text, CommandDecision::Ask, reasons.join("; "), judged.rule, judged.lasting, judged.exact};
         if (std::none_of(verdict.findings.cbegin(), verdict.findings.cend(), [&finding](const CommandFinding &other) {
                 return other.command == finding.command && other.reason == finding.reason; }))
             verdict.findings.append(finding);

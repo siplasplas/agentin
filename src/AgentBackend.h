@@ -1,5 +1,7 @@
 #pragma once
 
+#include "CommandApproval.h"
+
 #include <QHash>
 #include <QJsonObject>
 #include <QList>
@@ -269,6 +271,8 @@ public:
     virtual void resetSessionApprovals() {}
     // Rules managed by the application; revocation takes effect without reconnecting.
     virtual QStringList trustedSessionCommands() const { return {}; }
+    // Trusts command prefixes for the conversation, as chosen for the commands of an approval.
+    virtual void trustSessionCommands(const QStringList &) {}
     virtual bool removeTrustedSessionCommand(const QString &) { return false; }
     // Answers are keyed by AgentQuestion::id; a missing key means the question was not answered.
     // A question with multiSelect may have several values.
@@ -292,11 +296,11 @@ signals:
     void conversationUsage(const TokenUsage &usage);
     // sessionRule identifies an application-managed command family, if available.
     // alwaysRule describes the lasting rule the agent proposes; empty when it proposes none.
-    // alwaysPatterns are the lines that Always adds to agentin's rules, which the user may edit first; the tab
-    // adds them, and the agent only gets the decision.
+    // choices are what agentin's rules let the user choose for each command that asks: trusting it for the chat
+    // or adding a rule. The tab applies them, and the agent only gets the decision.
     void approvalRequested(int id, const QString &title, const QString &description, bool canAcceptForSession,
                            const QString &alwaysRule, const QString &sessionRule = {},
-                           const QStringList &alwaysPatterns = {});
+                           const QList<ApprovalChoice> &choices = {});
     void questionsRequested(int id, const QList<AgentQuestion> &questions, bool blocking = true);
     void requestResolved(int id);
     void conversationOpened(const QString &id, bool resumed);
@@ -312,3 +316,5 @@ signals:
     void historyRefreshStarted();
     void historyRefreshed(const QString &id, const QList<ChatEntry> &entries, bool hasMore);
 };
+
+Q_DECLARE_METATYPE(ApprovalChoice)

@@ -50,6 +50,10 @@ struct Classification
     QStringList reads;
     QStringList writes;
     QStringList executes;
+    // The addresses a command that fetches, such as curl or wget, talks to.
+    QStringList urls;
+    // Files in the home directory that the command reads by itself, such as curl's .netrc.
+    QStringList homeReads;
     // Why the command cannot be judged in full, such as an argument whose value is not known where a path
     // or an option could stand. A command with problems must not run without a question.
     QStringList problems;

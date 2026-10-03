@@ -35,6 +35,8 @@ struct CommandUse
     QStringList reads;
     QStringList writes;
     QStringList executes;
+    // The addresses a command that fetches, such as curl or wget, talks to.
+    QStringList urls;
     // The variables set for the command or earlier in the line, which may change what it does.
     QStringList environment;
     // Whether xargs adds arguments from its input, which the evaluation does not see. It is a problem as

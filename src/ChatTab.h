@@ -25,7 +25,7 @@ struct PendingRequest
     bool canAcceptForSession = false;
     QString alwaysRule;
     QString sessionRule;
-    QStringList alwaysPatterns;
+    QList<ApprovalChoice> choices;
     QList<AgentQuestion> questions;
     // The question shown now; earlier ones are answered.
     qsizetype current = 0;
@@ -107,8 +107,9 @@ public:
     // Approvals and questions are answered in the tab, one request at a time.
     const PendingRequest *pendingRequest() const { return requests_.isEmpty() ? nullptr : &requests_.first(); }
     qsizetype pendingRequestCount() const { return requests_.size(); }
-    // With Always, patterns replaces the request's alwaysPatterns, as the user edited them.
-    void answerApproval(ApprovalDecision decision, const std::optional<QStringList> &patterns = std::nullopt);
+    // Allows the request and applies what the user chose for each command: an empty trust or pattern is not
+    // taken. With AcceptAlways and no choices, the request's own choices are added as rules.
+    void answerApproval(ApprovalDecision decision, const std::optional<QList<ApprovalChoice>> &chosen = std::nullopt);
     // Approvals given "for this session" in this chat, as the user reads them.
     QStringList sessionApprovals() const { return sessionApprovals_; }
     void resetSessionApprovals();

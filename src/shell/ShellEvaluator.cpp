@@ -942,8 +942,13 @@ private:
         use.subcommand = classification.subcommand;
         for (const QString &problem : classification.problems) appendUnique(use.problems, problem);
         for (const QString &path : classification.reads) addPath(use.reads, path, use);
+        for (const QString &file : classification.homeReads) {
+            if (scope.home().startsWith('/')) addPath(use.reads, scope.home() + '/' + file, use);
+            else appendUnique(use.problems, "the home directory is not known");
+        }
         for (const QString &path : classification.writes) addPath(use.writes, path, use);
         for (const QString &path : classification.executes) addPath(use.executes, path, use);
+        use.urls = classification.urls;
     }
 };
 

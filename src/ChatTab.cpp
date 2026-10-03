@@ -465,7 +465,7 @@ void ChatTab::setAgent(AgentBackend *agent)
     });
     connect(agent, &AgentBackend::approvalRequested, this,
             [this](int id, const QString &title, const QString &description, bool canAcceptForSession,
-                   const QString &alwaysRule, const QString &sessionRule, const QStringList &alwaysPatterns) {
+                   const QString &alwaysRule, const QString &sessionRule, const QList<ApprovalChoice> &choices) {
         PendingRequest request;
         request.id = id;
         request.approval = true;
@@ -474,7 +474,7 @@ void ChatTab::setAgent(AgentBackend *agent)
         request.canAcceptForSession = canAcceptForSession;
         request.alwaysRule = alwaysRule;
         request.sessionRule = sessionRule;
-        request.alwaysPatterns = alwaysPatterns;
+        request.choices = choices;
         requests_.append(request);
         emit requestsChanged();
     });
@@ -742,14 +742,26 @@ void ChatTab::showHistory(const QList<ChatEntry> &entries, bool hasMore, const Q
     emit textAppended();
 }
 
-void ChatTab::answerApproval(ApprovalDecision decision, const std::optional<QStringList> &patterns)
+void ChatTab::answerApproval(ApprovalDecision decision, const std::optional<QList<ApprovalChoice>> &chosen)
 {
     if (requests_.isEmpty() || !requests_.first().approval) return;
     const PendingRequest request = requests_.takeFirst();
-    // agentin's rules decide before the agents' own, so Always adds its lines there.
-    if (decision == ApprovalDecision::AcceptAlways)
-        for (const QString &pattern : patterns.value_or(request.alwaysPatterns))
-            if (addAllowRule(pattern.simplified())) emit logMessage("[Added to agentin's rules: allow " + pattern.simplified() + "]");
+    // agentin's rules decide before the agents' own, so the lines go there; trust goes to the chat's agent.
+    if (chosen || (decision == ApprovalDecision::AcceptAlways && !request.choices.isEmpty())) {
+        QStringList trust;
+        for (const ApprovalChoice &choice : chosen.value_or(request.choices)) {
+            if (!chosen) {
+                if (addAllowRule(choice.pattern.simplified()))
+                    emit logMessage("[Added to agentin's rules: allow " + choice.pattern.simplified() + "]");
+                continue;
+            }
+            if (!choice.trust.isEmpty()) trust.append(choice.trust);
+            if (!choice.pattern.trimmed().isEmpty() && addAllowRule(choice.pattern.simplified()))
+                emit logMessage("[Added to agentin's rules: allow " + choice.pattern.simplified() + "]");
+        }
+        if (!trust.isEmpty()) agent_->trustSessionCommands(trust);
+        if (chosen) decision = ApprovalDecision::Accept;
+    }
     if (decision == ApprovalDecision::AcceptForSession && request.sessionRule.isEmpty()) {
         QStringList lines = request.description.split('\n', Qt::SkipEmptyParts);
         for (QString &line : lines) line = line.trimmed();

@@ -143,6 +143,7 @@ public:
     bool canResetSessionApprovals() const override { return true; }
     void resetSessionApprovals() override;
     QStringList trustedSessionCommands() const override;
+    void trustSessionCommands(const QStringList &rules) override;
     bool removeTrustedSessionCommand(const QString &rule) override;
     void answerQuestions(int id, const QHash<QString, QStringList> &answers) override;
 

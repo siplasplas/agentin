@@ -591,6 +591,12 @@ QStringList ClaudeAgent::trustedSessionCommands() const
     return rules;
 }
 
+void ClaudeAgent::trustSessionCommands(const QStringList &rules)
+{
+    for (const QString &rule : rules) trustedSessionCommands_.insert(rule);
+    emit message("[Trusted for this chat: " + rules.join(", ") + "]");
+}
+
 bool ClaudeAgent::removeTrustedSessionCommand(const QString &rule)
 {
     if (!trustedSessionCommands_.remove(rule)) return false;
@@ -748,14 +754,11 @@ void ClaudeAgent::handleLine(const QByteArray &line)
             // answers the hook with the user's decision.
             askedCommandChecks_.insert(id);
             approvalVerdicts_.insert(id, verdict);
-            const QStringList patterns = verdict.alwaysPatterns();
             const QStringList trusted = verdict.sessionRules();
-            QString details = "Bash\n\n" + command + "\n";
-            for (const CommandFinding &finding : verdict.findings)
-                details += "\nAsks because of " + finding.command + ": " + finding.reason;
+            const QString details = "Bash\n\n" + command + "\n\n" + verdict.explanation();
             emit message("[Asking, as agentin's rules say: " + verdict.reason + "]");
             emit approvalRequested(id, "Approve " + name_ + " action", details, !trusted.isEmpty(), QString(),
-                                   trusted.join(", "), patterns);
+                                   trusted.join(", "), verdict.choices());
             return;
         }
         QString decision;
@@ -791,17 +794,16 @@ void ClaudeAgent::handleLine(const QByteArray &line)
         }
         askedCommandChecks_.insert(id);
         approvalVerdicts_.insert(id, verdict);
-        QString details = tool + "\n\n" + paths.join('\n') + "\n";
-        for (const CommandFinding &finding : verdict.findings) details += "\nAsks because of " + finding.command + ": " + finding.reason;
+        const QString details = tool + "\n\n" + paths.join('\n') + "\n\n" + verdict.explanation();
         emit message("[Asking, as the file may hold secrets: " + verdict.reason + "]");
         emit approvalRequested(id, "Approve " + name_ + " action", details, false, QString());
     } else if (type == "approval") {
         // Without the hook, as with an older SDK, the same rules answer the approval.
-        QStringList patterns;
+        QList<ApprovalChoice> choices;
         if (event.value("tool").toString() == "Bash") {
             const CommandVerdict verdict = commandRuleVerdict(event.value("input").toObject().value("command").toString(),
                                                               commandContext({}));
-            patterns = verdict.alwaysPatterns();
+            choices = verdict.choices();
             const bool allow = verdict.decision == CommandDecision::Allow && !readOnly_;
             if (verdict.decision == CommandDecision::Deny || allow) {
                 send({{"type", "approval_response"}, {"id", event.value("id").toInt()}, {"allow", allow},
@@ -814,7 +816,7 @@ void ClaudeAgent::handleLine(const QByteArray &line)
         const QString details = QString::fromUtf8(QJsonDocument(event.value("input").toObject()).toJson(QJsonDocument::Indented));
         emit approvalRequested(event.value("id").toInt(), "Approve " + name_ + " action",
                                event.value("tool").toString() + "\n\n" + details.trimmed(),
-                               event.value("canRemember").toBool(), event.value("alwaysRule").toString(), QString(), patterns);
+                               event.value("canRemember").toBool(), event.value("alwaysRule").toString(), QString(), choices);
     } else if (type == "question") {
         // The SDK keys answers by question text.
         QList<AgentQuestion> questions;
