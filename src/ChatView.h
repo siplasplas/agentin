@@ -63,6 +63,9 @@ class ChatView : public QPlainTextEdit
 {
 public:
     explicit ChatView(QWidget *parent = nullptr);
+    // Shows another document. The tool highlights of the shown one go first: they point into it, and Qt
+    // repaints the old highlights when new ones are set, which would read a document a closed tab deleted.
+    void showDocument(QTextDocument *document);
     void refreshTools();
     // Hidden tool calls leave only the user's messages and the answers, with a thin line where they were.
     void setToolsShown(bool shown);

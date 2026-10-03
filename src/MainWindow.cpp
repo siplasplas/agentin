@@ -385,7 +385,7 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     chatView_->setPlaceholderText("Select a chat in the tree or start a new one.");
     emptyDocument_ = new QTextDocument(chatView_);
     emptyDocument_->setDocumentLayout(new QPlainTextDocumentLayout(emptyDocument_));
-    chatView_->setDocument(emptyDocument_);
+    chatView_->showDocument(emptyDocument_);
     // The model and effort belong to the chat, so they sit in its header.
     tokens_ = new QLabel(chatPanel_);
     tokens_->setObjectName("tokenUsage");
@@ -645,7 +645,7 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
             chatPanel_->setParent(this);
         }
         ChatTab *tab = chatTab(page);
-        if (tab && chatView_->document() == tab->document()) chatView_->setDocument(emptyDocument_);
+        if (tab && chatView_->document() == tab->document()) chatView_->showDocument(emptyDocument_);
     });
 
     connect(modelInput_, QOverload<int>::of(&QComboBox::activated), this, &MainWindow::chooseModel);
@@ -735,7 +735,7 @@ MainWindow::~MainWindow()
     for (AgentProvider *listed : providers_) disconnect(listed, nullptr, this, nullptr);
     // A help process still running is killed with the window; its error must not reach the deleted log.
     for (QProcess *process : findChildren<QProcess *>(Qt::FindDirectChildrenOnly)) disconnect(process, nullptr, this, nullptr);
-    chatView_->setDocument(emptyDocument_);
+    chatView_->showDocument(emptyDocument_);
     reasoning_->setDocument(emptyDocument_);
     chatPanel_->setParent(this);
     while (tabs_->count() > 0) {
@@ -2510,14 +2510,14 @@ void MainWindow::showCurrentTab()
     if (!tab) {
         chatPanel_->hide();
         chatPanel_->setParent(this);
-        chatView_->setDocument(emptyDocument_);
+        chatView_->showDocument(emptyDocument_);
     } else {
         if (chatPanel_->parentWidget() != page) {
             page->layout()->addWidget(chatPanel_);
             chatPanel_->show();
         }
         if (chatView_->document() != tab->document()) {
-            chatView_->setDocument(tab->document());
+            chatView_->showDocument(tab->document());
             tab->document()->setDefaultFont(chatView_->font());
             chatView_->refreshTools();
             chatView_->moveCursor(QTextCursor::End);

@@ -95,6 +95,14 @@ ChatView::ChatView(QWidget *parent) : QPlainTextEdit(parent), foldMargin_(new QW
     setToolTip("Click a tool heading to expand or collapse its details and output.");
 }
 
+void ChatView::showDocument(QTextDocument *document)
+{
+    if (QPlainTextEdit::document() == document) return;
+    setExtraSelections({});
+    separators_.clear();
+    setDocument(document);
+}
+
 void ChatView::refreshTools()
 {
     QHash<int, bool> collapsed;

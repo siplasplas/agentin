@@ -69,6 +69,7 @@ private slots:
     void geminiListsSessionsFromAllProjects();
     void claudeAttachRespectsExternalLock();
     void geminiAttachRespectsExternalLock();
+    void newChatAfterClosingAllTabs();
 };
 
 void MainWindowTest::foldedOutputScrolling()
@@ -1914,4 +1915,68 @@ void MainWindowTest::geminiAttachRespectsExternalLock()
 }
 
 QTEST_MAIN(MainWindowTest)
+// Closing the last tab deletes its document while the chat view still held the highlights of its tool
+// calls; the next chat then crashed when Qt repainted them.
+void MainWindowTest::newChatAfterClosingAllTabs()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString fakeServer = directory.filePath("codex");
+    QFile script(fakeServer);
+    QVERIFY(script.open(QIODevice::WriteOnly));
+    script.write(R"PY(#!/usr/bin/env python3
+import json, sys
+def send(message):
+    print(json.dumps(message), flush=True)
+for line in sys.stdin:
+    request = json.loads(line)
+    method = request.get("method")
+    if "id" not in request or not method:
+        continue
+    result = {}
+    if method == "thread/start":
+        result = {"thread": {"id": "thread-%d" % request["id"]}}
+    elif method == "turn/start":
+        result = {"turn": {"id": "turn-1"}}
+    send({"id": request["id"], "result": result})
+    if method == "turn/start":
+        thread = request["params"]["threadId"]
+        send({"method": "turn/started", "params": {"threadId": thread, "turn": {"id": "turn-1"}}})
+        for n in range(10):
+            item = {"type": "commandExecution", "id": "c%d" % n, "command": "ls %d" % n}
+            send({"method": "item/started", "params": {"threadId": thread, "item": item}})
+            send({"method": "item/commandExecution/outputDelta",
+                  "params": {"threadId": thread, "itemId": "c%d" % n, "delta": "a\nb\nc\n"}})
+            send({"method": "item/completed",
+                  "params": {"threadId": thread, "item": dict(item, status="completed")}})
+        send({"method": "item/completed", "params": {"threadId": thread,
+              "item": {"type": "agentMessage", "id": "m", "text": "done"}}})
+        send({"method": "turn/completed", "params": {"threadId": thread,
+              "turn": {"id": "turn-1", "status": "completed"}}})
+)PY");
+    script.close();
+    QVERIFY(script.setPermissions(QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner));
+    MainWindow window(fakeServer, directory.path(), {}, {}, "gemini", nullptr, directory.filePath("index.json"));
+    window.show();
+    auto *input = window.findChild<QPlainTextEdit *>("commandInput");
+    auto *chat = window.findChild<QPlainTextEdit *>("chatView");
+    QVERIFY(input && chat);
+    QTRY_VERIFY(window.findChild<QWidget *>("newChatButton")->isEnabled());
+    input->setFocus();
+    QTest::keyClicks(input, "run");
+    QTest::keyClick(input, Qt::Key_Return);
+    QTRY_VERIFY_WITH_TIMEOUT(chat->toPlainText().contains("done"), 10000);
+    const auto closeAll = [&window, chat] {
+        for (int i = 0; i < 10 && !chat->toPlainText().contains("Select a chat"); ++i) {
+            QTest::keyClick(&window, Qt::Key_W, Qt::ControlModifier);
+            QTest::qWait(20);
+        }
+    };
+    for (int round = 0; round < 3; ++round) {
+        closeAll();
+        startChat(window, "Codex", directory.path());
+        QTRY_VERIFY(chat->document()->toPlainText().isEmpty() || !chat->toPlainText().contains("done"));
+    }
+}
+
 #include "MainWindowTest.moc"
