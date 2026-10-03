@@ -724,6 +724,10 @@ Judged judge(const CommandUse &use, const CommandContext &context, const QString
     if (!coverable || unknownValue) result.rule.clear();
     // The files xargs adds are not in the command's words, so a rule names the command as it is.
     result.exact = use.inputArguments;
+    // Code given on the command line, as in python3 -c, is new each time: no rule would match it again.
+    static const QStringList interpreters{"python", "python3", "python2", "node", "perl", "ruby", "php", "lua", "deno", "bun"};
+    if (interpreters.contains(use.program) && (words.contains("-c") || words.contains("-e") || words.contains("--eval")))
+        result.rule.clear();
     // Installing writes to a place the command does not name, so it should be decided each time.
     if (std::any_of(reasons.cbegin(), reasons.cend(), [](const QString &reason) { return reason.contains("outside the project"); })) {
         result.lasting = false;
@@ -843,8 +847,13 @@ CommandVerdict commandRuleVerdict(const QString &command, const CommandContext &
         if (judged.decision == CommandDecision::Deny) return decline(use.text, judged.reason);
         QStringList reasons;
         if (!judged.reason.isEmpty()) reasons.append(judged.reason);
+        // A program of the project runs without a question and can do whatever such a variable would make it
+        // do, so the variables ask only about other programs.
+        const bool projectProgram = use.effect == Effect::Execute && !use.executes.isEmpty()
+            && std::all_of(use.executes.cbegin(), use.executes.cend(),
+                           [&real](const QString &path) { return inside(realPath(path), real.writable); });
         for (const QString &variable : use.environment) {
-            if (!changesWhatRuns(variable) || variables.contains(variable)) continue;
+            if (projectProgram || !changesWhatRuns(variable) || variables.contains(variable)) continue;
             variables.insert(variable);
             reasons.append("the line sets " + variable + ", which can change what commands run");
             // No rule about the command covers the variable.

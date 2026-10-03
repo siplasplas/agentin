@@ -798,7 +798,10 @@ files** list (at first `~/.ssh`, `~/.gnupg`, `~/.zai-key`, `~/.netrc`, `~/.aws`,
 `*credentials*`), writing a path of the **Protected paths** list, a redirection
 to a file outside the writable directories, a variable of the **Variables**
 list (at first `PATH`, `LD_PRELOAD`, `IFS`, `HOME`, `GIT_EDITOR`,
-`GIT_SSH_COMMAND` and others that choose a program),
+`GIT_SSH_COMMAND` and others that choose a program) set for a program other than
+one of the project — `HOME=/x git status` asks, while
+`HOME=/nonexistent build/tests/test_x` does not, as a program of the project runs
+without a question anyway and can do whatever the variable would make it do —
 a command that an Allow line covers but that is known to write a file or run a
 program through an option (`git diff --output=…`), and a line that cannot be
 parsed or followed (a `case`, a function, a command run in the background with
@@ -842,7 +845,7 @@ the chat. A line that names the whole command also covers what asked about it,
 such as the secret file it reads or the protected path it writes; a broader line
 does not. Some commands offer nothing to remember and can only be allowed once:
 one whose argument has a value not known in advance (`curl "$U"` after
-`U=$(…)`), a redirection outside the writable directories or into a protected
+`U=$(…)`), code given on the command line (`python3 -c "…"`, `node -e`), a redirection outside the writable directories or into a protected
 path, a variable of the list, a line too long to run within the time limit, and
 installing, such as `make install`, which writes to a place the command does not
 name (it can still be trusted for the chat).
