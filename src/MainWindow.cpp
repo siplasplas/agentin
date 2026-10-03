@@ -51,6 +51,7 @@
 #include <QProcess>
 #include <QPushButton>
 #include <QSaveFile>
+#include <QScreen>
 #include <QStyle>
 #include <QToolButton>
 #include <QTimer>
@@ -2631,11 +2632,48 @@ void MainWindow::updateRequestPanel()
         ? QString("  (%1 more waiting)").arg(tab->pendingRequestCount() - 1) : QString();
     if (request->approval) {
         title->setText("<b>" + request->title.toHtmlEscaped() + "</b>" + waiting.toHtmlEscaped());
-        text->setText(request->alwaysRule.isEmpty() ? request->description
-                                                    : request->description + "\n\nAlways allow: " + request->alwaysRule);
+        const QString description = request->alwaysRule.isEmpty()
+            ? request->description : request->description + "\n\nAlways allow: " + request->alwaysRule;
+        // A long command, such as a whole script, scrolls in a field of limited height, so that the buttons below
+        // always stay on the screen.
+        layout->removeWidget(text);
+        text->deleteLater();
+        auto *details = new QPlainTextEdit(requestPanel_);
+        details->setObjectName("approvalDetails");
+        details->setReadOnly(true);
+        details->setLineWrapMode(QPlainTextEdit::WidgetWidth);
+        details->setPlainText(description);
+        const int line = details->fontMetrics().lineSpacing();
+        const int maximum = qMax(6 * line, height() * 35 / 100);
+        const int wanted = (details->document()->blockCount() + 1) * line + 2 * details->frameWidth() + 8;
+        details->setFixedHeight(qMin(wanted, maximum));
+        layout->addWidget(details);
         // The row joins the panel before its buttons, so they are shown in the already visible panel.
         auto *buttons = new QHBoxLayout;
         layout->addLayout(buttons);
+        if (wanted > maximum) {
+            auto *all = new QPushButton("Show all…", requestPanel_);
+            all->setToolTip("Show the whole request in a window of its own");
+            buttons->addWidget(all);
+            connect(all, &QPushButton::clicked, this, [this, description, title = request->title] {
+                auto *window = new QDialog(this);
+                window->setAttribute(Qt::WA_DeleteOnClose);
+                window->setWindowTitle(title);
+                auto *windowLayout = new QVBoxLayout(window);
+                auto *full = new QPlainTextEdit(window);
+                full->setReadOnly(true);
+                full->setLineWrapMode(QPlainTextEdit::NoWrap);
+                full->setPlainText(description);
+                windowLayout->addWidget(full);
+                auto *close = new QDialogButtonBox(QDialogButtonBox::Close, window);
+                connect(close, &QDialogButtonBox::rejected, window, &QDialog::close);
+                windowLayout->addWidget(close);
+                // At most most of the screen; longer text scrolls.
+                const QRect screen = this->screen() ? this->screen()->availableGeometry() : QRect(0, 0, 1280, 800);
+                window->resize(screen.width() * 8 / 10, screen.height() * 8 / 10);
+                window->show();
+            });
+        }
         const auto addButton = [this, buttons, tab](const QString &label, ApprovalDecision decision, const QString &tip) {
             auto *button = new QPushButton(label, requestPanel_);
             button->setToolTip(tip);

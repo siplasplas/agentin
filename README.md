@@ -601,7 +601,9 @@ Any other text is sent to the chat in the current tab when it is not a read-only
 preview. Messages entered while a response is in progress are queued. Requests to
 approve an action or answer a question appear in a
 panel below the chat of the tab that asked, so other tabs stay usable; a
-background tab with a waiting request is marked. An approval can be given once
+background tab with a waiting request is marked. A long request, such as a whole
+script, scrolls in a field of at most about a third of the window, so that the
+buttons stay visible, and **Show all…** opens it in a window of its own. An approval can be given once
 or, for Codex and for Claude when Claude Code suggests a rule, for the rest of
 the session. When the agent proposes a lasting rule, **Always allow** adds it, so
 similar actions run without asking from now on: Codex allows commands with the
