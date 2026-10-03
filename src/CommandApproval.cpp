@@ -692,11 +692,22 @@ Judged judge(const CommandUse &use, const CommandContext &context, const QString
     Judged result;
     result.rule = ruleText(words);
     const QStringList outsidePlaces = places(use, context.writable);
-    // A place the command does not name, such as the repository git works in or the directory a compiler
-    // writes into by default, cannot be part of a rule: one naming the command would allow it anywhere.
+    // A place the command does not name as a whole path, such as the repository git works in, the directory a
+    // compiler writes into by default, or a file given relative to the current directory, cannot be part of a
+    // rule: one naming the command would allow it in any directory.
     bool implicitPlace = use.effect == Effect::GitWrite && !outsidePlaces.isEmpty();
+    // A path is named when a word is the path, or an option with the path attached, as in -o/x or --output=/x.
+    const auto named = [&use](const QString &path) {
+        return std::any_of(use.words.cbegin(), use.words.cend(), [&path](const QString &word) {
+            if (word == path) return true;
+            if (!word.endsWith(path)) return false;
+            const QString option = word.chopped(path.size());
+            return option.startsWith('-') && !option.contains('/');
+        });
+    };
     for (const QString &path : use.writes + use.executes)
-        if (use.directories.contains(path) && !inside(realPath(path), context.writable)) implicitPlace = true;
+        if (!use.redirectionWrites.contains(path) && !inside(realPath(path), context.writable) && !named(path))
+            implicitPlace = true;
     const GitAsk git = gitAsk(use, words);
     if (!ask.isEmpty() && allowed <= specificity(ask)) {
         reasons.prepend("agentin's rule " + ask);

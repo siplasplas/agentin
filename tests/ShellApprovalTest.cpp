@@ -386,6 +386,9 @@ void ShellApprovalTest::suggestions()
     QCOMPARE(always("git -C /srv/other add a"), QStringList());
     QCOMPARE(always("cd /srv/other && g++ -c a.cpp"), QStringList());
     QCOMPARE(always("g++ -c a.cpp -o /srv/out/a.o"), QStringList{"g++ -c a.cpp -o /srv/out/a.o *"});
+    QCOMPARE(always("cd /srv/other && touch x"), QStringList());
+    QCOMPARE(always("touch ../outside"), QStringList());
+    QCOMPARE(always("touch /srv/other/x"), QStringList{"touch /srv/other/x *"});
     QCOMPARE(always("python3 -c \"print(1)\""), QStringList());
     QVERIFY(commandRuleVerdict("python3 -c \"print(1)\"", context).sessionRules().isEmpty());
     QCOMPARE(always("python3 tools/scan.py --all"), QStringList{"python3 tools/scan.py --all *"});
