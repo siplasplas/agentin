@@ -49,7 +49,7 @@ struct CommandVerdict
 // The rules of a first start: git add * and git commit -m * as Allow, rm * and rmdir * as Ask, and the
 // fixed denials and changes to system packages as Deny.
 QList<CommandRule> defaultCommandRules();
-// Always denied, whatever the rules say: git push and privilege escalation.
+// Always denied, whatever the rules say: git push, privilege escalation and removing system packages.
 QStringList fixedDeniedPatterns();
 // Why a pattern can never be allowed, or an empty string.
 QString fixedDenial(const QString &pattern);

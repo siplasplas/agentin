@@ -645,10 +645,13 @@ edits its pattern or switches its decision, **Remove** deletes it, an unchecked 
 listed without effect, a click on a column header sorts the list, and a line's
 context menu copies it or sets its decision. On the first start the list holds
 `git add *` and `git commit -m *` as Allow (or the commands an earlier version
-allowed), `rm *` and `rmdir *` as Ask, and as Deny the changes to system packages through apt, apt-get, dnf, yum, zypper,
-pacman, snap, flatpak and brew, which can be removed or unchecked. `git push *`,
-`sudo *`, `doas *` and `su *` are listed as Deny at every start with a checked box
-that cannot be changed, and they apply whatever the settings say.
+allowed), `rm *` and `rmdir *` as Ask, and as Deny the installing and upgrading
+of system packages through apt, apt-get, dnf, yum, zypper, pacman, snap, flatpak
+and brew, which can be removed, unchecked or allowed. `git push *`, `sudo *`,
+`doas *`, `su *` and the removal of system packages through the same tools (such
+as `apt *remove *`, `apt *purge *` or `pacman -R*`) are listed as Deny at every
+start with a checked box that cannot be changed, and they apply whatever the
+settings say.
 
 The rules are kept in `approvals.json` in agentin's data directory, apart from
 `settings.json`, together with the Codex rules agentin has seen and kept.

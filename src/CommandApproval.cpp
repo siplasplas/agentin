@@ -332,14 +332,13 @@ QList<CommandRule> defaultCommandRules()
     QList<CommandRule> rules{{"git add *", CommandDecision::Allow, true}, {"git commit -m *", CommandDecision::Allow, true},
                              {"rm *", CommandDecision::Ask, true}, {"rmdir *", CommandDecision::Ask, true}};
     for (const QString &pattern : fixedDeniedPatterns()) rules.append({pattern, CommandDecision::Deny, true});
-    // Changes to the system's packages; "*" before an operation also covers its options and variants such as
-    // reinstall or full-upgrade. These can be removed or unchecked.
-    for (const QString &pattern : {"apt *install *", "apt *remove *", "apt *purge *", "apt *upgrade *",
-                                   "apt-get *install *", "apt-get *remove *", "apt-get *purge *", "apt-get *upgrade *",
-                                   "dnf *install *", "dnf *remove *", "dnf *upgrade *", "yum *install *", "yum *remove *",
-                                   "yum *update *", "zypper *install *", "zypper *remove *", "zypper in *", "zypper rm *",
-                                   "pacman -S*", "pacman -R*", "pacman -U*", "snap install *", "snap remove *",
-                                   "flatpak install *", "flatpak uninstall *", "brew install *", "brew uninstall *"})
+    // Installing and upgrading system packages; "*" before an operation also covers its options and variants
+    // such as reinstall or full-upgrade. These can be removed, unchecked or allowed; removals are fixed denials.
+    for (const QString &pattern : {"apt *install *", "apt *upgrade *", "apt-get *install *", "apt-get *upgrade *",
+                                   "dnf *install *", "dnf *upgrade *", "yum *install *", "yum *update *",
+                                   "zypper *install *", "zypper in *", "zypper *update *", "pacman -S*", "pacman -U*",
+                                   "snap install *", "snap refresh *", "flatpak install *", "flatpak update *",
+                                   "brew install *", "brew upgrade *"})
         rules.append({pattern, CommandDecision::Deny, true});
     return rules;
 }
@@ -356,9 +355,22 @@ CommandDecision commandDecisionFromName(const QString &name)
                                                           : CommandDecision::Allow;
 }
 
+namespace {
+// Removing system packages can break the system, so it is always declined; installing and upgrading are
+// removable Deny lines of the defaults instead.
+const QStringList &packageRemovalPatterns()
+{
+    static const QStringList patterns{"apt *remove *", "apt *purge *", "apt-get *remove *", "apt-get *purge *",
+                                      "dnf *remove *", "dnf *erase *", "yum *remove *", "yum *erase *",
+                                      "zypper *remove *", "zypper rm *", "pacman -R*", "snap remove *",
+                                      "flatpak uninstall *", "brew uninstall *"};
+    return patterns;
+}
+}
+
 QStringList fixedDeniedPatterns()
 {
-    return {"git push *", "sudo *", "doas *", "su *"};
+    return QStringList{"git push *", "sudo *", "doas *", "su *"} + packageRemovalPatterns();
 }
 
 QString fixedDenial(const QString &pattern)
@@ -366,6 +378,7 @@ QString fixedDenial(const QString &pattern)
     const QStringList words = pattern.split(' ', Qt::SkipEmptyParts);
     if (QStringList{"sudo", "doas", "su"}.contains(executable(words.value(0)))) return "privilege escalation is always declined";
     if (words.value(0) == "git" && words.contains("push")) return "git push is always declined";
+    if (packageRemovalPatterns().contains(pattern.simplified())) return "removing system packages is always declined";
     return {};
 }
 
