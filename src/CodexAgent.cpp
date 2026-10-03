@@ -621,6 +621,7 @@ void CodexAgent::showOutputOf(const QString &itemId)
 
 void CodexAgent::resetTurn()
 {
+    fileChanges_.clear();
     runningCommands_.clear();
     outputCommand_.clear();
     busy_ = false;
@@ -681,6 +682,11 @@ void CodexAgent::handleNotification(const QString &method, const QJsonObject &pa
         runningCommands_.insert(itemId, item.value("command").toString());
         outputCommand_ = itemId;
         emit toolStarted("shell", item.value("command").toString());
+    } else if (method == "item/started" && item.value("type") == "fileChange") {
+        // An approval for file changes names no files; they come with the item and its patch updates.
+        fileChanges_.insert(item.value("id").toString(), item.value("changes").toArray());
+    } else if (method == "item/fileChange/patchUpdated") {
+        fileChanges_.insert(params.value("itemId").toString(), params.value("changes").toArray());
     } else if (method == "item/completed") {
         const QString type = item.value("type").toString();
         const QString completedId = item.value("id").toString();
@@ -818,7 +824,24 @@ void CodexAgent::handleServerRequest(const QString &method, const QJsonValue &id
                 description += "\nDirectory: " + params.value("cwd").toString();
             }
         } else {
-            description += "\n" + params.value("grantRoot").toString();
+            QStringList files;
+            QString diffs;
+            for (const QJsonValue &value : fileChanges_.value(params.value("itemId").toString())) {
+                const QJsonObject change = value.toObject();
+                const QJsonObject kind = change.value("kind").toObject();
+                const QString type = kind.value("type").toString();
+                const QString path = change.value("path").toString();
+                const QString moved = kind.value("move_path").toString();
+                files.append((type == "add" ? "add " : type == "delete" ? "delete " : "change ") + path
+                             + (moved.isEmpty() ? QString() : " \u2192 " + moved));
+                if (!change.value("diff").toString().isEmpty())
+                    diffs += "\n\n--- " + path + "\n" + change.value("diff").toString().trimmed();
+            }
+            description += files.isEmpty() ? QString("\nCodex asks to change files without naming them.")
+                                           : "\nFiles:\n" + files.join('\n');
+            if (!params.value("grantRoot").toString().isEmpty())
+                description += "\nAllow writes under: " + params.value("grantRoot").toString();
+            description += diffs;
         }
         const int requestId = nextServerRequest_++;
         serverRequests_.insert(requestId, id);

@@ -106,6 +106,8 @@ private:
     // Command prefixes Codex proposed as lasting rules, by approval request.
     QHash<int, QJsonArray> proposedRules_;
     QSet<QString> trustedSessionCommands_;
+    // The changes of file change items in the running turn, shown in their approvals.
+    QHash<QString, QJsonArray> fileChanges_;
     QString trustedConversationId_;
     QHash<int, QString> requestSessionRules_;
     // Additional permissions Codex asked for, by approval request.

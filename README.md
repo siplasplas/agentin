@@ -233,6 +233,29 @@ and Antigravity turns get `--approval-mode plan` and `--mode plan`: the agent
 reads and plans but is told not to change files. Only Codex enforces this with a
 sandbox, so only read-only Codex turns skip the directory lock.
 
+Read-only never changes files silently, but it is not a promise that nothing
+changes: Codex may still ask to run a command outside its sandbox, and Claude may
+end its plan by asking to leave plan mode; files change only if you agree. agentin's
+Allow rules do not apply to read-only chats, so such a request always reaches you.
+It is useful:
+
+- **For questions and reviews**, such as "why does this test fail?", "explain this
+  module" or "review my last commit", when an answer must not come with an
+  unrequested "fix".
+- **For planning**, when the agent should first describe the changes it would
+  make, so that you can correct the plan before switching Read-only off and
+  letting it work.
+- **Beside another chat in the same directory**, with Codex only: a read-only
+  Codex turn neither takes nor waits for the directory, so it can study the
+  project while another chat changes it. Claude, GLM, Gemini and Antigravity
+  only follow an instruction, so their read-only turns still wait for the
+  directory.
+- **In a directory you do not want touched**, such as a checkout of someone
+  else's project or a release branch, where Codex's sandbox enforces it unless you
+  approve a request to leave it.
+
+For ordinary work, where the agent is meant to change files, leave it off.
+
 **Settings → Options…** sets the model and effort that new chats start with, for
 each agent that offers a choice. The effort is `medium` unless changed there.
 The options are saved in `settings.json` in the application data directory.
@@ -603,7 +626,9 @@ approve an action or answer a question appear in a
 panel below the chat of the tab that asked, so other tabs stay usable; a
 background tab with a waiting request is marked. A long request, such as a whole
 script, scrolls in a field of at most about a third of the window, so that the
-buttons stay visible, and **Show all…** opens it in a window of its own. An approval can be given once
+buttons stay visible, and **Show all…** opens it in a window of its own. A Codex
+request to change files lists the files with what happens to each (add, change,
+delete or move) and their diffs, which Codex sends before the request. An approval can be given once
 or, for Codex and for Claude when Claude Code suggests a rule, for the rest of
 the session. When the agent proposes a lasting rule, **Always allow** adds it, so
 similar actions run without asking from now on: Codex allows commands with the
