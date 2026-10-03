@@ -177,8 +177,8 @@ private:
     // The API error the CLI is retrying after, until the turn makes progress or ends.
     QString retry_;
     QHash<int, int> pendingQuestionCounts_;
-    // What agentin's rules said about the shell commands of pending approvals, for the allow rules that
-    // Always adds to agentin's list and the commands a chat can trust.
+    // What agentin's rules said about the shell commands of pending approvals, for the commands a chat can
+    // trust.
     QHash<int, CommandVerdict> approvalVerdicts_;
     // Hook checks that agentin's rules turned into approvals; they are answered as hook decisions.
     QSet<int> askedCommandChecks_;

@@ -30,7 +30,7 @@ The conversation language does not change the English-language requirements for 
 - Build: `cmake -S . -B build && cmake --build build`; run `./build/agentin -C /path/to/project`.
 - With tests: `cmake -S . -B build -DBUILD_TESTING=ON && cmake --build build`.
 - The Claude and GLM bridge (`claude/bridge.py`) runs in the project virtual environment `.venv` with `claude-agent-sdk`; the build copies the script next to the executable as `claude_bridge.py`.
-- The application stores its conversation indexes, recent directories and command rules in its application data directory (`codex-conversations.json`, `<provider>-conversations.json`, `recent-directories.json`, `approvals.json`).
+- The application stores its conversation indexes, recent directories and command rules in its application data directory (`codex-conversations.json`, `<provider>-conversations.json`, `recent-directories.json`, `approvals.json`; the last one is version 2, with the rules and the lists of secret files, protected paths and variables).
 
 ## qt-extra
 

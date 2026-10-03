@@ -12,9 +12,11 @@
 // git push.
 QStringList lastingRulePrefix(const QStringList &proposed);
 
-// agentin's own rules: a pattern with * and ? matched against each command of a command line, after wrappers
-// such as env and timeout and after Git's directory options; a trailing " *" also matches the command without
-// arguments, so "git stash *" matches "git stash". Deny rules and the fixed denials win over everything.
+// agentin's own rules: a pattern matched against each command of a command line, after wrappers such as env and
+// timeout and after Git's directory options. * matches any text and ? one character; a trailing " *" also
+// matches the command without arguments, so "git stash *" matches "git stash". Three placeholders match within
+// one argument: <int> digits, <path> any text without a space, and <writable> a path inside the writable
+// directories, as in "cmake --build <writable> -j<int> *". Deny rules and the fixed denials win over everything.
 // Allow runs without asking; Ask always asks; Deny declines at once, with no way to agree. A command that no
 // rule matches is judged by what it does: see commandRuleVerdict.
 enum class CommandDecision { None, Allow, Ask, Deny };
@@ -85,10 +87,32 @@ void setCommandRules(const QList<CommandRule> &rules);
 void setCommandRulesChangedHandler(const std::function<void()> &handler);
 // Adds an enabled allow rule, or enables an existing one; false when nothing changed or it is never allowed.
 bool addAllowRule(const QString &pattern);
-bool commandPatternMatches(const QString &pattern, const QString &command);
+// Without writable, <writable> matches nothing.
+bool commandPatternMatches(const QString &pattern, const QString &command,
+                           const std::function<bool(const QString &)> &writable = {});
 // Whether some command could match both the pattern and a rule allowing commands that start with prefix,
-// judged by the pattern's text before its first wildcard.
+// judged by the pattern's text before its first wildcard or placeholder.
 bool patternOverlapsPrefix(const QString &pattern, const QString &prefix);
+
+// The lists that complete the rules, kept in approvals.json beside them. Paths are patterns: ~/ is the home
+// directory, ** any directories and * or ? match within a name; a pattern that does not start with / or ~/
+// matches at any depth, and a directory covers everything in it.
+struct ApprovalLists
+{
+    // Files that may hold keys and passwords: a command that shows what is in them asks.
+    QStringList secretPaths;
+    // Where writing by a shell command asks, whatever the Allow rules say. .git needs no line: writing there
+    // other than through git is always declined.
+    QStringList protectedPaths;
+    // Variables that change what programs run or how the shell reads the line: a line that sets one asks.
+    // * matches any text, as in GIT_CONFIG*.
+    QStringList askVariables;
+};
+ApprovalLists defaultApprovalLists();
+ApprovalLists approvalLists();
+void setApprovalLists(const ApprovalLists &lists);
+// Whether a path, which may hold glob characters, could name a file that a pattern of the list covers.
+bool pathMatchesList(const QString &path, const QStringList &patterns, const QString &home);
 
 // The decision about a command line. The line is parsed as Bash and each command it could run is judged, also
 // those in substitutions, loops and shell -c scripts:

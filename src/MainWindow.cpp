@@ -1640,7 +1640,8 @@ QTreeWidgetItem *addRuleItem(QTreeWidget *tree, const CommandRule &rule)
     if (fixed.isEmpty()) {
         item->setFlags(Qt::ItemIsSelectable | Qt::ItemIsEnabled | Qt::ItemIsUserCheckable | Qt::ItemIsEditable);
         item->setCheckState(0, rule.enabled ? Qt::Checked : Qt::Unchecked);
-        item->setToolTip(0, "Double-click to edit the pattern; * matches any text and ? one character");
+        item->setToolTip(0, "Double-click to edit the pattern; * matches any text, ? one character, and <int>, <path> "
+                            "and <writable> one argument");
         item->setToolTip(1, "Double-click to switch between Allow, Ask and Deny");
     } else {
         item->setFlags(Qt::ItemIsSelectable);
@@ -1684,6 +1685,18 @@ void listFixedDenials(QList<CommandRule> &rules)
     }
 }
 
+// A list of approvals.json, or its defaults when the file has none, as one of version 1.
+QStringList listFromJson(const QJsonObject &approvals, const QString &key, const QStringList &defaults)
+{
+    if (!approvals.value(key).isArray()) return defaults;
+    QStringList values;
+    for (const QJsonValue &value : approvals.value(key).toArray()) {
+        const QString text = value.toString().trimmed();
+        if (!text.isEmpty() && !values.contains(text)) values.append(text);
+    }
+    return values;
+}
+
 QList<CommandRule> rulesFromJson(const QJsonArray &array)
 {
     QList<CommandRule> rules;
@@ -1713,11 +1726,16 @@ void MainWindow::loadApprovals()
         QList<CommandRule> rules = defaultCommandRules();
         listFixedDenials(rules);
         setCommandRules(rules);
+        setApprovalLists(defaultApprovalLists());
         saveApprovals();
         return;
     }
     const QJsonObject approvals = QJsonDocument::fromJson(file.readAll()).object();
     file.close();
+    const ApprovalLists defaults = defaultApprovalLists();
+    setApprovalLists({listFromJson(approvals, "secretPaths", defaults.secretPaths),
+                      listFromJson(approvals, "protectedPaths", defaults.protectedPaths),
+                      listFromJson(approvals, "askVariables", defaults.askVariables)});
     QList<CommandRule> rules = rulesFromJson(approvals.value("commandRules").toArray());
     const int listed = int(rules.size());
     listFixedDenials(rules);
@@ -1738,7 +1756,11 @@ void MainWindow::saveApprovals()
     for (const CommandRule &rule : commandRules())
         rules.append(QJsonObject{{"pattern", rule.pattern}, {"decision", commandDecisionName(rule.decision)},
                                  {"enabled", rule.enabled}});
-    QJsonObject approvals{{"version", 1}, {"commandRules", rules},
+    const ApprovalLists lists = approvalLists();
+    QJsonObject approvals{{"version", 2}, {"commandRules", rules},
+                          {"secretPaths", QJsonArray::fromStringList(lists.secretPaths)},
+                          {"protectedPaths", QJsonArray::fromStringList(lists.protectedPaths)},
+                          {"askVariables", QJsonArray::fromStringList(lists.askVariables)},
                           {"keptCodexRules", QJsonArray::fromStringList(keptCodexRules_)}};
     if (codexRulesKnown_) approvals.insert("knownCodexRules", QJsonArray::fromStringList(knownCodexRules_));
     const QByteArray content = QJsonDocument(approvals).toJson(QJsonDocument::Indented);
@@ -1764,6 +1786,7 @@ void MainWindow::watchApprovals()
                 QList<CommandRule> rules = defaultCommandRules();
                 listFixedDenials(rules);
                 setCommandRules(rules);
+                setApprovalLists(defaultApprovalLists());
                 keptCodexRules_.clear();
                 saveApprovals();
                 appendLine("[approvals.json was removed; its default rules were written again]");
@@ -1832,25 +1855,39 @@ void MainWindow::checkCodexRules()
                        .arg(conflicts.size() == 1 ? "it" : "them"));
 }
 
-// agentin's rules for shell commands, with check boxes; they decide before the agents' own rules. Chat trust
-// for a session stays in memory and is not listed.
+// agentin's rules for shell commands, with check boxes, the lists that complete them, and the commands each
+// chat trusts for its session; the rules decide before the agents' own. Nothing changes before OK.
 void MainWindow::showApprovalsDialog()
 {
     QDialog dialog(this);
     dialog.setWindowTitle("Approvals");
-    dialog.resize(760, 560);
-    auto *layout = new QVBoxLayout(&dialog);
+    dialog.resize(800, 600);
+    auto *dialogLayout = new QVBoxLayout(&dialog);
+    auto *pages = new QTabWidget(&dialog);
+    pages->setObjectName("approvalsPages");
+    dialogLayout->addWidget(pages, 1);
+    auto *commandsPage = new QWidget(pages);
+    pages->addTab(commandsPage, "Commands");
+    auto *layout = new QVBoxLayout(commandsPage);
     auto *intro = new QLabel("Shell commands that agents may run without asking (Allow), must always ask about (Ask), "
-                             "or that are declined with no way to agree (Deny). "
-                             "A pattern applies to each command of a command line; * matches any text and ? one "
-                             "character, and a trailing \" *\" also matches the command alone. Deny wins over Ask and Ask "
-                             "over Allow, and all win over the agents' own rules. Commands other than git that name a path in "
-                             ".git are always declined.", &dialog);
+                             "or that are declined with no way to agree (Deny). A pattern applies to each command of a "
+                             "command line: * matches any text and ? one character, a trailing \" *\" also matches the "
+                             "command alone, and <int>, <path> and <writable> match digits, any one argument, and a path "
+                             "inside the chat's writable directories. Deny wins over Ask and Ask over Allow, the more "
+                             "specific of Ask and Allow wins, and all win over the agents' own rules. A command no line "
+                             "matches runs when it only reads or works inside the writable directories, and asks "
+                             "otherwise. Writing into .git other than through git is always declined.", &dialog);
     intro->setWordWrap(true);
     layout->addWidget(intro);
     auto *tree = new QTreeWidget(&dialog);
     tree->setObjectName("approvalsTree");
     tree->setHeaderLabels({"Command pattern", "Decision"});
+    tree->headerItem()->setToolTip(0, "Matched against each command of a line, after wrappers such as env and git -C:\n"
+                                      "*  any text\n?  one character\n\" *\" at the end  also the command alone\n"
+                                      "<int>  digits, as in -j<int>\n<path>  any one argument\n"
+                                      "<writable>  a path inside the chat's writable directories");
+    tree->headerItem()->setToolTip(1, "Allow: runs without asking\nAsk: always asks, unless a more specific Allow line matches\n"
+                                      "Deny: declined, with no way to agree");
     tree->setRootIsDecorated(false);
     tree->setEditTriggers(QAbstractItemView::NoEditTriggers);
     for (const CommandRule &rule : commandRules()) addRuleItem(tree, rule);
@@ -1969,14 +2006,121 @@ void MainWindow::showApprovalsDialog()
         fillConflicts();
     });
 
-    auto *note = new QLabel("Chat trust given for a session is kept in memory and ends with the chat.", &dialog);
-    note->setWordWrap(true);
-    layout->addWidget(note);
+    // The lists that complete the rules: a line per path or variable, edited in place.
+    const ApprovalLists lists = approvalLists();
+    const ApprovalLists defaults = defaultApprovalLists();
+    const auto addListPage = [pages](const QString &name, const QString &objectName, const QString &text,
+                                     const QStringList &values, const QStringList &defaultValues) {
+        auto *page = new QWidget(pages);
+        auto *pageLayout = new QVBoxLayout(page);
+        auto *label = new QLabel(text, page);
+        label->setWordWrap(true);
+        pageLayout->addWidget(label);
+        auto *list = new QListWidget(page);
+        list->setObjectName(objectName);
+        const auto addItem = [list](const QString &value) {
+            auto *item = new QListWidgetItem(value, list);
+            item->setFlags(item->flags() | Qt::ItemIsEditable);
+            return item;
+        };
+        for (const QString &value : values) addItem(value);
+        pageLayout->addWidget(list, 1);
+        auto *row = new QHBoxLayout;
+        auto *add = new QPushButton("Add", page);
+        auto *remove = new QPushButton("Remove", page);
+        auto *restore = new QPushButton("Restore defaults", page);
+        row->addWidget(add);
+        row->addWidget(remove);
+        row->addWidget(restore);
+        row->addStretch(1);
+        pageLayout->addLayout(row);
+        QObject::connect(add, &QPushButton::clicked, list, [list, addItem] {
+            QListWidgetItem *item = addItem(QString());
+            list->setCurrentItem(item);
+            list->editItem(item);
+        });
+        QObject::connect(remove, &QPushButton::clicked, list, [list] {
+            const int row = list->currentRow();
+            if (row < 0) return;
+            delete list->takeItem(row);
+            if (list->count() > 0) list->setCurrentRow(qMin(row, list->count() - 1));
+        });
+        QObject::connect(restore, &QPushButton::clicked, list, [list, addItem, defaultValues] {
+            list->clear();
+            for (const QString &value : defaultValues) addItem(value);
+        });
+        pages->addTab(page, name);
+        return list;
+    };
+    const QString pathSyntax = " A line is a path pattern: ~/ is the home directory, * and ? match within a name, ** any "
+                               "directories; a pattern that does not start with / or ~/ matches at any depth, and a "
+                               "directory covers everything in it.";
+    QListWidget *secrets = addListPage("Secret files", "secretPaths",
+        "Files that may hold keys and passwords. A command that shows what is in them asks, whatever the Allow lines say, "
+        "unless an Allow line names the whole command; commands that only describe files, such as wc or ls, do not."
+            + pathSyntax, lists.secretPaths, defaults.secretPaths);
+    QListWidget *protectedPaths = addListPage("Protected paths", "protectedPaths",
+        "Places where writing by a shell command asks, whatever the Allow lines say, also inside the writable directories, "
+        "for example .github/workflows. The repository's .git needs no line: writing there other than through git is "
+        "always declined." + pathSyntax, lists.protectedPaths, defaults.protectedPaths);
+    QListWidget *variables = addListPage("Variables", "askVariables",
+        "Variables that change what programs run or how the shell reads a command line, such as PATH or LD_PRELOAD. A line "
+        "that sets one, before a command or with export, asks; no Allow line covers it. * matches any text, as in "
+        "GIT_CONFIG*.", lists.askVariables, defaults.askVariables);
+
+    // What each open chat trusts for its session; it ends with the conversation.
+    auto *trustPage = new QWidget(pages);
+    auto *trustLayout = new QVBoxLayout(trustPage);
+    auto *trustIntro = new QLabel("Commands that a chat runs without asking until its conversation changes, given with "
+                                  "Trust … for this chat. Nothing of it is saved.", trustPage);
+    trustIntro->setWordWrap(true);
+    trustLayout->addWidget(trustIntro);
+    auto *trust = new QTreeWidget(trustPage);
+    trust->setObjectName("chatTrust");
+    trust->setHeaderLabels({"Chat", "Trusted commands"});
+    trust->setRootIsDecorated(false);
+    trust->setColumnWidth(0, 300);
+    QHash<QTreeWidgetItem *, QPointer<AgentBackend>> trustAgents;
+    for (int i = 0; i < tabs_->count(); ++i) {
+        ChatTab *tab = chatTab(tabs_->widget(i));
+        if (!tab) continue;
+        for (const QString &rule : tab->agent()->trustedSessionCommands()) {
+            auto *item = new QTreeWidgetItem(trust, {tab->provider()->name() + ": " + tab->title().left(60), rule});
+            trustAgents.insert(item, tab->agent());
+        }
+    }
+    trustLayout->addWidget(trust, 1);
+    auto *trustButtons = new QHBoxLayout;
+    auto *revoke = new QPushButton("Remove", trustPage);
+    revoke->setToolTip("The chat asks again about such commands");
+    trustButtons->addWidget(revoke);
+    trustButtons->addStretch(1);
+    trustLayout->addLayout(trustButtons);
+    QList<std::pair<QPointer<AgentBackend>, QString>> revoked;
+    connect(revoke, &QPushButton::clicked, &dialog, [trust, &trustAgents, &revoked] {
+        QTreeWidgetItem *item = trust->currentItem();
+        if (!item) return;
+        revoked.append({trustAgents.take(item), item->text(1)});
+        delete item;
+    });
+    pages->addTab(trustPage, "Chat trust");
+
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
-    layout->addWidget(buttons);
+    dialogLayout->addWidget(buttons);
     connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
     connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
     if (dialog.exec() != QDialog::Accepted) return;
+    const auto valuesOf = [](const QListWidget *list) {
+        QStringList values;
+        for (int i = 0; i < list->count(); ++i) {
+            const QString value = list->item(i)->text().trimmed();
+            if (!value.isEmpty() && !values.contains(value)) values.append(value);
+        }
+        return values;
+    };
+    setApprovalLists({valuesOf(secrets), valuesOf(protectedPaths), valuesOf(variables)});
+    for (const auto &[agent, rule] : revoked)
+        if (agent) agent->removeTrustedSessionCommand(rule);
     QList<CommandRule> rules;
     for (const CommandRule &rule : rulesOf(tree)) {
         if (rule.decision != CommandDecision::Deny && !fixedDenial(rule.pattern).isEmpty()) {
@@ -1990,6 +2134,43 @@ void MainWindow::showApprovalsDialog()
             rules.append({pattern, CommandDecision::Deny, true});
     setCommandRules(rules);
     saveApprovals();
+}
+
+// The lines that Always adds to agentin's rules, as the user edits them; false when the user cancels.
+bool MainWindow::editAlwaysPatterns(QStringList &patterns)
+{
+    QDialog dialog(this);
+    dialog.setObjectName("alwaysPatternsDialog");
+    dialog.setWindowTitle("Always allow");
+    dialog.resize(640, 320);
+    auto *layout = new QVBoxLayout(&dialog);
+    auto *intro = new QLabel("These lines are added to agentin's rules as Allow, one per line. Edit them to allow more or "
+                             "less: * matches any text and ? one character, a trailing \" *\" also matches the command "
+                             "alone, <int> matches digits, <path> any one argument and <writable> a path inside the "
+                             "chat's writable directories. The command runs once whatever you keep.", &dialog);
+    intro->setWordWrap(true);
+    layout->addWidget(intro);
+    auto *lines = new QPlainTextEdit(&dialog);
+    lines->setObjectName("alwaysPatterns");
+    lines->setPlainText(patterns.join('\n'));
+    layout->addWidget(lines, 1);
+    auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
+    buttons->button(QDialogButtonBox::Ok)->setText("Allow and add");
+    layout->addWidget(buttons);
+    connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
+    connect(buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
+    if (dialog.exec() != QDialog::Accepted) return false;
+    patterns.clear();
+    for (const QString &line : lines->toPlainText().split('\n')) {
+        const QString pattern = line.simplified();
+        if (pattern.isEmpty() || patterns.contains(pattern)) continue;
+        if (!fixedDenial(pattern).isEmpty()) {
+            appendLine("[Not allowed: \"" + pattern + "\"; " + fixedDenial(pattern) + "]");
+            continue;
+        }
+        patterns.append(pattern);
+    }
+    return true;
 }
 
 // Recently used working directories are shown in the directory chooser of the New chat dialog.
@@ -2801,8 +2982,10 @@ void MainWindow::updateRequestPanel()
         ? QString("  (%1 more waiting)").arg(tab->pendingRequestCount() - 1) : QString();
     if (request->approval) {
         title->setText("<b>" + request->title.toHtmlEscaped() + "</b>" + waiting.toHtmlEscaped());
-        const QString description = request->alwaysRule.isEmpty()
+        QString description = request->alwaysRule.isEmpty()
             ? request->description : request->description + "\n\nAlways allow: " + request->alwaysRule;
+        if (!request->alwaysPatterns.isEmpty())
+            description += "\n\nAlways allow adds to agentin's rules: " + request->alwaysPatterns.join(", ");
         // A long command, such as a whole script, scrolls in a field of limited height, so that the buttons below
         // always stay on the screen.
         layout->removeWidget(text);
@@ -2854,9 +3037,20 @@ void MainWindow::updateRequestPanel()
             addButton(request->sessionRule.isEmpty() ? "Allow for this session"
                       : "Trust " + request->sessionRule + " for this chat", ApprovalDecision::AcceptForSession,
                       request->sessionRule.isEmpty() ? "Also allow the same kind of action for the rest of this session"
-                      : "Trust simple " + request->sessionRule + " commands with different arguments; revoke in Settings > Approvals");
-        if (!request->alwaysRule.isEmpty())
+                      : "Run " + request->sessionRule + " with any arguments without asking until this chat's conversation "
+                        "changes; remove it in Settings → Approvals… → Chat trust");
+        if (!request->alwaysPatterns.isEmpty()) {
+            // The lines can be edited first, for example to widen "gh run list *" or narrow "npm *".
+            auto *always = new QPushButton("Always allow…", requestPanel_);
+            always->setToolTip("Edit and add to agentin's rules: " + request->alwaysPatterns.join(", "));
+            buttons->addWidget(always);
+            connect(always, &QPushButton::clicked, this, [this, tab, patterns = request->alwaysPatterns] {
+                QStringList edited = patterns;
+                if (editAlwaysPatterns(edited)) tab->answerApproval(ApprovalDecision::AcceptAlways, edited);
+            });
+        } else if (!request->alwaysRule.isEmpty()) {
             addButton("Always allow", ApprovalDecision::AcceptAlways, request->alwaysRule);
+        }
         addButton("Decline", ApprovalDecision::Decline, "The agent continues without this action");
         addButton("Decline and stop", ApprovalDecision::Cancel, "Decline and end the agent's turn");
         buttons->addStretch(1);

@@ -292,8 +292,11 @@ signals:
     void conversationUsage(const TokenUsage &usage);
     // sessionRule identifies an application-managed command family, if available.
     // alwaysRule describes the lasting rule the agent proposes; empty when it proposes none.
+    // alwaysPatterns are the lines that Always adds to agentin's rules, which the user may edit first; the tab
+    // adds them, and the agent only gets the decision.
     void approvalRequested(int id, const QString &title, const QString &description, bool canAcceptForSession,
-                           const QString &alwaysRule, const QString &sessionRule = {});
+                           const QString &alwaysRule, const QString &sessionRule = {},
+                           const QStringList &alwaysPatterns = {});
     void questionsRequested(int id, const QList<AgentQuestion> &questions, bool blocking = true);
     void requestResolved(int id);
     void conversationOpened(const QString &id, bool resumed);

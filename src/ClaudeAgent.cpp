@@ -582,10 +582,6 @@ void ClaudeAgent::answerApproval(int id, ApprovalDecision decision)
     } else {
         send({{"type", "approval_response"}, {"id", id}, {"allow", allow}, {"decision", value}});
     }
-    // agentin's list decides before Claude Code's own rules, so Always also allows the command there.
-    if (decision == ApprovalDecision::AcceptAlways)
-        for (const QString &pattern : verdict.alwaysPatterns())
-            if (addAllowRule(pattern)) emit message("[Added to agentin's rules: allow " + pattern + "]");
 }
 
 QStringList ClaudeAgent::trustedSessionCommands() const
@@ -755,9 +751,8 @@ void ClaudeAgent::handleLine(const QByteArray &line)
             for (const CommandFinding &finding : verdict.findings)
                 details += "\nAsks because of " + finding.command + ": " + finding.reason;
             emit message("[Asking, as agentin's rules say: " + verdict.reason + "]");
-            emit approvalRequested(id, "Approve " + name_ + " action", details, !trusted.isEmpty(),
-                                   patterns.isEmpty() ? QString() : "Allow " + patterns.join(", ") + " in agentin's rules",
-                                   trusted.join(", "));
+            emit approvalRequested(id, "Approve " + name_ + " action", details, !trusted.isEmpty(), QString(),
+                                   trusted.join(", "), patterns);
             return;
         }
         QString decision;
@@ -770,9 +765,11 @@ void ClaudeAgent::handleLine(const QByteArray &line)
                          + verdict.reason + "]");
     } else if (type == "approval") {
         // Without the hook, as with an older SDK, the same rules answer the approval.
+        QStringList patterns;
         if (event.value("tool").toString() == "Bash") {
             const CommandVerdict verdict = commandRuleVerdict(event.value("input").toObject().value("command").toString(),
                                                               commandContext({}));
+            patterns = verdict.alwaysPatterns();
             const bool allow = verdict.decision == CommandDecision::Allow && !readOnly_;
             if (verdict.decision == CommandDecision::Deny || allow) {
                 send({{"type", "approval_response"}, {"id", event.value("id").toInt()}, {"allow", allow},
@@ -782,14 +779,10 @@ void ClaudeAgent::handleLine(const QByteArray &line)
                 return;
             }
         }
-        if (event.value("tool").toString() == "Bash")
-            approvalVerdicts_.insert(event.value("id").toInt(),
-                                     commandRuleVerdict(event.value("input").toObject().value("command").toString(),
-                                                        commandContext({})));
         const QString details = QString::fromUtf8(QJsonDocument(event.value("input").toObject()).toJson(QJsonDocument::Indented));
         emit approvalRequested(event.value("id").toInt(), "Approve " + name_ + " action",
                                event.value("tool").toString() + "\n\n" + details.trimmed(),
-                               event.value("canRemember").toBool(), event.value("alwaysRule").toString());
+                               event.value("canRemember").toBool(), event.value("alwaysRule").toString(), QString(), patterns);
     } else if (type == "question") {
         // The SDK keys answers by question text.
         QList<AgentQuestion> questions;

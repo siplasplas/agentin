@@ -7,6 +7,7 @@
 #include <QObject>
 
 #include <functional>
+#include <optional>
 
 class QTextDocument;
 class QTimer;
@@ -24,6 +25,7 @@ struct PendingRequest
     bool canAcceptForSession = false;
     QString alwaysRule;
     QString sessionRule;
+    QStringList alwaysPatterns;
     QList<AgentQuestion> questions;
     // The question shown now; earlier ones are answered.
     qsizetype current = 0;
@@ -105,7 +107,8 @@ public:
     // Approvals and questions are answered in the tab, one request at a time.
     const PendingRequest *pendingRequest() const { return requests_.isEmpty() ? nullptr : &requests_.first(); }
     qsizetype pendingRequestCount() const { return requests_.size(); }
-    void answerApproval(ApprovalDecision decision);
+    // With Always, patterns replaces the request's alwaysPatterns, as the user edited them.
+    void answerApproval(ApprovalDecision decision, const std::optional<QStringList> &patterns = std::nullopt);
     // Approvals given "for this session" in this chat, as the user reads them.
     QStringList sessionApprovals() const { return sessionApprovals_; }
     void resetSessionApprovals();

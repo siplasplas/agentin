@@ -68,6 +68,7 @@ private slots:
     void claudeAttachRespectsExternalLock();
     void geminiAttachRespectsExternalLock();
     void newChatAfterClosingAllTabs();
+    void approvalsFileVersions();
 };
 
 void MainWindowTest::foldedOutputScrolling()
@@ -841,8 +842,10 @@ for line in sys.stdin:
     approvals.clear();
     request(101, "git fetch first");
     QCOMPARE(approvals.size(), 1);
-    QVERIFY(!approvals.last().at(4).toString().isEmpty());
+    // Always adds agentin's line, which the tab may let the user edit; Codex gets no rule of its own.
+    QVERIFY(approvals.last().at(4).toString().isEmpty());
     QCOMPARE(approvals.last().at(5).toString(), QString("git fetch"));
+    QCOMPARE(approvals.last().at(6).toStringList(), QStringList{"git fetch *"});
     chat.answerApproval(approvals.last().first().toInt(), ApprovalDecision::AcceptForSession);
     QTRY_COMPARE(responses().value(101), QString("accept"));
     QCOMPARE(chat.trustedSessionCommands(), QStringList{"git fetch"});
@@ -881,6 +884,51 @@ for line in sys.stdin:
     QVERIFY(chat.newConversation(directory.path()));
     QVERIFY(chat.trustedSessionCommands().isEmpty());
     QTRY_COMPARE(chat.sessionId(), QString("test-thread"));
+}
+
+// approvals.json of version 1 loads with the default lists and is written again as version 2; the lists of a
+// version 2 file are used as they are, also when one is empty.
+void MainWindowTest::approvalsFileVersions()
+{
+    const auto restore = qScopeGuard([] {
+        setCommandRules(defaultCommandRules());
+        setApprovalLists(defaultApprovalLists());
+    });
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString path = directory.filePath("approvals.json");
+    const auto write = [&path](const QJsonObject &object) {
+        QFile file(path);
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        file.write(QJsonDocument(object).toJson());
+    };
+    const auto read = [&path] {
+        QFile file(path);
+        return file.open(QIODevice::ReadOnly) ? QJsonDocument::fromJson(file.readAll()).object() : QJsonObject();
+    };
+    write({{"version", 1}, {"commandRules", QJsonArray{QJsonObject{{"pattern", "npm test *"}, {"decision", "Allow"}}}}});
+    {
+        MainWindow window("/nonexistent/codex", directory.path(), "/nonexistent/python", "/nonexistent/bridge",
+                          "/nonexistent/gemini", nullptr, directory.filePath("index.json"), "/nonexistent/agy",
+                          directory.filePath("gemini"));
+        QCOMPARE(approvalLists().secretPaths, defaultApprovalLists().secretPaths);
+        QVERIFY(std::any_of(commandRules().cbegin(), commandRules().cend(),
+                            [](const CommandRule &rule) { return rule.pattern == "npm test *"; }));
+    }
+    QJsonObject saved = read();
+    QCOMPARE(saved.value("version").toInt(), 2);
+    QCOMPARE(saved.value("secretPaths").toArray().size(), defaultApprovalLists().secretPaths.size());
+    QVERIFY(saved.value("askVariables").toArray().contains("LD_PRELOAD"));
+    saved.insert("secretPaths", QJsonArray{"notes.txt"});
+    saved.insert("protectedPaths", QJsonArray{".github/workflows"});
+    saved.insert("askVariables", QJsonArray());
+    write(saved);
+    MainWindow window("/nonexistent/codex", directory.path(), "/nonexistent/python", "/nonexistent/bridge",
+                      "/nonexistent/gemini", nullptr, directory.filePath("index.json"), "/nonexistent/agy",
+                      directory.filePath("gemini"));
+    QCOMPARE(approvalLists().secretPaths, QStringList{"notes.txt"});
+    QCOMPARE(approvalLists().protectedPaths, QStringList{".github/workflows"});
+    QVERIFY(approvalLists().askVariables.isEmpty());
 }
 
 // Starts a chat through the New chat dialog, choosing the agent and working directory there.

@@ -84,6 +84,7 @@ private:
     void showOptionsDialog();
     void applyChatFont(const QFont &font);
     void showApprovalsDialog();
+    bool editAlwaysPatterns(QStringList &patterns);
     void showNotificationsDialog();
     void showMuteState();
     void loadRecentDirectories();

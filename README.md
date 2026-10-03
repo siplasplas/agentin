@@ -701,9 +701,16 @@ pattern with a check box and **Allow** (runs without asking), **Ask** (always
 asks, whatever chat trust or the agent's own rules say) or **Deny** (declined at
 once, with no way to agree). `*` matches any text and `?`
 one character, and a trailing ` *` also matches the command alone, so
-`git stash *` covers `git stash` and `git stash pop`. A pattern applies to each
-command of a command line, after Git's `-C`, `--git-dir` or `--work-tree`
-options. **Add allow**, **Add ask** and **Add deny** add a line, a double-click
+`git stash *` covers `git stash` and `git stash pop`; without it a pattern
+allows no further arguments. Three placeholders match within one argument:
+`<int>` digits, `<path>` any one argument, and `<writable>` a path inside the
+chat's writable directories, judged from the directory the command runs in. So
+`cmake --build build -j<int> *` covers any number of jobs, and
+`rm -rf <writable>` lets the agent remove what it likes inside the project and
+the temporary directory while other removals still ask. A pattern applies to each
+command of a command line, after wrappers such as `env` and `timeout` and after
+Git's `-C`, `--git-dir` or `--work-tree` options. The column headers show this
+syntax as a tooltip. **Add allow**, **Add ask** and **Add deny** add a line, a double-click
 edits its pattern or switches its decision, **Remove** deletes it, an unchecked line stays
 listed without effect, a click on a column header sorts the list, and a line's
 context menu copies it or sets its decision. On the first start the list holds
@@ -721,11 +728,25 @@ secrets, and `gh api` with a writing request) — are listed as Deny at every
 start with a checked box that cannot be changed, and they apply whatever the
 settings say.
 
-The rules are kept in `approvals.json` in agentin's data directory, apart from
-`settings.json`, together with the Codex rules agentin has seen and kept.
+The dialog has three more pages, each an editable list with **Add**, **Remove**
+and **Restore defaults**: **Secret files** (paths whose contents a command may
+not show without a question), **Protected paths** (places where writing by a
+shell command asks, empty at first; `.github/workflows` is a typical line), and
+**Variables** (names whose setting asks, such as `PATH`, `LD_PRELOAD` or
+`GIT_CONFIG*`). A path line uses `~/` for the home directory, `*` and `?` within a
+name and `**` for any directories; a line that does not start with `/` or `~/`
+matches at any depth, and a directory covers everything in it, so `.env` covers
+every `.env` file and `~/.ssh` the whole directory. The **Chat trust** page lists
+what each open chat trusts for its session, and **Remove** withdraws it. Nothing
+changes before **OK**.
+
+The rules and the lists are kept in `approvals.json` (version 2) in agentin's
+data directory, apart from `settings.json`, together with the Codex rules agentin
+has seen and kept. A file of version 1, without the lists, loads with the default
+lists and is written as version 2 at the next change.
 agentin watches the file while it runs: an outside edit takes effect at once,
 with the fixed denials added back, and a removed file is written again with the
-default rules, so removing it resets the list. Earlier versions kept such rules
+default rules and lists, so removing it resets them. Earlier versions kept such rules
 in `settings.json` (`trustedCommands` or `commandRules`); they are not migrated:
 agentin does not start with such a section and shows an error, which can be
 copied, naming the file, so that the section or the whole file can be removed.
@@ -759,11 +780,13 @@ where they really write. The decision is taken in this order:
    `git branch -D`, `git stash drop`/`clear`, `git commit --amend`,
    `git gc --prune`, `git reflog expire`.
 
-Some things ask whatever the Allow lines say: reading a file that may hold
-secrets (`~/.ssh`, `~/.gnupg`, `~/.netrc`, `~/.aws`, `~/.config/gh`, `.env`
-files, `*.pem`, `id_rsa*`, `id_ed25519*`, `*credentials*`), a redirection to a
-file outside the writable directories, a variable that changes what programs
-run (`PATH`, `LD_PRELOAD`, `IFS`, `GIT_EDITOR`, `GIT_SSH_COMMAND` and similar),
+Some things ask whatever the Allow lines say: reading a file of the **Secret
+files** list (at first `~/.ssh`, `~/.gnupg`, `~/.zai-key`, `~/.netrc`, `~/.aws`,
+`~/.config/gh`, `.env` files, `*.pem`, `id_rsa*`, `id_ed25519*` and
+`*credentials*`), writing a path of the **Protected paths** list, a redirection
+to a file outside the writable directories, a variable of the **Variables**
+list (at first `PATH`, `LD_PRELOAD`, `IFS`, `HOME`, `GIT_EDITOR`,
+`GIT_SSH_COMMAND` and others that choose a program),
 a command that an Allow line covers but that is known to write a file or run a
 program through an option (`git diff --output=…`), and a line that cannot be
 parsed or followed (a `case`, a function, a command run in the background with
@@ -773,12 +796,17 @@ ask, as the files come from the input and one of them could be a secret.
 
 A line is allowed only when every command of it is. When it asks, agentin names
 the commands that need the question and why; agreeing runs the whole line.
-**Always allow** adds an Allow line for each named command: `git fetch *` for a
-Git command, `git tag -f *` for one that can lose work, and the command itself
-with ` *` otherwise, which also covers what asked about it, such as the secret
-file it reads. **Trust … for this chat** allows the same commands until the
-conversation changes, without saving anything. A redirection outside the
-writable directories and a dangerous variable can only be allowed once.
+**Always allow…** opens the lines it would add to agentin's rules, one per named
+command, to edit before they are saved: `git fetch *` for a Git command,
+`git tag -f *` for one that can lose work, the program with the words that name
+what it does for a command agentin does not know or that uses the network
+(`gh run list *`, `npm test *`), and the command itself otherwise, with numbers
+as `<int>` (`cmake --build /opt/x -j<int> *`). A line that names the whole command
+also covers what asked about it, such as the secret file it reads or the
+protected path it writes; a broader line does not. **Trust … for this chat**
+allows the same commands until the conversation changes, without saving
+anything. A redirection outside the writable directories or into a protected
+path and a variable of the list can only be allowed once.
 Installing, such as `make install`, writes to a place the command does not
 name, so it is not offered a lasting line: allow it once, or trust it for the
 chat.
@@ -811,19 +839,18 @@ At every start agentin reports, in the log, Codex rules added while it was not
 running and the conflicts not yet resolved.
 
 Codex asks about far fewer commands, as it runs most of them in its sandbox;
-those it does ask about are judged the same way. Chat trust is kept in agentin's
-memory, without writing a lasting Codex rule; a chain such as
-`git fetch … && git pull` offers each command, trusted on its own.
+those it does ask about are judged the same way. **Always allow…** on such a
+command adds only agentin's lines and no Codex rule, so that Codex keeps asking
+and agentin's rules, with their denials, keep answering. Chat trust is kept in
+agentin's memory; a chain such as `git fetch … && git pull` offers each command,
+trusted on its own. It belongs to one conversation in one chat and ends when
+changing the conversation or exiting the application.
 
-A lasting **Always allow** rule that Codex proposes for a Git command is saved
-without its files or message, as `git add`, `git commit -m` or `git` with the
-subcommand, so that it matches the next such command; other commands keep the
-proposed rule. The rule goes both into Codex's rules and, with ` *` added, into
-agentin's list. `sudo`, `doas`, `su` and `git push` are never offered a lasting
-rule, and requests for them are declined. Chat trust is kept in memory, belongs
-to one conversation in one chat and ends when changing the conversation or
-exiting the application.
-Network approval requests require their own decision.
+Network approval requests require their own decision: their **Always allow**
+saves the rule that Codex proposes, for a Git command without its files or
+message (as `git` with the subcommand), in Codex's rules. `sudo`, `doas`, `su`
+and `git push` are never offered a lasting rule, and requests for them are
+declined.
 
 Codex can also ask for additional permissions, such as writing to or reading
 directories outside the chat's directory, or network access. The panel lists

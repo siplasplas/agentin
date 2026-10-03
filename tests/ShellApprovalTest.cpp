@@ -26,6 +26,9 @@ private slots:
     void decisions();
     void rulesAndTrust();
     void symbolicLinks();
+    void typedPatterns();
+    void suggestions();
+    void editableLists();
     void corpusParses();
     void prefixesDoNotCrash();
     void evaluate_data();
@@ -141,7 +144,8 @@ void ShellApprovalTest::decisions_data()
           "git status > /dev/null", "cat .git/config", "ls .gi*", "ls ~/.ssh", "wc -l ~/.ssh/config", "cat src/*", "cat src/*.json",
           "make -j8", "./run.sh --all", "/tmp/build/tool", "[ -f x ] && cat x", "cd /etc && ls; cat passwd",
           "for f in src/*.cpp; do wc -l \"$f\"; done", "X=build; cmake --build $X -j4 2>&1 | tail -5",
-          "mkdir -p /tmp/a && cd /tmp/a && echo hi > f && cat f", "git stash list", "git branch --show-current", "git tag v1"})
+          "mkdir -p /tmp/a && cd /tmp/a && echo hi > f && cat f", "git stash list", "git branch --show-current", "git tag v1",
+          "touch build/*", "cp src/* /tmp/"})
         row("allow", command);
     for (const char *command :
          {"/opt/x/bash -lc 'git add .'", "/opt/x/git add .", "git commit -m hello > /etc/log", "git add $FILES",
@@ -295,6 +299,108 @@ void ShellApprovalTest::symbolicLinks()
              Decision::Allow);
     const CommandVerdict asked = commandRuleVerdict("touch link/x", {base + "/project", {base + "/project"}, {}, base + "/home"});
     QVERIFY2(asked.reason.contains("really " + base + "/outside/x"), qPrintable(asked.reason));
+}
+
+// The placeholders of the rules match one argument each.
+void ShellApprovalTest::typedPatterns()
+{
+    const auto inProject = [](const QString &path) { return path.startsWith("/p/") || path == "build"; };
+    QVERIFY(commandPatternMatches("cmake --build build -j<int> *", "cmake --build build -j16"));
+    QVERIFY(!commandPatternMatches("cmake --build build -j<int> *", "cmake --build build -jx"));
+    QVERIFY(commandPatternMatches("head -n <int> <path>", "head -n 5 a.txt"));
+    QVERIFY(!commandPatternMatches("head -n <int> <path>", "head -n 5 a b"));
+    QVERIFY(commandPatternMatches("rm -rf <writable> *", "rm -rf build", inProject));
+    QVERIFY(!commandPatternMatches("rm -rf <writable> *", "rm -rf /etc", inProject));
+    QVERIFY(!commandPatternMatches("rm -rf <writable> *", "rm -rf build"));
+    QVERIFY(commandPatternMatches("cat <x> *", "cat <x>"));
+    QVERIFY(patternOverlapsPrefix("cmake --build <writable> *", "cmake"));
+    QVERIFY(!patternOverlapsPrefix("cmake --build <writable> *", "ctest"));
+
+    // In a decision, <writable> is judged from the directory the command runs in. Without a trailing " *" the
+    // rule allows no other arguments.
+    setCommandRules({{"rm *", CommandDecision::Ask, true}, {"rm -rf <writable>", CommandDecision::Allow, true}});
+    const auto restore = qScopeGuard([] { setCommandRules(defaultCommandRules()); });
+    const CommandContext context{"/p", {"/p", "/tmp"}, {}, "/h"};
+    QCOMPARE(commandRuleVerdict("rm -rf build", context).decision, CommandDecision::Allow);
+    QCOMPARE(commandRuleVerdict("cd /tmp && rm -rf qce", context).decision, CommandDecision::Allow);
+    QCOMPARE(commandRuleVerdict("cd /etc && rm -rf x", context).decision, CommandDecision::Ask);
+    QCOMPARE(commandRuleVerdict("rm -rf ../other", context).decision, CommandDecision::Ask);
+    QCOMPARE(commandRuleVerdict("rm -rf build /etc", context).decision, CommandDecision::Ask);
+}
+
+// What Always proposes: a family of commands where that is safe, the command itself otherwise, with numbers
+// as <int> and its glob characters standing for themselves.
+void ShellApprovalTest::suggestions()
+{
+    setCommandRules(defaultCommandRules());
+    const CommandContext context{"/p", {"/p", "/tmp"}, {}, "/h"};
+    const auto always = [&context](const QString &command) { return commandRuleVerdict(command, context).alwaysPatterns(); };
+    QCOMPARE(always("gh run list --limit 5"), QStringList{"gh run list *"});
+    QCOMPARE(always("gh pr view 5"), QStringList{"gh pr view *"});
+    QCOMPARE(always("npm test"), QStringList{"npm test *"});
+    QCOMPARE(always("git fetch origin main"), QStringList{"git fetch *"});
+    QCOMPARE(always("curl https://example.com"), QStringList{"curl https://example.com *"});
+    QCOMPARE(always("python3 -m json.tool"), QStringList{"python3 -m json.tool *"});
+    QCOMPARE(always("cmake --build /usr/local/x -j16"), QStringList{"cmake --build /usr/local/x -j<int> *"});
+    QCOMPARE(always("rm -rf build/*"), QStringList{"rm -rf build/[*] *"});
+    QCOMPARE(always("git tag -f v1"), QStringList{"git tag -f *"});
+    QCOMPARE(always("ls && npm test && gh pr view 5"), (QStringList{"npm test *", "gh pr view *"}));
+    // A command that asks for another reason as well keeps its own rule.
+    QCOMPARE(always("npm test > /etc/x"), QStringList());
+    QCOMPARE(always("make install"), QStringList());
+
+    // A rule that Always added names the whole command, so it also covers the secret file the command reads.
+    const QString secret = "head -5 ~/.ssh/id_rsa";
+    QCOMPARE(always(secret), QStringList{"head -<int> /h/.ssh/id_rsa *"});
+    const auto restore = qScopeGuard([] { setCommandRules(defaultCommandRules()); });
+    QVERIFY(addAllowRule("head -<int> /h/.ssh/id_rsa *"));
+    QCOMPARE(commandRuleVerdict(secret, context).decision, CommandDecision::Allow);
+    QCOMPARE(commandRuleVerdict("head -20 ~/.ssh/id_rsa", context).decision, CommandDecision::Allow);
+    QCOMPARE(commandRuleVerdict("head -5 ~/.ssh/id_rsa ~/.ssh/id_ed25519", context).decision, CommandDecision::Ask);
+    QVERIFY(addAllowRule("rm -rf build/[*] *"));
+    QCOMPARE(commandRuleVerdict("rm -rf build/*", context).decision, CommandDecision::Allow);
+    QCOMPARE(commandRuleVerdict("rm -rf build/x", context).decision, CommandDecision::Ask);
+}
+
+// The secret files, protected paths and variables come from lists that the user edits.
+void ShellApprovalTest::editableLists()
+{
+    setCommandRules(defaultCommandRules());
+    const auto restore = qScopeGuard([] {
+        setCommandRules(defaultCommandRules());
+        setApprovalLists(defaultApprovalLists());
+    });
+    const CommandContext context{"/p", {"/p", "/tmp"}, {}, "/h"};
+    const auto decision = [&context](const QString &command) { return commandRuleVerdict(command, context).decision; };
+    QVERIFY(pathMatchesList("/h/.ssh/id_rsa", {"~/.ssh"}, "/h"));
+    QVERIFY(pathMatchesList("/h/.ssh", {"~/.ssh"}, "/h"));
+    QVERIFY(!pathMatchesList("/h/.sshx", {"~/.ssh"}, "/h"));
+    QVERIFY(pathMatchesList("/p/a/b/.env", {".env"}, "/h"));
+    QVERIFY(pathMatchesList("/p/.github/workflows/ci.yml", {".github/workflows"}, "/h"));
+    QVERIFY(pathMatchesList("/p/*/.env", {".env"}, "/h"));
+    QVERIFY(pathMatchesList("/p/.e*", {".env"}, "/h"));
+    QVERIFY(!pathMatchesList("/p/src/*", {".env"}, "/h"));
+    QVERIFY(pathMatchesList("/srv/keys/a.pem", {"/srv/keys/**/*.pem"}, "/h"));
+
+    QCOMPARE(decision("cat notes.txt"), CommandDecision::Allow);
+    QCOMPARE(decision("touch .github/workflows/ci.yml"), CommandDecision::Allow);
+    QCOMPARE(decision("MY_TOOL_PATH=/x make"), CommandDecision::Allow);
+    QCOMPARE(decision("PATH=. make"), CommandDecision::Ask);
+    setApprovalLists({{"notes.txt"}, {".github/workflows"}, {"MY_*"}});
+    QCOMPARE(decision("cat notes.txt"), CommandDecision::Ask);
+    QCOMPARE(decision("wc -l notes.txt"), CommandDecision::Allow);
+    QCOMPARE(decision("cat ~/.ssh/id_rsa"), CommandDecision::Allow);
+    QCOMPARE(decision("touch .github/workflows/ci.yml"), CommandDecision::Ask);
+    QCOMPARE(decision("echo x > .github/workflows/ci.yml"), CommandDecision::Ask);
+    QCOMPARE(decision("cat .github/workflows/ci.yml"), CommandDecision::Allow);
+    QCOMPARE(decision("MY_TOOL_PATH=/x make"), CommandDecision::Ask);
+    QCOMPARE(decision("PATH=. make"), CommandDecision::Allow);
+    // Writing into .git stays declined without a line.
+    QCOMPARE(decision("touch .git/x"), CommandDecision::Deny);
+    // Always can name a command that writes a protected path, but not a redirection there.
+    QCOMPARE(commandRuleVerdict("touch .github/workflows/ci.yml", context).alwaysPatterns(),
+             QStringList{"touch .github/workflows/ci.yml *"});
+    QVERIFY(commandRuleVerdict("echo x > .github/workflows/ci.yml", context).alwaysPatterns().isEmpty());
 }
 
 void ShellApprovalTest::parse_data()

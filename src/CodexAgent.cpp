@@ -401,8 +401,6 @@ void CodexAgent::answerApproval(int id, ApprovalDecision decision)
             {"acceptWithExecpolicyAmendment", QJsonObject{{"execpolicy_amendment", rule}}}}}});
         QStringList words;
         for (const QJsonValue &word : rule) words.append(word.toString());
-        // The rule also goes into agentin's list, which wins over Codex's own rules.
-        addAllowRule(words.join(' ') + " *");
         emit message("[Approval: always allow commands starting with " + words.join(' ') + "]");
         return;
     }
@@ -790,10 +788,11 @@ void CodexAgent::handleServerRequest(const QString &method, const QJsonValue &id
     if (method == "item/commandExecution/requestApproval" || method == "item/fileChange/requestApproval") {
         QStringList sessionRules;
         CommandVerdict verdict;
-        if (method == "item/commandExecution/requestApproval") {
-            // agentin's rules decide before asking; Codex's own rules acted already. A request for network
-            // access needs its own decision, so neither the rules nor chat trust allow it.
-            const bool network = !params.value("networkApprovalContext").toObject().isEmpty();
+        const bool command = method == "item/commandExecution/requestApproval";
+        // A request for network access needs its own decision, so neither the rules nor chat trust allow it.
+        const bool network = command && !params.value("networkApprovalContext").toObject().isEmpty();
+        if (command) {
+            // agentin's rules decide before asking; Codex's own rules acted already.
             CommandContext context;
             context.directory = params.value("cwd").toString(workingDirectory_);
             context.writable = writableDirectories() + QStringList{workingDirectory_, "/tmp", QDir::tempPath()};
@@ -854,16 +853,16 @@ void CodexAgent::handleServerRequest(const QString &method, const QJsonValue &id
         const QJsonArray rule = QJsonArray::fromStringList(lastingRulePrefix(proposed));
         QString alwaysRule;
         if (!sessionRules.isEmpty()) requestSessionRules_.insert(requestId, sessionRules);
-        // No lasting rule for a command that should be decided each time, such as an install.
-        const bool lasting = std::none_of(verdict.findings.cbegin(), verdict.findings.cend(),
-                                          [](const CommandFinding &finding) { return !finding.rule.isEmpty() && !finding.lasting; });
-        if (!rule.isEmpty() && lasting) {
+        // Always on a command adds agentin's lines only, without a Codex rule, so that Codex keeps asking and
+        // agentin's rules, with their denials, keep deciding. Network access is granted by a Codex rule.
+        if (network && !rule.isEmpty()) {
             proposedRules_.insert(requestId, rule);
             QStringList words;
             for (const QJsonValue &word : rule) words.append(word.toString());
             alwaysRule = "Allow commands starting with \"" + words.join(' ') + "\" without asking";
         }
-        emit approvalRequested(requestId, "Approve Codex action", description.trimmed(), true, alwaysRule, sessionRule);
+        emit approvalRequested(requestId, "Approve Codex action", description.trimmed(), true, alwaysRule, sessionRule,
+                               network ? QStringList() : verdict.alwaysPatterns());
     } else if (method == "item/permissions/requestApproval") {
         const QJsonObject permissions = params.value("permissions").toObject();
         QStringList lines{params.value("reason").toString()};

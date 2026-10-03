@@ -140,12 +140,58 @@ bool addAllowRule(const QString &pattern)
     return true;
 }
 
-bool commandPatternMatches(const QString &pattern, const QString &command)
+namespace {
+const QRegularExpression &placeholderExpression()
 {
-    const auto matches = [&command](const QString &glob) {
-        const QRegularExpression expression(
-            QRegularExpression::wildcardToRegularExpression(glob, QRegularExpression::NonPathWildcardConversion));
-        return expression.isValid() && expression.match(command).hasMatch();
+    static const QRegularExpression expression("<(int|path|writable)>");
+    return expression;
+}
+
+// The pattern as a regular expression for a whole command; each <writable> is a captured group.
+QRegularExpression patternExpression(const QString &pattern)
+{
+    static QHash<QString, QRegularExpression> cache;
+    const auto found = cache.constFind(pattern);
+    if (found != cache.constEnd()) return *found;
+    const auto glob = [](const QString &text) {
+        return text.isEmpty() ? QString()
+                              : QRegularExpression::wildcardToRegularExpression(
+                                    text, QRegularExpression::NonPathWildcardConversion | QRegularExpression::UnanchoredWildcardConversion);
+    };
+    QString expression;
+    qsizetype from = 0;
+    for (auto it = placeholderExpression().globalMatch(pattern); it.hasNext();) {
+        const QRegularExpressionMatch match = it.next();
+        expression += glob(pattern.mid(from, match.capturedStart() - from));
+        const QString name = match.captured(1);
+        expression += name == "int" ? "[0-9]+" : name == "path" ? "[^ ]+" : "([^ ]+)";
+        from = match.capturedEnd();
+    }
+    expression += glob(pattern.mid(from));
+    const QRegularExpression compiled("\\A(?:" + expression + ")\\z");
+    if (cache.size() > 2000) cache.clear();
+    cache.insert(pattern, compiled);
+    return compiled;
+}
+
+// The position of the first wildcard or placeholder, or -1.
+qsizetype firstWildcard(const QString &pattern)
+{
+    static const QRegularExpression wildcard(R"([*?\[]|<(int|path|writable)>)");
+    return pattern.indexOf(wildcard);
+}
+}
+
+bool commandPatternMatches(const QString &pattern, const QString &command, const std::function<bool(const QString &)> &writable)
+{
+    const auto matches = [&](const QString &text) {
+        const QRegularExpression expression = patternExpression(text);
+        if (!expression.isValid()) return false;
+        const QRegularExpressionMatch match = expression.match(command);
+        if (!match.hasMatch()) return false;
+        for (int group = 1; group <= match.lastCapturedIndex(); ++group)
+            if (!writable || !writable(match.captured(group))) return false;
+        return true;
     };
     const QString simplified = pattern.simplified();
     if (simplified.isEmpty()) return false;
@@ -158,8 +204,7 @@ bool patternOverlapsPrefix(const QString &pattern, const QString &prefix)
 {
     // The literal start keeps a space before a wildcard, so that "apt *" does not reach "apt-get".
     QString literal = pattern.simplified();
-    static const QRegularExpression wildcard(R"([*?\[])");
-    const qsizetype first = literal.indexOf(wildcard);
+    const qsizetype first = firstWildcard(literal);
     if (first >= 0) literal = literal.left(first);
     else literal += ' ';
     const QString start = prefix.simplified() + ' ';
@@ -171,21 +216,60 @@ namespace {
 // "rm -rf build *", allowed with Always, passes while "rm *" still asks about other removals.
 int specificity(const QString &pattern)
 {
-    static const QRegularExpression wildcard(R"([*?\[])");
-    const qsizetype first = pattern.simplified().indexOf(wildcard);
+    const qsizetype first = firstWildcard(pattern.simplified());
     return int(first < 0 ? pattern.simplified().size() + 1 : first);
 }
 
+using Writable = std::function<bool(const QString &)>;
+
 // The most specific enabled rule of the decision that matches the command, or an empty string.
-QString bestRule(const QString &line, CommandDecision decision)
+QString bestRule(const QString &line, CommandDecision decision, const Writable &writable = {})
 {
     QString found;
     for (const CommandRule &rule : ruleList())
-        if (rule.enabled && rule.decision == decision && commandPatternMatches(rule.pattern, line)
+        if (rule.enabled && rule.decision == decision && commandPatternMatches(rule.pattern, line, writable)
             && (found.isEmpty() || specificity(rule.pattern) > specificity(found)))
             found = rule.pattern;
     return found;
 }
+
+// Whether a pattern names the whole command, as Always adds it: only <int> may stand for a part of it, and a
+// trailing " *" adds nothing to the command it matched.
+bool coversExactly(const QString &pattern, const QString &line)
+{
+    QString text = pattern.simplified();
+    if (text.endsWith(" *")) text.chop(2);
+    static const QRegularExpression broad(R"([*?\[]|<(path|writable)>)");
+    return !text.contains(broad) && commandPatternMatches(text, line);
+}
+
+ApprovalLists &lists()
+{
+    static ApprovalLists value = defaultApprovalLists();
+    return value;
+}
+}
+
+ApprovalLists defaultApprovalLists()
+{
+    ApprovalLists defaults;
+    defaults.secretPaths = {"~/.ssh",  "~/.gnupg", "~/.zai-key",    "~/.netrc", "~/.config/gh", "~/.aws",
+                            ".env",    ".env.*",   "*credentials*", "*.pem",    "id_rsa*",      "id_ed25519*"};
+    defaults.askVariables = {"LD_PRELOAD", "LD_LIBRARY_PATH", "LD_AUDIT", "PATH", "PYTHONPATH", "BASH_ENV", "ENV", "IFS", "PS4",
+                             "CDPATH", "HOME", "GIT_DIR", "GIT_WORK_TREE", "GIT_SSH", "GIT_SSH_COMMAND", "GIT_EXEC_PATH",
+                             "GIT_CONFIG*", "GIT_EDITOR", "GIT_SEQUENCE_EDITOR", "GIT_PAGER", "GIT_EXTERNAL_DIFF", "GIT_ASKPASS",
+                             "GIT_PROXY_COMMAND", "SSH_ASKPASS", "EDITOR", "VISUAL", "PAGER"};
+    return defaults;
+}
+
+ApprovalLists approvalLists()
+{
+    return lists();
+}
+
+void setApprovalLists(const ApprovalLists &value)
+{
+    lists() = value;
 }
 
 namespace {
@@ -245,70 +329,103 @@ QString outside(const QString &path, const QStringList &writable, const char *ve
     return QString(verb) + ' ' + path + (real == path ? QString() : " (really " + real + ")") + ", outside the writable directories";
 }
 
-// Whether a path is .git or inside one; a pattern that could name .git counts too.
+// Whether a path is .git or inside one; a pattern that could name .git counts too. The shell's * and ? do not
+// match a leading dot, so only a pattern that starts with one can.
 bool namesGitDirectory(const QString &path)
 {
     for (const QString &component : path.split('/', Qt::SkipEmptyParts))
-        if (component == ".git" || (hasGlob(component) && globMatches(component, ".git"))) return true;
+        if (component == ".git" || (hasGlob(component) && component.startsWith('.') && globMatches(component, ".git")))
+            return true;
     return false;
 }
 
-// The files that may hold keys and passwords: reading them asks. ** stands for any directories.
-const QStringList &secretPatterns()
+// Whether two names, either of which may hold glob characters, could be the same name. A glob that takes any
+// name, such as *, does not lead to a particular file as the last part of a path, no more than a recursive
+// search does.
+bool namesMeet(const QString &path, const QString &pattern, bool last)
 {
-    static const QStringList patterns{"~/.ssh/**",  "~/.gnupg/**",      "~/.zai-key", "~/.netrc",     "~/.config/gh/**", "~/.aws/**",
-                                      "**/.env",    "**/.env.*",        "**/*credentials*", "**/*.pem", "**/id_rsa*",
-                                      "**/id_ed25519*"};
-    return patterns;
-}
-
-QRegularExpression secretExpression(QString pattern, const QString &home)
-{
-    if (pattern.startsWith("~/")) pattern = home + pattern.mid(1);
-    QString expression = "^";
-    for (int i = 0; i < pattern.size(); ++i) {
-        if (pattern.mid(i, 3) == "**/") {
-            expression += "(?:.*/)?";
-            i += 2;
-        } else if (pattern.mid(i) == "/**") {
-            // The directory itself, as a recursive search reads all of it.
-            expression += "(?:/.*)?";
-            i += 2;
-        } else if (pattern.at(i) == '*') {
-            expression += "[^/]*";
-        } else {
-            expression += QRegularExpression::escape(pattern.at(i));
+    if (path == pattern) return true;
+    const bool pathGlob = hasGlob(path);
+    if (pathGlob && last)
+        for (const char *name : {"x", "file.txt", "data.json"})
+            if (globMatches(path, name)) return false;
+    if (pathGlob && hasGlob(pattern)) {
+        // Two globs meet when one matches a name the other stands for, with its wildcards left empty or filled.
+        for (const QString &fill : {QString(), QString("x")}) {
+            QString patternName = pattern;
+            QString pathName = path;
+            patternName.replace('*', fill).replace('?', 'x');
+            pathName.replace('*', fill).replace('?', 'x');
+            if (globMatches(path, patternName) || globMatches(pattern, pathName)) return true;
         }
+        return false;
     }
-    return QRegularExpression(expression + "$");
+    if (pathGlob) return globMatches(path, pattern);
+    return hasGlob(pattern) && globMatches(pattern, path);
 }
 
+// Whether the path from part i on could name a file that the pattern from part j on covers; ** stands for
+// any directories, and what is below a matched pattern is covered too.
+bool partsMeet(const QStringList &path, int i, const QStringList &pattern, int j)
+{
+    if (j == pattern.size()) return true;
+    if (pattern.at(j) == "**") return partsMeet(path, i, pattern, j + 1) || (i < path.size() && partsMeet(path, i + 1, pattern, j));
+    if (i == path.size()) return false;
+    return namesMeet(path.at(i), pattern.at(j), i + 1 == path.size()) && partsMeet(path, i + 1, pattern, j + 1);
+}
+}
+
+bool pathMatchesList(const QString &path, const QStringList &patterns, const QString &home)
+{
+    if (!path.startsWith('/')) return false;
+    const QStringList parts = QDir::cleanPath(path).split('/', Qt::SkipEmptyParts);
+    for (QString pattern : patterns) {
+        pattern = QDir::cleanPath(pattern.trimmed());
+        if (pattern.isEmpty() || pattern == ".") continue;
+        if (pattern == "~" || pattern.startsWith("~/")) pattern = home + pattern.mid(1);
+        else if (!pattern.startsWith('/')) pattern = "**/" + pattern;
+        if (partsMeet(parts, 0, pattern.split('/', Qt::SkipEmptyParts), 0)) return true;
+    }
+    return false;
+}
+
+namespace {
 bool mayHoldSecrets(const QString &path, const QString &home)
 {
-    for (const QString &pattern : secretPatterns())
-        if (secretExpression(pattern, home).match(path).hasMatch()) return true;
-    if (!hasGlob(path)) return false;
-    // A pattern asks when it could name one of the usual secret files.
-    for (const char *file : {"/.ssh/id_rsa", "/.ssh/id_ed25519", "/.ssh/config", "/.gnupg/secring.gpg", "/.zai-key", "/.netrc",
-                             "/.config/gh/hosts.yml", "/.aws/credentials"})
-        if (globMatches(path, home + file)) return true;
-    // A pattern that takes any file, such as *, is no more a way to a secret than a recursive search is.
-    const QString name = path.section('/', -1);
-    for (const char *file : {"x", "file.txt", "data.json"})
-        if (globMatches(name, file)) return false;
-    for (const char *file : {".env", ".env.local", "credentials", "credentials.json", "key.pem", "id_rsa", "id_ed25519"})
-        if (globMatches(name, file)) return true;
-    return false;
+    return pathMatchesList(path, lists().secretPaths, home);
 }
 
 // Variables that choose the programs a command runs, or change how the shell reads the line.
 bool changesWhatRuns(const QString &variable)
 {
-    static const QSet<QString> variables{"LD_PRELOAD", "LD_LIBRARY_PATH", "LD_AUDIT", "PATH", "PYTHONPATH", "BASH_ENV", "ENV",
-                                         "IFS", "PS4", "CDPATH", "HOME", "GIT_DIR", "GIT_WORK_TREE", "GIT_SSH", "GIT_SSH_COMMAND",
-                                         "GIT_EXEC_PATH", "GIT_EDITOR", "GIT_SEQUENCE_EDITOR", "GIT_PAGER", "GIT_EXTERNAL_DIFF",
-                                         "GIT_ASKPASS", "GIT_PROXY_COMMAND", "SSH_ASKPASS", "EDITOR", "VISUAL", "PAGER"};
-    return variables.contains(variable) || variable.startsWith("GIT_CONFIG");
+    for (const QString &pattern : lists().askVariables)
+        if (pattern == variable || (hasGlob(pattern) && globMatches(pattern, variable))) return true;
+    return false;
+}
+
+// A command as the text of a rule that names it: glob characters in its words stand for themselves, and a
+// number, alone or after an option such as -j, becomes <int>.
+QString ruleText(const QStringList &words)
+{
+    static const QRegularExpression number("^(-{1,2}[A-Za-z][A-Za-z-]*=?|-)?[0-9]+$");
+    QStringList parts;
+    for (QString word : words) {
+        word.replace(QRegularExpression(R"(([*?\[<]))"), "[\\1]");
+        const QRegularExpressionMatch match = number.match(word);
+        if (match.hasMatch()) word = match.captured(1) + "<int>";
+        parts.append(word);
+    }
+    return parts.join(' ');
+}
+
+// The rule for a command that asks only because agentin does not know it or it uses the network: its program
+// with the words that name what it does, such as "gh run list" or "npm test", when there are any.
+QString commandFamily(const QStringList &words)
+{
+    static const QRegularExpression plain("^[A-Za-z][A-Za-z0-9._+-]*$");
+    int count = 0;
+    while (count < words.size() && plain.match(words.at(count)).hasMatch()) ++count;
+    return count >= 2 ? words.mid(0, count).join(' ') : ruleText(words);
 }
 
 // The words the rules see: the program by its name, and Git without the options that only choose the
@@ -407,14 +524,25 @@ GitAsk gitAsk(const CommandUse &use, const QStringList &words)
     return {};
 }
 
-// The most specific allow among the rules and the prefixes a chat trusts, or an empty string.
-QString bestAllow(const QString &line, const QStringList &trusted)
+struct Allowed
 {
-    QString found = bestRule(line, CommandDecision::Allow);
-    for (const QString &prefix : trusted) {
-        const QString pattern = prefix + " *";
-        if (commandPatternMatches(pattern, line) && (found.isEmpty() || specificity(pattern) > specificity(found))) found = pattern;
-    }
+    QString pattern;
+    // Whether some matching rule names the whole command.
+    bool exact = false;
+};
+
+// The most specific allow among the rules and the prefixes a chat trusts.
+Allowed bestAllow(const QString &line, const QStringList &trusted, const Writable &writable)
+{
+    Allowed found;
+    const auto consider = [&](const QString &pattern) {
+        if (!commandPatternMatches(pattern, line, writable)) return;
+        if (found.pattern.isEmpty() || specificity(pattern) > specificity(found.pattern)) found.pattern = pattern;
+        if (coversExactly(pattern, line)) found.exact = true;
+    };
+    for (const CommandRule &rule : ruleList())
+        if (rule.enabled && rule.decision == CommandDecision::Allow) consider(rule.pattern);
+    for (const QString &prefix : trusted) consider(prefix + " *");
     return found;
 }
 
@@ -432,6 +560,15 @@ Judged judge(const CommandUse &use, const CommandContext &context, const QString
     const QStringList words = ruleWords(use);
     const QString text = words.join(' ');
     const auto denied = [](const QString &reason) { return Judged{CommandDecision::Deny, reason, {}, false, {}}; };
+    // <writable> in a rule: a path that is inside the writable directories from every directory the command
+    // may run in.
+    const Writable writable = [&use, &context](const QString &path) {
+        if (path.startsWith('/')) return inside(realPath(QDir::cleanPath(path)), context.writable);
+        if (use.directories.isEmpty()) return false;
+        for (const QString &directory : use.directories)
+            if (!inside(realPath(QDir::cleanPath(directory + '/' + path)), context.writable)) return false;
+        return true;
+    };
 
     if (QStringList{"sudo", "doas", "su"}.contains(use.program)) return denied("privilege escalation is always declined");
     const QString remote = remoteChange(use, words);
@@ -440,7 +577,7 @@ Judged judge(const CommandUse &use, const CommandContext &context, const QString
         for (const QString &pattern : fixedDeniedPatterns())
             if (commandPatternMatches(pattern, text)) return denied(fixedDenial(pattern).isEmpty() ? pattern : fixedDenial(pattern));
         for (const CommandRule &rule : ruleList())
-            if (rule.enabled && rule.decision == CommandDecision::Deny && commandPatternMatches(rule.pattern, text))
+            if (rule.enabled && rule.decision == CommandDecision::Deny && commandPatternMatches(rule.pattern, text, writable))
                 return denied("agentin's rule " + rule.pattern);
     }
     // The repository's .git is changed only by git itself.
@@ -450,26 +587,36 @@ Judged judge(const CommandUse &use, const CommandContext &context, const QString
 
     // What a rule about the command does not cover: where its redirections write.
     QStringList reasons = use.redirectionProblems;
-    for (const QString &path : use.redirectionWrites)
+    for (const QString &path : use.redirectionWrites) {
         if (const QString reason = outside(path, context.writable, "writes"); !reason.isEmpty()) reasons.append(reason);
+        else if (pathMatchesList(path, lists().protectedPaths, home) || pathMatchesList(realPath(path), lists().protectedPaths, home))
+            reasons.append("writes " + path + ", a protected path");
+    }
     const bool coverable = reasons.isEmpty() && !text.isEmpty() && !use.program.isEmpty();
 
-    const QString ask = text.isEmpty() ? QString() : bestRule(text, CommandDecision::Ask);
-    const QString allow = text.isEmpty() ? QString() : bestAllow(text, context.trusted);
+    const QString ask = text.isEmpty() ? QString() : bestRule(text, CommandDecision::Ask, writable);
+    const Allowed allowedBy = text.isEmpty() ? Allowed() : bestAllow(text, context.trusted, writable);
+    const QString allow = allowedBy.pattern;
     const int allowed = allow.isEmpty() ? -1 : specificity(allow);
-    // A rule that names the whole command, as Always adds it, also covers what the command reads and what the
-    // catalog cannot judge about it.
-    const bool exact = allowed >= text.size();
+    // A rule that names the whole command, as Always adds it, also covers what the command reads, where it
+    // writes and what the catalog cannot judge about it.
+    const bool exact = allowedBy.exact;
 
     QStringList problems = use.problems;
     for (const QString &problem : use.redirectionProblems) problems.removeAll(problem);
-    if (!exact && !shell::describesWithoutContents(use.program))
-        for (const QString &path : use.reads)
-            if (mayHoldSecrets(path, home) || mayHoldSecrets(realPath(path), home))
-                reasons.append("reads " + path + ", which may hold secrets");
+    if (!exact) {
+        if (!shell::describesWithoutContents(use.program))
+            for (const QString &path : use.reads)
+                if (mayHoldSecrets(path, home) || mayHoldSecrets(realPath(path), home))
+                    reasons.append("reads " + path + ", which may hold secrets");
+        for (const QString &path : use.writes)
+            if (!use.redirectionWrites.contains(path)
+                && (pathMatchesList(path, lists().protectedPaths, home) || pathMatchesList(realPath(path), lists().protectedPaths, home)))
+                reasons.append("writes " + path + ", a protected path");
+    }
 
     Judged result;
-    result.rule = text;
+    result.rule = ruleText(words);
     const GitAsk git = gitAsk(use, words);
     if (!ask.isEmpty() && allowed <= specificity(ask)) {
         reasons.prepend("agentin's rule " + ask);
@@ -486,14 +633,19 @@ Judged judge(const CommandUse &use, const CommandContext &context, const QString
             reasons.append(use.program.isEmpty() ? QString("the program is not known") : use.program + " is not a program agentin knows");
         else if (use.effect == Effect::Network) reasons.append("it uses the network");
         else if (use.effect == Effect::Remove) reasons.append("it removes files");
+        QStringList places;
         for (const QString &path : use.writes) {
             if (use.redirectionWrites.contains(path)) continue;
-            if (const QString reason = outside(path, context.writable, "writes"); !reason.isEmpty()) reasons.append(reason);
+            if (const QString reason = outside(path, context.writable, "writes"); !reason.isEmpty()) places.append(reason);
         }
         for (const QString &path : use.executes)
-            if (const QString reason = outside(path, context.writable, "runs"); !reason.isEmpty()) reasons.append(reason);
-        // A rule for a Git command covers its other files and messages too.
+            if (const QString reason = outside(path, context.writable, "runs"); !reason.isEmpty()) places.append(reason);
+        reasons += places;
+        // A rule for a Git command covers its other files and messages too, and one for a command that asks only
+        // as it is not known or uses the network covers the same kind of work with other arguments.
         if (plain && words.value(0) == "git") result.rule = lastingRulePrefix(words).join(' ');
+        else if (plain && places.isEmpty() && (use.effect == Effect::Network || use.effect == Effect::Unknown))
+            result.rule = commandFamily(words);
     }
     if (reasons.isEmpty()) return result;
     reasons.removeDuplicates();

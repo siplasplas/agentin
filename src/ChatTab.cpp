@@ -1,6 +1,7 @@
 #include "ChatTab.h"
 #include "ChatView.h"
 #include "ChangeTracker.h"
+#include "CommandApproval.h"
 
 #include "TurnLocks.h"
 
@@ -464,7 +465,7 @@ void ChatTab::setAgent(AgentBackend *agent)
     });
     connect(agent, &AgentBackend::approvalRequested, this,
             [this](int id, const QString &title, const QString &description, bool canAcceptForSession,
-                   const QString &alwaysRule, const QString &sessionRule) {
+                   const QString &alwaysRule, const QString &sessionRule, const QStringList &alwaysPatterns) {
         PendingRequest request;
         request.id = id;
         request.approval = true;
@@ -473,6 +474,7 @@ void ChatTab::setAgent(AgentBackend *agent)
         request.canAcceptForSession = canAcceptForSession;
         request.alwaysRule = alwaysRule;
         request.sessionRule = sessionRule;
+        request.alwaysPatterns = alwaysPatterns;
         requests_.append(request);
         emit requestsChanged();
     });
@@ -740,10 +742,14 @@ void ChatTab::showHistory(const QList<ChatEntry> &entries, bool hasMore, const Q
     emit textAppended();
 }
 
-void ChatTab::answerApproval(ApprovalDecision decision)
+void ChatTab::answerApproval(ApprovalDecision decision, const std::optional<QStringList> &patterns)
 {
     if (requests_.isEmpty() || !requests_.first().approval) return;
     const PendingRequest request = requests_.takeFirst();
+    // agentin's rules decide before the agents' own, so Always adds its lines there.
+    if (decision == ApprovalDecision::AcceptAlways)
+        for (const QString &pattern : patterns.value_or(request.alwaysPatterns))
+            if (addAllowRule(pattern.simplified())) emit logMessage("[Added to agentin's rules: allow " + pattern.simplified() + "]");
     if (decision == ApprovalDecision::AcceptForSession && request.sessionRule.isEmpty()) {
         QStringList lines = request.description.split('\n', Qt::SkipEmptyParts);
         for (QString &line : lines) line = line.trimmed();
