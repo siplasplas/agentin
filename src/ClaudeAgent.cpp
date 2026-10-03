@@ -740,6 +740,8 @@ void ClaudeAgent::handleLine(const QByteArray &line)
         busy_ = false;
         stopRequested_ = false;
         textStarted_ = false;
+        // A steering message the bridge never answered must not block steering in later turns.
+        if (!steeringText_.isEmpty()) emit steerFailed(std::exchange(steeringText_, {}), "the turn ended before it was confirmed");
         emit turnCompleted(event.value("status").toString(), event.value("details").toString());
         emit stateChanged();
         sendNextPrompt();

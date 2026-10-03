@@ -444,7 +444,12 @@ class Bridge:
                       "message": "No turn is running"})
                 return
             self.steered = True
-            await self.client.query(text)
+            try:
+                await self.client.query(text)
+            except Exception as exc:
+                # agentin waits for an answer to every steering message before it lets the user steer again.
+                send({"type": "steer_failed", "text": text, "message": str(exc) or type(exc).__name__})
+                return
             send({"type": "steer_accepted", "text": text})
         elif kind == "stop":
             if self.turn_task is not None:

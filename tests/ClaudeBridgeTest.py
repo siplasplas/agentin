@@ -335,6 +335,23 @@ class ClaudeBridgeTest(unittest.IsolatedAsyncioTestCase):
                     self.assertNotIn("updatedInput", output)
             self.assertFalse(hasattr(bridge, "allowed_file_command"))
 
+    async def test_failed_steering_is_answered(self):
+        events = []
+        with patch.object(bridge_module, "send", events.append):
+            bridge = bridge_module.Bridge("/tmp/project")
+
+            class Failing:
+                async def query(self, text):
+                    raise RuntimeError("not connected")
+
+            bridge.client = Failing()
+            bridge.turn_task = asyncio.get_running_loop().create_future()
+            await bridge.handle({"type": "steer", "text": "also check the tests"})
+            self.assertEqual(events[-1]["type"], "steer_failed")
+            self.assertEqual(events[-1]["text"], "also check the tests")
+            self.assertIn("not connected", events[-1]["message"])
+            bridge.turn_task.cancel()
+
     async def test_glm_requires_zai_credentials(self):
         with patch.dict(bridge_module.os.environ, {}, clear=True):
             bridge = bridge_module.Bridge("/tmp/project", "glm")

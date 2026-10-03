@@ -2563,7 +2563,11 @@ QWidget *MainWindow::addChatTab(AgentProvider *selected, const QString &workingD
     });
     // A tab in the background that waits for an answer is marked until the user switches to it.
     connect(tab, &ChatTab::requestsChanged, this, [this, page, tab] {
-        if (tabs_->currentWidget() == page) updateRequestPanel();
+        // Steering waits while an approval or a question is open, and is possible again once it is answered.
+        if (tabs_->currentWidget() == page) {
+            updateRequestPanel();
+            updateSteerButton();
+        }
         else if (tab->pendingRequest()) tabs_->setTabAttention(page, true);
         // An agent waiting for an answer is announced even at the current tab: the user may be away.
         const QString key = QString::number(quintptr(page));
