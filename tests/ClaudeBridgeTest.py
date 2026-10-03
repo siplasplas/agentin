@@ -1,6 +1,7 @@
 """Exercise the JSONL adapter without starting a paid Claude session."""
 
 import asyncio
+import os
 import importlib.util
 import sys
 import types
@@ -334,6 +335,20 @@ class ClaudeBridgeTest(unittest.IsolatedAsyncioTestCase):
                 else:
                     self.assertNotIn("updatedInput", output)
             self.assertFalse(hasattr(bridge, "allowed_file_command"))
+
+    async def test_edit_outside_the_writable_directories_is_marked(self):
+        events = []
+        with patch.object(bridge_module, "send", events.append):
+            bridge = bridge_module.Bridge("/tmp/project")
+            context = Message(suggestions=[])
+            approval = asyncio.create_task(bridge.can_use_tool("Write", {"file_path": "/srv/other/a.h", "content": "x"}, context))
+            await asyncio.sleep(0)
+            request = events[-1]
+            self.assertEqual(request["type"], "approval")
+            self.assertTrue(request["outsideWritable"])
+            self.assertIn(os.path.realpath("/tmp/project"), request["writable"])
+            await bridge.handle({"type": "approval_response", "id": request["id"], "decision": "decline"})
+            await approval
 
     async def test_failed_steering_is_answered(self):
         events = []

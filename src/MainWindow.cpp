@@ -899,7 +899,12 @@ void MainWindow::submitSteer()
 {
     ChatTab *tab = currentTab();
     const QString text = input_->toPlainText().trimmed();
-    if (!tab || text.isEmpty() || !tab->steer(text)) return;
+    // The button is ready before the message is written, so a click on it first asks for the message.
+    if (text.isEmpty()) {
+        input_->setFocus();
+        return;
+    }
+    if (!tab || !tab->steer(text)) return;
     if (undoAfterSend_) input_->replaceText({});
     else input_->clear();
     input_->setFocus();
@@ -922,11 +927,22 @@ void MainWindow::submitFromKeyboard()
     else submitCommand();
 }
 
+// The button is ready whenever the running turn can take a message, as the Send button is, also before the
+// message is written; the tooltip says why it is not.
 void MainWindow::updateSteerButton()
 {
     const ChatTab *tab = currentTab();
     steerButton_->setVisible(tab && tab->agent()->supportsSteering());
-    steerButton_->setEnabled(canSteerNow());
+    const bool ready = tab && tab->isLive() && !tab->pendingRequest() && tab->agent()->canSteer();
+    steerButton_->setEnabled(ready);
+    QString why;
+    if (tab && !ready) {
+        if (tab->pendingRequest()) why = "\nNot now: answer the approval or question first.";
+        else if (tab->agent()->isSteering()) why = "\nNot now: the previous steering message is not confirmed yet.";
+        else if (!tab->agent()->isResponding()) why = "\nNot now: no turn is running; Send starts one.";
+    }
+    steerButton_->setToolTip("Steer: send this message to the running turn, as Enter does while it runs; "
+                             "Send queues it for the next turn" + why);
 }
 
 namespace {
@@ -3044,10 +3060,6 @@ void MainWindow::updateRequestPanel()
         title->setText("<b>" + request->title.toHtmlEscaped() + "</b>" + waiting.toHtmlEscaped());
         QString description = request->alwaysRule.isEmpty()
             ? request->description : request->description + "\n\nAlways allow: " + request->alwaysRule;
-        QStringList offered;
-        for (const ApprovalChoice &choice : request->choices)
-            if (!choice.pattern.isEmpty()) offered.append(choice.pattern);
-        if (!offered.isEmpty()) description += "\n\nAlways allow… offers these lines for agentin's rules:\n  " + offered.join("\n  ");
         // A long command, such as a whole script, scrolls in a field of limited height, so that the buttons below
         // always stay on the screen.
         layout->removeWidget(text);

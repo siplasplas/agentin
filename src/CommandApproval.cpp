@@ -259,7 +259,8 @@ ApprovalLists defaultApprovalLists()
     defaults.askVariables = {"LD_PRELOAD", "LD_LIBRARY_PATH", "LD_AUDIT", "PATH", "PYTHONPATH", "BASH_ENV", "ENV", "IFS", "PS4",
                              "CDPATH", "HOME", "GIT_DIR", "GIT_WORK_TREE", "GIT_SSH", "GIT_SSH_COMMAND", "GIT_EXEC_PATH",
                              "GIT_CONFIG*", "GIT_EDITOR", "GIT_SEQUENCE_EDITOR", "GIT_PAGER", "GIT_EXTERNAL_DIFF", "GIT_ASKPASS",
-                             "GIT_PROXY_COMMAND", "SSH_ASKPASS", "EDITOR", "VISUAL", "PAGER"};
+                             "GIT_PROXY_COMMAND", "SSH_ASKPASS", "EDITOR", "VISUAL", "PAGER", "PKG_CONFIG_PATH",
+                             "PKG_CONFIG_LIBDIR"};
     return defaults;
 }
 

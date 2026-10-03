@@ -815,9 +815,41 @@ void ClaudeAgent::handleLine(const QByteArray &line)
                 return;
             }
         }
-        const QString details = QString::fromUtf8(QJsonDocument(event.value("input").toObject()).toJson(QJsonDocument::Indented));
-        emit approvalRequested(event.value("id").toInt(), "Approve " + name_ + " action",
-                               event.value("tool").toString() + "\n\n" + details.trimmed(),
+        const QString tool = event.value("tool").toString();
+        const QJsonObject input = event.value("input").toObject();
+        QString details = QString::fromUtf8(QJsonDocument(input).toJson(QJsonDocument::Indented)).trimmed();
+        QString title = "Approve " + name_ + " action";
+        // An edit reads as the file and the change, and says plainly when the file is outside the chat's
+        // directories, as such an edit may change another project.
+        const QString path = input.value(tool == "NotebookEdit" ? "notebook_path" : "file_path").toString();
+        if (QStringList{"Edit", "MultiEdit", "Write", "NotebookEdit"}.contains(tool) && !path.isEmpty()) {
+            const auto shortened = [](const QString &text) {
+                QStringList lines = text.split('\n');
+                const qsizetype count = lines.size();
+                if (count > 30) lines = lines.mid(0, 30) << QString("… %1 more lines").arg(count - 30);
+                return lines.join('\n');
+            };
+            details = tool + " " + path;
+            if (event.value("outsideWritable").toBool()) {
+                title = name_ + " wants to change a file outside this chat's directories";
+                QStringList writable;
+                for (const QJsonValue &directory : event.value("writable").toArray()) writable.append(directory.toString());
+                details += "\n\nThis file is outside the directories of this chat"
+                           + (writable.isEmpty() ? QString() : " (" + writable.join(", ") + ")")
+                           + ". Allowing it lets " + name_ + " change it, for example in another project.";
+            }
+            if (tool == "Write") {
+                details += "\n\nNew content:\n" + shortened(input.value("content").toString());
+            } else if (tool == "Edit") {
+                details += "\n\nReplace:\n" + shortened(input.value("old_string").toString()) + "\n\nWith:\n"
+                         + shortened(input.value("new_string").toString());
+            } else if (tool == "MultiEdit") {
+                details += QString("\n\n%1 changes").arg(input.value("edits").toArray().size());
+            }
+        } else {
+            details = tool + "\n\n" + details;
+        }
+        emit approvalRequested(event.value("id").toInt(), title, details,
                                event.value("canRemember").toBool(), event.value("alwaysRule").toString(), QString(), choices);
     } else if (type == "question") {
         // The SDK keys answers by question text.

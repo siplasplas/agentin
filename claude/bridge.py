@@ -287,8 +287,13 @@ class Bridge:
         if tool_name == "AskUserQuestion":
             send({"type": "question", "id": request_id, "questions": input_data.get("questions", [])})
         else:
+            # An edit asks only outside the writable directories, or in a read-only chat; agentin says which.
+            key = EDIT_TOOLS.get(tool_name)
+            target = input_data.get(key) if key and isinstance(input_data, dict) else None
+            outside = isinstance(target, str) and bool(target) and not self.path_is_allowed(target)
             send({"type": "approval", "id": request_id, "tool": tool_name, "input": input_data,
-                  "canRemember": bool(suggestions), "alwaysRule": describe_permission_updates(suggestions)})
+                  "canRemember": bool(suggestions), "alwaysRule": describe_permission_updates(suggestions),
+                  "outsideWritable": outside, "writable": self.writable_directories() if outside else []})
         try:
             answer = await future
         finally:

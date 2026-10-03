@@ -692,8 +692,10 @@ to change files with its editing tools. Their edits (Edit, MultiEdit, Write and
 NotebookEdit) of files in the chat's directory, in a directory allowed for the
 session, in a directory listed in `permissions.additionalDirectories` of the
 Claude Code settings the session reads, or in the temporary directory (`/tmp`,
-or `TMPDIR`) are approved without asking. These directories are the
-*writable directories* of the chat; shell commands are judged by agentin's
+or `TMPDIR`) are approved without asking. An edit elsewhere asks, and its panel
+names the file, says that it is outside the chat's directories, for example in
+another project, and shows the new content or the replaced text instead of the
+tool's raw input. These directories are the *writable directories* of the chat; shell commands are judged by agentin's
 rules, described next. The reading tools (Read, Grep, Glob and NotebookRead)
 run without a question anywhere, also outside the project, except on a file of
 the **Secret files** list (see below), about which agentin asks; Glob only lists
@@ -781,8 +783,13 @@ where they really write. The decision is taken in this order:
    question: commands that only read (`cat`, `grep`, `ls`, `sed -n`, `git log`,
    `git diff` and the like, anywhere), and commands that write, build or run
    programs only inside the writable directories (`touch`, `cp`, `sed -i`,
-   `git add`, `cmake`, `make`, `ctest`, a program of the project given by its
-   path, a redirection to a file there). Asking: commands that remove files, use
+   `git add`, `cmake`, `cmake --install` with `--prefix`, `make`, `ctest`, the C
+   and C++ compilers `gcc`, `g++`, `cc`, `c++`, `clang` and `clang++`, also
+   versioned as `g++-14`, with flags from `$(pkg-config …)`, a program of the
+   project given by its path, a redirection to a file there); `pkg-config`, `nm`,
+   `objdump`, `readelf` and `size` only read. A compiler option that loads code
+   into it or chooses the programs it runs (`-fplugin`, `-B`, `-specs`,
+   `-Xclang`, `@file`) asks. Asking: commands that remove files, use
    the network (`curl`, `git fetch`, `gh pr view`), write or run something
    outside the writable directories, install (`make install`), are not known to
    agentin (`python3`, `npm`), or whose arguments cannot be read from the line

@@ -92,6 +92,8 @@ const Entry kEntries[] = {
      Effect::None, Operands::Text, "", "", ""},
     {"ps pgrep free uptime tr", Effect::Read, Operands::Text, "", "", ""},
     {"date", Effect::Read, Operands::Text, "", "", "-s --set"},
+    {"pkg-config c++filt", Effect::Read, Operands::Text, "", "", ""},
+    {"nm objdump readelf size", Effect::Read, Operands::Read, "", "", ""},
     {"cat wc nl tac rev od hexdump strings md5sum sha1sum sha256sum sha512sum realpath readlink expand fold fmt comm join paste cmp df",
      Effect::Read, Operands::Read, "", "", ""},
     {"head tail", Effect::Read, Operands::Read, "-n -c --lines --bytes", "", ""},
@@ -739,7 +741,26 @@ Classification classifyCMake(const QList<Argument> &arguments)
         }
         return result;
     }
-    if (QStringList{"--install", "--open", "--workflow", "--find-package", "--preset", "-E", "-P"}.contains(mode)
+    if (mode == "--install") {
+        // Installing runs the install scripts of the build directory, which the project wrote, into the prefix
+        // given here; without --prefix the place was chosen when the project was configured.
+        const QString directory = reader.path();
+        QString prefix;
+        for (++reader.index; !reader.atEnd(); ++reader.index) {
+            const Argument &argument = reader.current();
+            const QString &text = argument.text;
+            if (!argument.known) notKnown(result, argument);
+            else if (text == "--prefix") prefix = reader.path();
+            else if (text.startsWith("--prefix=")) prefix = text.section('=', 1);
+            else if (text == "--config" || text == "--component" || text == "--default-directory-permissions") reader.skipValue();
+            else if (text != "--strip" && text != "-v" && text != "--verbose") block(result, "cmake --install with " + text + " cannot be judged");
+        }
+        if (prefix.isEmpty()) block(result, "cmake --install without --prefix writes where the project was configured to install");
+        if (!directory.isEmpty()) result.executes.append(directory);
+        if (!prefix.isEmpty()) result.writes.append(prefix);
+        return result;
+    }
+    if (QStringList{"--open", "--workflow", "--find-package", "--preset", "-E", "-P"}.contains(mode)
         || mode.startsWith("--preset=")) {
         block(result, "cmake " + mode + " cannot be judged");
         return result;
@@ -881,6 +902,84 @@ Classification classifyMake(const QString &program, const QList<Argument> &argum
     result.executes.append(where);
     for (const QString &file : std::as_const(files)) result.executes.append(joined(directory, file));
     result.writes.append(where);
+    return result;
+}
+
+// A C or C++ compiler: it reads the sources and headers and writes its output, which is the file of -o, or
+// a.out, object files or assembly in the current directory, or nothing for -fsyntax-only, -E and -M. Options
+// that load code into the compiler or choose the programs it runs cannot be judged.
+Classification classifyCompiler(const QList<Argument> &arguments)
+{
+    Classification result;
+    result.effect = Effect::Build;
+    static const QStringList valued = split("-o -I -L -l -D -U -x -include -imacros -isystem -iquote -idirafter -iprefix -MF -MT "
+                                            "-MQ -Xlinker -Xpreprocessor -Xassembler -arch -target --target -isysroot --sysroot "
+                                            "-T -e -u -z -aux-info -dumpdir -dumpbase");
+    static const QStringList reading = split("-include -imacros -T");
+    QString output;
+    bool outputGiven = false;
+    bool noOutput = false;
+    bool compileOnly = false;
+    bool dependencies = false;
+    // Flags from pkg-config come from the .pc files of installed libraries; a line that sets PKG_CONFIG_PATH asks.
+    static const QRegularExpression packageFlags(
+        R"(^(\$\(|`)pkg-config( +(--cflags|--libs|--cflags-only-I|--cflags-only-other|--libs-only-L|--libs-only-l|--static|[A-Za-z0-9_.+-]+))+(\)|`)$)");
+    for (int i = 0; i < arguments.size(); ++i) {
+        const Argument &argument = arguments.at(i);
+        const QString &text = argument.text;
+        if (!argument.known) {
+            if (!packageFlags.match(text).hasMatch()) notKnown(result, argument);
+            continue;
+        }
+        if (text.startsWith('@')) {
+            block(result, "options read from " + text.mid(1) + " cannot be judged");
+            continue;
+        }
+        if (!text.startsWith('-') || text == "-") {
+            if (text != "-") result.reads.append(text);
+            continue;
+        }
+        // Plugins, the programs the compiler runs, and options passed on that could load either.
+        const QString name = text.section('=', 0, 0);
+        if (text.startsWith("-B") || text.startsWith("-specs") || name == "-wrapper" || name == "-Xclang" || name == "-load"
+            || name == "-plugin" || name.startsWith("-fplugin") || name.startsWith("-fpass-plugin") || text.startsWith("-Wp,")
+            || (text.startsWith("-Wl,") && text.contains("plugin"))) {
+            block(result, "the option " + name.section(',', 0, 1) + " cannot be judged");
+            continue;
+        }
+        if (text == "-fsyntax-only" || text == "-E" || text == "-M" || text == "-MM") noOutput = true;
+        else if (text == "-c" || text == "-S") compileOnly = true;
+        else if (text == "-MD" || text == "-MMD") dependencies = true;
+        if (valued.contains(text)) {
+            if (++i >= arguments.size()) break;
+            const Argument &value = arguments.at(i);
+            if (!value.known) {
+                if (text == "-o" || text == "-MF" || reading.contains(text)) notKnown(result, value);
+                continue;
+            }
+            if (text == "-o") {
+                outputGiven = true;
+                if (value.text != "-") output = value.text;
+            } else if (text == "-MF") {
+                result.writes.append(value.text);
+            } else if (reading.contains(text)) {
+                result.reads.append(value.text);
+            }
+        } else if (text.startsWith("-o") && text.size() > 2) {
+            outputGiven = true;
+            output = text.mid(2);
+        } else if (text.startsWith("-MF") && text.size() > 3) {
+            result.writes.append(text.mid(3));
+        }
+    }
+    if (outputGiven) {
+        if (!output.isEmpty()) result.writes.append(output);
+    } else if (!noOutput || compileOnly) {
+        // a.out, or an object or assembly file per source, in the current directory.
+        result.writes.append(".");
+    }
+    // Dependency files go next to the output, or into the current directory.
+    if (dependencies && !result.writes.contains(".")) result.writes.append(".");
     return result;
 }
 
@@ -1066,6 +1165,7 @@ const QHash<QString, Classifier> &classifiers()
         add("make gmake ninja", classifyMake);
         add("set", plain(classifySet));
         add("curl wget", classifyFetch);
+        add("gcc g++ cc c++ clang clang++", plain(classifyCompiler));
         return entries;
     }();
     return table;
@@ -1092,7 +1192,11 @@ QString effectName(Effect effect)
 
 Classification classifyProgram(const QString &program, const QList<Argument> &arguments)
 {
-    const auto found = classifiers().constFind(program);
+    auto found = classifiers().constFind(program);
+    // Compilers are often installed under a versioned name, such as g++-14 or clang-18.
+    static const QRegularExpression versioned("^(gcc|g\\+\\+|clang|clang\\+\\+)-[0-9][0-9.]*$");
+    const QRegularExpressionMatch match = versioned.match(program);
+    if (found == classifiers().constEnd() && match.hasMatch()) found = classifiers().constFind(match.captured(1));
     if (found == classifiers().constEnd()) return {};
     return (*found)(program, arguments);
 }
