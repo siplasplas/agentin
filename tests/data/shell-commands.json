@@ -1,0 +1,446 @@
+{
+  "version": 1,
+  "description": "Shell command lines and the decision agentin should take about them. 'cwd' names a directory of 'directories'; 'writable' lists the directories where writing is allowed. 'expect' is allow, ask, deny, or agent (agentin leaves the decision to the agent). 'asks' lists the commands an ask names. 'pending' marks behaviour planned for a later stage: the test expects it to fail until then.",
+  "directories": {
+    "P": "/home/user/work/qcodeedit",
+    "S": "/home/user/work/syntax-hi-lib",
+    "G": "/home/user/work",
+    "K": "/home/user/.local/share/org.kde.syntax-highlighting"
+  },
+  "writable": [
+    "P",
+    "/tmp"
+  ],
+  "cases": [
+    {
+      "name": "list-files-of-other-project",
+      "command": "cd /home/user/work/syntax-hi-lib && git ls-files | head -50 && wc -l lib/downloader.cpp lib/*.h 2>/dev/null | tail -20",
+      "cwd": "P",
+      "expect": "allow",
+      "pending": true,
+      "note": "cd anywhere; reading; 2>/dev/null"
+    },
+    {
+      "name": "list-and-read-cmake",
+      "command": "cd /home/user/work/qcodeedit && git ls-files | grep -v -E '^tests/data|\\.xml$' | head -60 && cat CMakeLists.txt | head -60 && cat kate/CMakeLists.txt 2>/dev/null",
+      "cwd": "P",
+      "expect": "allow",
+      "pending": true
+    },
+    {
+      "name": "ls-remote-tags",
+      "command": "git ls-remote --tags https://invent.kde.org/frameworks/syntax-highlighting.git 2>/dev/null | grep -o 'v6\\.[0-9]*\\.[0-9]*$' | sort -uV | tail -4",
+      "cwd": "P",
+      "expect": "ask",
+      "asks": [
+        "git ls-remote --tags https://invent.kde.org/frameworks/syntax-highlighting.git"
+      ],
+      "pending": true,
+      "note": "network; Always may add git ls-remote *"
+    },
+    {
+      "name": "read-sources-with-semicolons",
+      "command": "cd /home/user/work/syntax-hi-lib/lib && ls && wc -l downloader.* index.* 2>/dev/null; cat downloader.h; cat downloader.cpp",
+      "cwd": "P",
+      "expect": "allow",
+      "pending": true
+    },
+    {
+      "name": "read-several-files-and-ranges",
+      "command": "cd /home/user/work; cat syntax-hi-lib/lib/index.h syntax-hi-lib/lib/index.cpp; cat qcodeedit/kate/CMakeLists.txt; ls qcodeedit/kate/include/qce/kate qcodeedit/tests qcodeedit/docs; grep -n \"class\\|static\\|load\\|read\" qcodeedit/kate/include/qce/kate/*.h | head -50; sed -n 95,120p qcodeedit/demo/DemoWindow.cpp; sed -n 120,140p qcodeedit/tests/test_fold_pairing.cpp",
+      "cwd": "P",
+      "expect": "allow",
+      "pending": true,
+      "note": "sed -n only reads"
+    },
+    {
+      "name": "read-outside-project-data",
+      "command": "cd /home/user/work/qcodeedit; cat kate/include/qce/kate/KateXmlReader.h; grep -n \"kateversion\\|##\\|IncludeRules\" kate/src/KateXmlReader.cpp | head -30; ls docs; ls /home/user/.local/share/org.kde.syntax-highlighting/ 2>/dev/null; ls /home/user/.local/share/org.kde.syntax-highlighting/syntax | wc -l; cat tests/CMakeLists.txt | head -40",
+      "cwd": "P",
+      "expect": "allow",
+      "pending": true
+    },
+    {
+      "name": "build-in-temporary-directory",
+      "command": "cmake -S . -B /tmp/qce-build -DQCE_BUILD_DEMO=OFF >/dev/null && cmake --build /tmp/qce-build -j16 2>&1 | grep -E \"error|warning|Error\" | head -30; cd /tmp/qce-build && ctest 2>&1 | tail -30",
+      "cwd": "P",
+      "expect": "allow",
+      "pending": true,
+      "note": "writes and runs only in /tmp"
+    },
+    {
+      "name": "for-over-build-directories-reading",
+      "command": "for d in build cmake-build-debug cmake-build-release; do echo \"=== $d\"; grep -E \"CMAKE_BUILD_TYPE:|CMAKE_GENERATOR:|QCE_BUILD\" $d/CMakeCache.txt; done",
+      "cwd": "P",
+      "expect": "allow",
+      "pending": true,
+      "note": "for over a literal list"
+    },
+    {
+      "name": "for-build-and-test-then-rm",
+      "command": "for d in build cmake-build-debug cmake-build-release; do echo \"=== $d\"; cmake --build $d -j16 2>&1 | grep -E \"error|Error|FAILED\" | head -20; echo \"build rc=${PIPESTATUS[0]}\"; (cd $d && ctest 2>&1 | tail -3); done; rm -rf /tmp/qce-build",
+      "cwd": "P",
+      "expect": "ask",
+      "asks": [
+        "rm -rf /tmp/qce-build"
+      ],
+      "note": "builds in writable directories; rm always asks"
+    },
+    {
+      "name": "stage-and-scan-for-private-data",
+      "command": "git status --short && git diff && git add kate/CMakeLists.txt tests/CMakeLists.txt kate/src/KateSyntaxVersion.cpp && git diff --cached --stat && git diff --cached | grep -inE \"user|/home/|token|password|secret\" ; echo \"grep rc=$?\"",
+      "cwd": "P",
+      "expect": "allow",
+      "pending": true
+    },
+    {
+      "name": "for-build-test-grep",
+      "command": "for d in build cmake-build-debug cmake-build-release; do echo \"=== $d\"; cmake --build $d -j16 2>&1 | grep -E \"KatePaths|error|FAILED\" | grep -iE \"error|warning|FAILED\" | head; echo \"rc=${PIPESTATUS[0]}\"; (cd $d && ctest 2>&1 | grep -E \"kate_paths|tests passed|Failed\"); done",
+      "cwd": "P",
+      "expect": "allow",
+      "pending": true
+    },
+    {
+      "name": "add-status-scan",
+      "command": "git add kate/CMakeLists.txt tests/CMakeLists.txt kate/src/KatePaths.cpp tests/test_kate_paths.cpp && git status --short && git diff --cached | grep -inE \"user|/home/|token|password|secret|HANDOFF\"; echo \"grep rc=$?\"",
+      "cwd": "P",
+      "expect": "allow",
+      "pending": true
+    },
+    {
+      "name": "two-cd-globs-and-dev-null",
+      "command": "cd /home/user/work/syntax-hi-lib/lib && cat wildcardmatcher.cpp | sed -n 1,200p | grep -v \"^ *//\" | head -80; grep -n \"priority\\|definitionsForFileName\" -A3 repository.cpp | head -40; cd /home/user/.local/share/org.kde.syntax-highlighting/syntax && grep -l \"<!ENTITY\" *.xml | head -3; grep -h -o '<language[^>]*>' cpp.xml makefile.xml; grep -c \"\" /dev/null; ls /home/user/work/qcodeedit/tests/data",
+      "cwd": "P",
+      "expect": "allow",
+      "pending": true
+    },
+    {
+      "name": "read-headers-of-data-files",
+      "command": "cd /home/user/.local/share/org.kde.syntax-highlighting/syntax && grep -h -o '<language[^>]*>' cpp.xml makefile.xml ada.xml | head; grep -n \"ENTITY\" ada.xml | head -3; sed -n 60,70p /home/user/work/syntax-hi-lib/lib/repository.cpp; grep -n \"fileNameFromFilePath\" -A8 /home/user/work/syntax-hi-lib/lib/repository.cpp | head -12",
+      "cwd": "P",
+      "expect": "allow",
+      "pending": true
+    },
+    {
+      "name": "build-and-run-test-with-environment",
+      "command": "cmake --build cmake-build-debug -j16 2>&1 | grep -E \"error|warning: .*KateSyntaxIndex|FAILED\" | head -20; QCE_KATE_TEST_DATA_DIR=$HOME/.local/share/org.kde.syntax-highlighting cmake-build-debug/tests/test_kate_syntax_index 2>&1 | tail -25",
+      "cwd": "P",
+      "expect": "allow",
+      "pending": true,
+      "note": "harmless environment prefix; project program in a writable directory"
+    },
+    {
+      "name": "build-and-run-reader-test",
+      "command": "cmake --build cmake-build-debug -j16 2>&1 | grep -E \"error|FAILED\" -A3 | head -30; cmake-build-debug/tests/test_kate_xml_reader 2>&1 | grep -E \"FAIL|crossLanguage|Totals|Loc:|Actual|Expected\"",
+      "cwd": "P",
+      "expect": "allow",
+      "pending": true
+    },
+    {
+      "name": "for-build-test-and-real-data",
+      "command": "for d in build cmake-build-debug cmake-build-release; do echo \"=== $d\"; cmake --build $d -j16 2>&1 | grep -E \"error|FAILED\" -A3 | head -20; echo \"rc=${PIPESTATUS[0]}\"; (cd $d && ctest 2>&1 | grep -E \"tests passed|Failed\"); done; QCE_KATE_TEST_DATA_DIR=$HOME/.local/share/org.kde.syntax-highlighting cmake-build-release/tests/test_kate_syntax_index 2>&1 | grep -E \"realData|Totals|FAIL\"",
+      "cwd": "P",
+      "expect": "allow",
+      "pending": true
+    },
+    {
+      "name": "status-tag-log",
+      "command": "git status --short && git tag -fa v2.3.0 -m \"qt-extra 2.3.0: quick search in the file dialog\" HEAD && git log --oneline -3 --decorate",
+      "cwd": "P",
+      "expect": "ask",
+      "asks": [
+        "git tag -fa v2.3.0 -m \"qt-extra 2.3.0: quick search in the file dialog\" HEAD"
+      ],
+      "note": "git tag -f asks"
+    },
+    {
+      "name": "echo-with-variables",
+      "command": "echo \"DISPLAY=$DISPLAY WAYLAND=$WAYLAND_DISPLAY XDG_SESSION_TYPE=$XDG_SESSION_TYPE\"",
+      "cwd": "P",
+      "expect": "allow",
+      "pending": true,
+      "note": "variables in an echo argument are harmless"
+    },
+    {
+      "name": "add-and-commit",
+      "command": "git add a.txt && git commit -m 'Fix it'",
+      "cwd": "P",
+      "expect": "allow"
+    },
+    {
+      "name": "commit-with-quiet-option",
+      "command": "git commit -q -m \"Message\n\nwith a body\"",
+      "cwd": "P",
+      "expect": "allow"
+    },
+    {
+      "name": "commit-message-heredoc",
+      "command": "git commit -m \"$(cat <<'EOF'\nFix it\n\nBody\nEOF\n)\"",
+      "cwd": "P",
+      "expect": "allow"
+    },
+    {
+      "name": "add-in-shell-wrapper",
+      "command": "/bin/bash -lc 'git add -A && git commit -m x'",
+      "cwd": "P",
+      "expect": "allow"
+    },
+    {
+      "name": "git-directory-option",
+      "command": "git -C sub add a.txt",
+      "cwd": "P",
+      "expect": "allow"
+    },
+    {
+      "name": "push-denied",
+      "command": "git status && git push",
+      "cwd": "P",
+      "expect": "deny"
+    },
+    {
+      "name": "push-through-directory-option",
+      "command": "git -C repo push",
+      "cwd": "P",
+      "expect": "deny"
+    },
+    {
+      "name": "sudo-denied",
+      "command": "sudo ls",
+      "cwd": "P",
+      "expect": "deny"
+    },
+    {
+      "name": "package-removal-denied",
+      "command": "apt-get purge something",
+      "cwd": "P",
+      "expect": "deny"
+    },
+    {
+      "name": "package-install-denied-by-default",
+      "command": "apt install htop",
+      "cwd": "P",
+      "expect": "deny"
+    },
+    {
+      "name": "git-directory-denied",
+      "command": "rm -rf .git",
+      "cwd": "P",
+      "expect": "deny"
+    },
+    {
+      "name": "git-directory-redirect-denied",
+      "command": "echo x > .git/HEAD",
+      "cwd": "P",
+      "expect": "deny"
+    },
+    {
+      "name": "rm-asks",
+      "command": "rm -rf build",
+      "cwd": "P",
+      "expect": "ask",
+      "asks": [
+        "rm -rf build"
+      ]
+    },
+    {
+      "name": "unknown-program-left-to-agent",
+      "command": "make && make install",
+      "cwd": "P",
+      "expect": "agent"
+    },
+    {
+      "name": "cd-then-rm-outside",
+      "command": "cd /etc && rm passwd",
+      "cwd": "P",
+      "expect": "ask",
+      "asks": [
+        "rm passwd"
+      ]
+    },
+    {
+      "name": "read-ssh-key",
+      "command": "cat ~/.ssh/id_ed25519",
+      "cwd": "P",
+      "expect": "ask",
+      "asks": [
+        "cat ~/.ssh/id_ed25519"
+      ],
+      "pending": true,
+      "note": "secret path"
+    },
+    {
+      "name": "read-api-key-file",
+      "command": "cat ~/.zai-key",
+      "cwd": "P",
+      "expect": "ask",
+      "asks": [
+        "cat ~/.zai-key"
+      ],
+      "pending": true,
+      "note": "secret path"
+    },
+    {
+      "name": "grep-env-file",
+      "command": "grep KEY .env",
+      "cwd": "P",
+      "expect": "ask",
+      "asks": [
+        "grep KEY .env"
+      ],
+      "pending": true,
+      "note": "secret path"
+    },
+    {
+      "name": "for-rm",
+      "command": "for d in a b; do rm -rf $d; done",
+      "cwd": "P",
+      "expect": "ask",
+      "pending": true,
+      "note": "rm inside a for loop"
+    },
+    {
+      "name": "build-outside-writable",
+      "command": "cmake --build /usr/local/x",
+      "cwd": "P",
+      "expect": "ask",
+      "pending": true,
+      "note": "not writable"
+    },
+    {
+      "name": "sed-in-place-outside",
+      "command": "sed -i s/a/b/ /etc/hosts",
+      "cwd": "P",
+      "expect": "ask",
+      "pending": true
+    },
+    {
+      "name": "sort-output-outside",
+      "command": "sort -o /etc/x y",
+      "cwd": "P",
+      "expect": "ask",
+      "pending": true
+    },
+    {
+      "name": "curl-in-substitution",
+      "command": "x=$(curl https://example.com); echo $x",
+      "cwd": "P",
+      "expect": "ask",
+      "pending": true,
+      "note": "network"
+    },
+    {
+      "name": "redirect-into-project",
+      "command": "echo x > notes.txt",
+      "cwd": "P",
+      "expect": "allow",
+      "pending": true,
+      "note": "writable directory"
+    },
+    {
+      "name": "redirect-outside",
+      "command": "echo x > /etc/x",
+      "cwd": "P",
+      "expect": "ask",
+      "pending": true
+    },
+    {
+      "name": "redirect-into-git-hooks",
+      "command": "echo x > .git/hooks/pre-commit",
+      "cwd": "P",
+      "expect": "deny"
+    },
+    {
+      "name": "cd-into-git-then-rm",
+      "command": "cd .git && rm index",
+      "cwd": "P",
+      "expect": "deny",
+      "note": "the .git rule must follow cd"
+    },
+    {
+      "name": "ld-preload",
+      "command": "LD_PRELOAD=./x.so ls",
+      "cwd": "P",
+      "expect": "ask",
+      "pending": true,
+      "note": "environment deny list"
+    },
+    {
+      "name": "path-prefix",
+      "command": "PATH=. make",
+      "cwd": "P",
+      "expect": "ask",
+      "pending": true,
+      "note": "environment deny list"
+    },
+    {
+      "name": "reset-hard",
+      "command": "git reset --hard HEAD~1",
+      "cwd": "P",
+      "expect": "ask",
+      "pending": true
+    },
+    {
+      "name": "tag-force",
+      "command": "git tag -f v1 HEAD",
+      "cwd": "P",
+      "expect": "ask",
+      "pending": true
+    },
+    {
+      "name": "gh-pr-create",
+      "command": "gh pr create --title x --body y",
+      "cwd": "P",
+      "expect": "deny",
+      "pending": true,
+      "note": "changes a remote server"
+    },
+    {
+      "name": "git-send-pack",
+      "command": "git send-pack origin main",
+      "cwd": "P",
+      "expect": "deny",
+      "pending": true,
+      "note": "changes a remote server"
+    },
+    {
+      "name": "gh-pr-view",
+      "command": "gh pr view 5",
+      "cwd": "P",
+      "expect": "ask",
+      "pending": true,
+      "note": "network"
+    },
+    {
+      "name": "eval-variable",
+      "command": "eval \"$cmd\"",
+      "cwd": "P",
+      "expect": "ask",
+      "pending": true,
+      "note": "cannot judge"
+    },
+    {
+      "name": "program-from-variable",
+      "command": "$prog arg",
+      "cwd": "P",
+      "expect": "ask",
+      "pending": true,
+      "note": "cannot judge"
+    },
+    {
+      "name": "source-script",
+      "command": "source script.sh",
+      "cwd": "P",
+      "expect": "ask",
+      "pending": true,
+      "note": "cannot judge"
+    },
+    {
+      "name": "unsupported-case",
+      "command": "case $x in a) ls;; esac",
+      "cwd": "P",
+      "expect": "ask",
+      "pending": true,
+      "note": "cannot judge"
+    }
+  ]
+}

@@ -167,6 +167,13 @@ if(BUILD_TESTING)
     target_link_libraries(agentin_test PRIVATE Qt6::Widgets Qt6::Test qt-extra diffcore::diffcore PkgConfig::LIBGIT2 qtermwidget6)
     target_include_directories(agentin_test PRIVATE src)
     add_test(NAME agentin_test COMMAND agentin_test)
+    # Decisions about shell command lines, against a corpus of real commands; no window, milliseconds.
+    add_executable(shell_approval_test tests/ShellApprovalTest.cpp src/CommandApproval.cpp src/CommandApproval.h)
+    target_link_libraries(shell_approval_test PRIVATE Qt6::Core Qt6::Test)
+    target_include_directories(shell_approval_test PRIVATE src)
+    target_compile_definitions(shell_approval_test PRIVATE
+        SHELL_COMMANDS_FILE="${CMAKE_CURRENT_SOURCE_DIR}/tests/data/shell-commands.json")
+    add_test(NAME shell_approval_test COMMAND shell_approval_test)
     set_tests_properties(agentin_test PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
     if(Python3_Interpreter_FOUND)
         add_test(NAME claude_bridge_test COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/ClaudeBridgeTest.py)
