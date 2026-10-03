@@ -1396,7 +1396,13 @@ void MainWindow::showOptionsDialog()
         trustedList->setCurrentItem(item);
         trustedList->editItem(item);
     });
-    connect(removeTrustedButton, &QPushButton::clicked, &dialog, [trustedList] { delete trustedList->currentItem(); });
+    connect(removeTrustedButton, &QPushButton::clicked, &dialog, [trustedList] {
+        // The selection moves to the entry that takes the removed one's place, or to the new last entry.
+        const int row = trustedList->currentRow();
+        if (row < 0) return;
+        delete trustedList->takeItem(row);
+        if (trustedList->count() > 0) trustedList->setCurrentRow(qMin(row, trustedList->count() - 1));
+    });
     trustedButtons->addWidget(addTrustedButton);
     trustedButtons->addWidget(removeTrustedButton);
     trustedButtons->addStretch(1);
@@ -1771,6 +1777,9 @@ void MainWindow::showApprovalsDialog()
     connect(remove, &QPushButton::clicked, &dialog, [this, tree, &rules, fill, updateRemove] {
         const QTreeWidgetItem *item = tree->currentItem();
         if (!item) return;
+        // The selection moves to the line that takes the removed one's place, or to the new last line.
+        const int group = item->parent() ? tree->indexOfTopLevelItem(item->parent()) : -1;
+        const int line = item->parent() ? item->parent()->indexOfChild(const_cast<QTreeWidgetItem *>(item)) : -1;
         if (item->data(0, Qt::UserRole).isValid()) {
             const ApprovalRule rule = rules.value(item->data(0, Qt::UserRole).toInt());
             const QString error = removeApprovalRule(rule);
@@ -1789,6 +1798,9 @@ void MainWindow::showApprovalsDialog()
             }
         }
         fill();
+        if (QTreeWidgetItem *parent = group >= 0 ? tree->topLevelItem(group) : nullptr) {
+            if (parent->childCount() > 0) tree->setCurrentItem(parent->child(qMin(line, parent->childCount() - 1)));
+        }
         updateRemove();
     });
     dialog.exec();
