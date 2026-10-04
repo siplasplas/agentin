@@ -2931,11 +2931,19 @@ void MainWindow::showCurrentTab()
             chatPanel_->show();
         }
         if (chatView_->document() != tab->document()) {
+            QScrollBar *bar = chatView_->verticalScrollBar();
+            for (int i = 0; i < tabs_->count(); ++i) {
+                ChatTab *shown = chatTab(tabs_->widget(i));
+                if (shown && shown->document() == chatView_->document())
+                    shown->setViewPosition(bar->value() >= bar->maximum() ? -1 : bar->value());
+            }
             chatView_->showDocument(tab->document());
             tab->document()->setDefaultFont(chatView_->font());
             chatView_->refreshTools();
+            // The scroll bar, not the cursor, restores the place: a chat may end with a folded tool's hidden
+            // lines, which the view cannot scroll to.
             chatView_->moveCursor(QTextCursor::End);
-            chatView_->ensureCursorVisible();
+            bar->setValue(tab->viewPosition() < 0 ? bar->maximum() : tab->viewPosition());
         }
     }
     revealCurrentConversation(true);

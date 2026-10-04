@@ -64,6 +64,10 @@ public:
         emit changed();
     }
     QString workingDirectory() const { return path_; }
+    // Where the shared chat view was in this chat when another tab took it: its first visible line, or -1 at
+    // the end, where it follows new text.
+    int viewPosition() const { return viewPosition_; }
+    void setViewPosition(int position) { viewPosition_ = position; }
     // The header without the changes summary is shown beside a button that has it.
     QString headerText(bool withChanges = true) const;
     // Null until the chat's first turn.
@@ -190,6 +194,7 @@ private:
     QString id_;
     QString path_;
     QString title_;
+    int viewPosition_ = -1;
     QString liveTranscript_;
     qsizetype historyRefreshCutoff_ = 0;
     QString historyRefreshQueuedText_;

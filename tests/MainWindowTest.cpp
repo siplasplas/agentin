@@ -82,6 +82,7 @@ private slots:
     void diffHighlighting();
     void codexSessionApprovalsWithdrawn();
     void conversationRenaming();
+    void tabsKeepTheirScrollPosition();
 };
 
 void MainWindowTest::foldedOutputScrolling()
@@ -2332,6 +2333,74 @@ for line in sys.stdin:
     QCOMPARE(offered, QString("Login form fixes"));
     QTest::qWait(50);
     QCOMPARE(readLog("names.jsonl").size(), 2);
+}
+
+// Each tab returns to where its chat was: the end, also when the chat ends with a folded tool's hidden lines,
+// or the line the user scrolled to.
+void MainWindowTest::tabsKeepTheirScrollPosition()
+{
+    const QString python = QStandardPaths::findExecutable("python3");
+    if (python.isEmpty()) QSKIP("Python 3 is unavailable");
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString fakeBridge = directory.filePath("fake-claude.py");
+    QFile script(fakeBridge);
+    QVERIFY(script.open(QIODevice::WriteOnly | QIODevice::Text));
+    script.write(R"PY(import json, sys
+print(json.dumps({"type": "ready"}), flush=True)
+for line in sys.stdin:
+    pass
+)PY");
+    script.close();
+    MainWindow window("/nonexistent/codex", directory.path(), python, fakeBridge);
+    window.resize(900, 600);
+    window.show();
+    for (const QString &name : {QString("first"), QString("second")}) {
+        QVERIFY(QDir(directory.path()).mkpath(name));
+        startChat(window, "Claude", directory.filePath(name));
+    }
+    auto *tabs = window.findChild<QTabWidget *>("chatTabs");
+    auto *view = window.findChild<QPlainTextEdit *>("chatView");
+    QVERIFY(tabs && view);
+    QList<ChatTab *> chats;
+    for (ChatTab *tab : window.findChildren<ChatTab *>())
+        if (tab->workingDirectory().endsWith("first") || tab->workingDirectory().endsWith("second")) chats.append(tab);
+    QCOMPARE(chats.size(), 2);
+    for (ChatTab *tab : chats) {
+        QStringList lines;
+        for (int line = 0; line < 200; ++line) lines.append(QString("Claude: answer %1").arg(line));
+        lines.append("[Claude tool: Bash]");
+        for (int line = 0; line < 20; ++line) lines.append(QString("output %1").arg(line));
+        tab->document()->setPlainText(lines.join('\n'));
+        QTextBlock block = tab->document()->findBlockByNumber(200);
+        for (bool header = true; block.isValid(); block = block.next(), header = false) {
+            auto *data = new ToolBlockData;
+            data->group = 1;
+            data->header = header;
+            block.setUserData(data);
+        }
+    }
+    const auto showTab = [&](int index) {
+        tabs->setCurrentWidget(qobject_cast<QWidget *>(chats.at(index)->parent()));
+        QCoreApplication::processEvents();
+    };
+    // The view follows the end of the chat it shows while its text arrives.
+    QCoreApplication::processEvents();
+    QScrollBar *bar = view->verticalScrollBar();
+    showTab(0);
+    QVERIFY(bar->maximum() > 100);
+    QCOMPARE(bar->value(), bar->maximum());
+    showTab(1);
+    QCOMPARE(bar->value(), bar->maximum());
+    bar->setValue(40);
+    showTab(0);
+    QCOMPARE(bar->value(), bar->maximum());
+    showTab(1);
+    QCOMPARE(bar->value(), 40);
+    bar->setValue(bar->maximum());
+    showTab(0);
+    showTab(1);
+    QCOMPARE(bar->value(), bar->maximum());
 }
 
 QTEST_MAIN(MainWindowTest)

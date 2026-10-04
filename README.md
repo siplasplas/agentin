@@ -238,7 +238,8 @@ many run, lists them and asks whether to stop them and quit; otherwise it closes
 at once. In both questions Cancel is the default, so Enter keeps everything
 running. While a changes window is open, the
 close button and Alt+F4 close the changes windows instead, and `quit` still quits. Ctrl+Tab switches tabs in most recently used
-order.
+order. Returning to a tab shows its chat where you left it: at the end, where new text
+keeps it, or at the line you scrolled to.
 
 In a Codex tab, choose the model and reasoning effort in the chat header.
 The lists come from the App Server (`model/list`); each model offers only the
