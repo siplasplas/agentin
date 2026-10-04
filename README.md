@@ -168,6 +168,8 @@ easy to resume. Switching tabs also reveals the matching conversation without
 moving keyboard focus. Restored chats appear even before discovery finishes.
 Directories appear under an agent only when they contain a discovered chat.
 Chat previews are shortened in the tree; hover over one to read the longer stored preview.
+A right click on a chat or a directory offers **Copy**, which puts the text of its
+tooltip on the clipboard: a chat's preview, details and ID, or a directory's path.
 Codex previews in the local JSON index are limited to 200 characters.
 
 Expanding Claude lists SDK sessions across all Claude projects. Expanding

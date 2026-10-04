@@ -530,6 +530,16 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     conversationTree_->setObjectName("conversationTree");
     conversationTree_->setHeaderHidden(true);
     conversationTree_->setMinimumWidth(0);
+    // A right click copies what the item's tooltip shows: a chat's title, details and ID, or a directory's path.
+    conversationTree_->setContextMenuPolicy(Qt::CustomContextMenu);
+    connect(conversationTree_, &QWidget::customContextMenuRequested, this, [this](const QPoint &position) {
+        QTreeWidgetItem *item = conversationTree_->itemAt(position);
+        if (!item) return;
+        const QString text = item->toolTip(0).isEmpty() ? item->text(0) : item->toolTip(0);
+        QMenu menu(conversationTree_);
+        menu.addAction("Copy", [text] { QGuiApplication::clipboard()->setText(text); });
+        menu.exec(conversationTree_->viewport()->mapToGlobal(position));
+    });
     treeLayout->addWidget(conversationTree_, 1);
     treePanel->setMinimumWidth(0);
     auto *leftSplitter = new QSplitter(Qt::Vertical, chatSplitter);
