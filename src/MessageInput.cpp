@@ -139,11 +139,16 @@ void MessageInput::showHistoryList()
     if (available.isValid()) {
         const int below = available.bottom() - field.bottom();
         const int above = field.top() - available.top();
+        // Without room for one row on either side the list does not open.
+        if (qMax(above, below) < rowHeight + frame) {
+            delete list;
+            return;
+        }
         if (height > below && above > below) {
-            height = qMin(height, qMax(rowHeight + frame, above));
+            height = qMin(height, above);
             position = QPoint(field.left(), field.top() - height);
         } else {
-            height = qMin(height, qMax(rowHeight + frame, below));
+            height = qMin(height, below);
         }
         position.setX(qBound(available.left(), position.x(), qMax(available.left(), available.right() - width + 1)));
     }
