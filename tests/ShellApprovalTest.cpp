@@ -159,7 +159,8 @@ void ShellApprovalTest::decisions_data()
           "rpm -qa | grep qt", "rpm -qf /usr/bin/ls", "pacman -Qi git",
           "cmake --build build -j$(nproc) 2>&1 | grep -E error", "cmake --build build -j $(nproc)", "make -j$(nproc)",
           "make -j \"$(nproc)\" all", "ninja -C build -j$(nproc)", "ctest --test-dir build -j$(nproc)",
-          "ldd build/agentin | grep -i qt6"})
+          "ldd build/agentin | grep -i qt6", "podman images", "docker ps -a", "podman image ls", "docker inspect x",
+          "podman --log-level debug ps"})
         row("allow", command);
     for (const char *command :
          {"/opt/x/bash -lc 'git add .'", "/opt/x/git add .", "git commit -m hello > /etc/log", "git add $FILES",
@@ -174,7 +175,8 @@ void ShellApprovalTest::decisions_data()
           "g++ -Xclang -load -Xclang x.so main.cpp", "cd /srv/other && git add a.cpp && git commit -m x",
           "git -C /srv/other commit -m x", "cmake --build /usr/local/x -j4", "cmake --install build", "cmake --install build --prefix /usr/local",
           "PKG_CONFIG_PATH=./pc g++ -c x.cpp", "ldd /usr/bin/ls", "ldd $(which git)", "make -C $(cat dir)",
-          "cmake --build $(cat dir) -j4", "dpkg -i x.deb", "dpkg --configure -a", "apt update", "rpm -e foo",
+          "cmake --build $(cat dir) -j4", "podman build -t x:1 -f docker/Dockerfile docker", "docker pull ubuntu:24.04",
+          "podman run --rm -v /:/host ubuntu ls", "docker rmi x", "podman system prune -a", "dpkg -i x.deb", "dpkg --configure -a", "apt update", "rpm -e foo",
           "apt-cache gencaches", "g++ -c x.cpp $(pkg-config --cflags $(cat f))", "cd /etc && g++ -c x.cpp"})
         row("ask", command);
     for (const char *command :
@@ -185,7 +187,7 @@ void ShellApprovalTest::decisions_data()
           "apt-get -y install something", "dnf install something", "pacman -Syu", "pacman -Syu --noconfirm",
           "apt-get purge something", "touch .gi*/x",
           "cp x .git/hooks/", ".git/hooks/pre-commit", "git log > .git/x", "for d in a b; do sudo rm $d; done",
-          "if true; then git push; fi"})
+          "if true; then git push; fi", "docker push me/x:1", "podman push x", "podman image push x"})
         row("deny", command);
 }
 

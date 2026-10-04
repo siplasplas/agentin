@@ -89,7 +89,8 @@ const QStringList &remotePatterns()
         "glab release create *", "glab release delete *", "glab release upload *", "glab repo create *",
         "glab repo delete *",  "glab issue create *",   "glab issue close *",    "glab ci run *",
         "glab variable set *", "hub pull-request *",    "hub release create *",  "hub release delete *",
-        "hub create *",        "hub delete *"};
+        "hub create *",        "hub delete *",          "docker push *",         "podman push *",
+        "docker image push *", "podman image push *",   "docker manifest push *", "podman manifest push *"};
     return patterns;
 }
 }

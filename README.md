@@ -748,7 +748,8 @@ of system packages through apt, apt-get, dnf, yum, zypper, pacman, snap, flatpak
 and brew, which can be removed, unchecked or allowed. `git push *`, `sudo *`,
 `doas *`, `su *`, the removal of system packages through the same tools (such
 as `apt *remove *`, `apt *purge *` or `pacman -R*`), and the commands that change
-a remote server — `git send-pack`, `git lfs push`, `git svn dcommit`, and the
+a remote server — `git send-pack`, `git lfs push`, `git svn dcommit`,
+`docker push` and `podman push`, and the
 writing commands of `gh`, `glab` and `hub` (creating, merging and closing pull
 requests, releases, repositories and issues, running workflows, setting
 secrets, and `gh api` with a writing request) — are listed as Deny at every
@@ -815,7 +816,8 @@ where they really write. The decision is taken in this order:
    question: commands that only read (`cat`, `grep`, `ls`, `sed -n`, `git log`,
    `git diff` and the like, anywhere, and the queries of the package managers:
    `dpkg -l`, `-L` and `-S`, `dpkg-query`, `apt-cache`, `apt list` and `show`,
-   `rpm -q`, `pacman -Q`), and commands that write, build or run
+   `rpm -q`, `pacman -Q`, and the listings of `podman` and `docker`, such as
+   `podman images` and `docker ps`), and commands that write, build or run
    programs only inside the writable directories (`touch`, `cp`, `sed -i`,
    `git add`, `cmake`, `cmake --install` with `--prefix`, `make`, `ctest` (also with
    a job count such as `-j$(nproc)`), `ldd` on a program of the project, the C
@@ -825,7 +827,8 @@ where they really write. The decision is taken in this order:
    `objdump`, `readelf` and `size` only read. A compiler option that loads code
    into it or chooses the programs it runs (`-fplugin`, `-B`, `-specs`,
    `-Xclang`, `@file`) asks. Asking: commands that remove files, use
-   the network (`curl`, `git fetch`, `gh pr view`), write or run something
+   the network (`curl`, `git fetch`, `gh pr view`, `podman build` and
+   `docker pull`), run or change containers (`podman run`, `docker rmi`), write or run something
    outside the writable directories, install (`make install`), are not known to
    agentin (`python3`, `npm`), or whose arguments cannot be read from the line
    (`cat $FILE` with an unknown value, `eval`, `source`, a script piped to `sh`).

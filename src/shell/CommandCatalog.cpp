@@ -1176,6 +1176,45 @@ Classification classifyPackageQuery(const QString &program, const QList<Argument
     return result;
 }
 
+// podman and docker: listing and inspecting read the local images and containers; building and pulling use the
+// network (a build runs its steps with it); running a container, removing and the rest cannot be judged, as a
+// container can mount any directory. Pushing changes a registry and is declined by the rules.
+Classification classifyContainers(const QString &program, const QList<Argument> &arguments)
+{
+    Classification result;
+    // The subcommand, after global options such as --log-level debug, and an object group such as image.
+    int i = 0;
+    while (i < arguments.size() && arguments.at(i).known && arguments.at(i).text.startsWith('-')) {
+        const QString option = arguments.at(i).text;
+        i += option.contains('=') || option == "--debug" || option == "-D" ? 1 : 2;
+    }
+    if (i >= arguments.size()) {
+        result.effect = Effect::Read;
+        return result;
+    }
+    if (!arguments.at(i).known) {
+        notKnown(result, arguments.at(i));
+        return result;
+    }
+    QString command = arguments.at(i).text;
+    static const QStringList groups = split("image container volume network system pod manifest");
+    if (groups.contains(command) && i + 1 < arguments.size() && arguments.at(i + 1).known)
+        command += ' ' + arguments.at(i + 1).text;
+    result.subcommand = command;
+    // A word, or an object group and its command joined by a space.
+    static const QStringList reads{"images", "ps", "inspect", "info", "version", "logs", "history", "port", "top", "stats",
+                                   "diff", "events", "image ls", "image list", "image inspect", "image history",
+                                   "container ls", "container list", "container inspect", "container logs", "container top",
+                                   "container port", "volume ls", "volume list", "volume inspect", "network ls",
+                                   "network list", "network inspect", "system df", "system info", "pod ps", "pod ls",
+                                   "pod inspect", "manifest inspect"};
+    static const QStringList network{"build", "buildx", "pull", "search", "login", "image build", "image pull"};
+    if (reads.contains(command)) result.effect = Effect::Read;
+    else if (network.contains(command) || command.startsWith("build")) result.effect = Effect::Network;
+    else block(result, program + " " + command + " runs or changes containers, which agentin cannot judge");
+    return result;
+}
+
 // ldd loads the programs it lists through the dynamic loader, which can run their code, so it counts as running
 // them: a program of the project runs without a question, any other asks.
 Classification classifyLdd(const QList<Argument> &arguments)
@@ -1247,6 +1286,7 @@ const QHash<QString, Classifier> &classifiers()
         add("gcc g++ cc c++ clang clang++", plain(classifyCompiler));
         add("dpkg dpkg-query apt-cache apt rpm pacman", classifyPackageQuery);
         add("ldd", plain(classifyLdd));
+        add("podman docker", classifyContainers);
         return entries;
     }();
     return table;
