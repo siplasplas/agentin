@@ -449,5 +449,39 @@ class ClaudeBridgeTest(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(events[-1]["status"], "interrupted")
 
 
+    async def test_compact_and_context_reports(self):
+        events = []
+        with patch.object(bridge_module, "send", events.append):
+            bridge = bridge_module.Bridge("/tmp/project")
+            await bridge.connect()
+
+            async def context_usage():
+                return {"totalTokens": 12345, "rawMaxTokens": 200000, "maxTokens": 180000}
+
+            bridge.client.get_context_usage = context_usage
+            bridge.client.responses = [sdk.ResultMessage(result="Compacted", is_error=False, terminal_reason="completed",
+                                                          session_id="session-test")]
+            await bridge.handle({"type": "compact"})
+            await bridge.turn_task
+            self.assertEqual(bridge.client.prompts[-1], "/compact")
+            kinds = [event["type"] for event in events]
+            self.assertLess(kinds.index("context"), kinds.index("compacted"))
+            self.assertEqual(events[-1], {"type": "compacted", "ok": True, "details": ""})
+            self.assertEqual([event for event in events if event["type"] == "context"][-1],
+                             {"type": "context", "used": 12345, "window": 200000})
+            self.assertIsNone(bridge.turn_task)
+            # A turn reports the context before it completes.
+            events.clear()
+            await bridge.handle({"type": "prompt", "text": "next"})
+            await bridge.turn_task
+            kinds = [event["type"] for event in events]
+            self.assertLess(kinds.index("context"), kinds.index("complete"))
+            # A compaction while a turn runs is refused.
+            bridge.turn_task = asyncio.get_running_loop().create_future()
+            await bridge.handle({"type": "compact"})
+            self.assertFalse(events[-1]["ok"])
+            bridge.turn_task.cancel()
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -74,6 +74,7 @@ private slots:
     void newChatAfterClosingAllTabs();
     void approvalsFileVersions();
     void claudeToolsBetweenText();
+    void claudeCompaction();
     void messageInputKeepsCursorVisible();
     void diffHighlighting();
     void codexSessionApprovalsWithdrawn();
@@ -1071,6 +1072,55 @@ for line in sys.stdin:
     const QString header = window.findChild<QLabel *>("chatHeader")->text();
     QVERIFY(!header.contains(message));
     QVERIFY(header.contains(message.left(40)));
+}
+
+// A Claude chat compacts its context with the Compact button, as a Codex chat does, and shows how many tokens
+// the context holds, as the bridge reports them.
+void MainWindowTest::claudeCompaction()
+{
+    const QString python = QStandardPaths::findExecutable("python3");
+    if (python.isEmpty()) QSKIP("Python 3 is unavailable");
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString fakeBridge = directory.filePath("fake-claude.py");
+    QFile script(fakeBridge);
+    QVERIFY(script.open(QIODevice::WriteOnly | QIODevice::Text));
+    script.write(R"PY(import json, sys
+def send(m): print(json.dumps(m), flush=True)
+send({"type": "ready"})
+for line in sys.stdin:
+    r = json.loads(line)
+    if r.get("type") == "prompt":
+        send({"type": "delta", "text": "Hello."})
+        send({"type": "session", "id": "claude-session"})
+        send({"type": "context", "used": 54321, "window": 200000})
+        send({"type": "complete", "status": "completed"})
+    elif r.get("type") == "compact":
+        send({"type": "context", "used": 1234, "window": 200000})
+        send({"type": "compacted", "ok": True, "details": ""})
+)PY");
+    script.close();
+    MainWindow window("/nonexistent/codex", directory.path(), python, fakeBridge);
+    window.show();
+    auto *input = window.findChild<QPlainTextEdit *>("commandInput");
+    auto *output = window.findChild<QPlainTextEdit *>("log");
+    auto *chat = window.findChild<QPlainTextEdit *>("chatView");
+    auto *compact = window.findChild<QPushButton *>("compactButton");
+    auto *context = window.findChild<QLineEdit *>("contextTokens");
+    QVERIFY(compact && context);
+    startChat(window, "Claude", directory.path());
+    QTRY_VERIFY(output->toPlainText().contains("[Connected to Claude Agent SDK]"));
+    QTRY_VERIFY(compact->isVisible());
+    QVERIFY(!compact->isEnabled());
+    QTest::keyClicks(input, "hello");
+    QTest::keyClick(input, Qt::Key_Return, Qt::ControlModifier);
+    QTRY_VERIFY(chat->toPlainText().contains("Hello."));
+    QTRY_VERIFY(context->text().remove(QRegularExpression("[^0-9]")) == "54321");
+    QTRY_VERIFY(compact->isEnabled());
+    compact->click();
+    QTRY_VERIFY(chat->toPlainText().contains("[Context compacted]"));
+    QTRY_VERIFY(context->text().remove(QRegularExpression("[^0-9]")) == "1234");
+    QTRY_VERIFY(compact->isEnabled());
 }
 
 // approvals.json of version 1 loads with the default lists and is written again as version 2; the lists of a

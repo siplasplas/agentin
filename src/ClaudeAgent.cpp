@@ -372,7 +372,12 @@ ClaudeAgent::ClaudeAgent(ClaudeProvider *provider, const QString &workingDirecto
             [this](int code, QProcess::ExitStatus) {
         emit message(QString("[%1] %2 bridge exited with code %3").arg(name_, kind_.toUpper()).arg(code));
         if (!steeringText_.isEmpty()) emit steerFailed(std::exchange(steeringText_, {}), "the bridge exited");
-        const bool working = busy_ || !queuedPrompts_.isEmpty();
+        // A compaction is not a turn: it ends without one.
+        const bool working = (busy_ && !compacting_) || !queuedPrompts_.isEmpty();
+        if (compacting_) {
+            compacting_ = false;
+            emit compactionFinished();
+        }
         ready_ = false;
         busy_ = false;
         stopRequested_ = false;
@@ -584,6 +589,23 @@ void ClaudeAgent::answerApproval(int id, ApprovalDecision decision)
     }
 }
 
+bool ClaudeAgent::canCompact() const
+{
+    return isRunning() && ready_ && !busy_ && !compacting_ && !sessionId_.isEmpty() && queuedPrompts_.isEmpty();
+}
+
+bool ClaudeAgent::compact()
+{
+    if (!canCompact()) return false;
+    busy_ = true;
+    compacting_ = true;
+    emit compactionStarted();
+    emit message("[Compacting " + name_ + " context]");
+    send({{"type", "compact"}});
+    emit stateChanged();
+    return true;
+}
+
 QStringList ClaudeAgent::trustedSessionCommands() const
 {
     QStringList rules = trustedSessionCommands_.values();
@@ -778,6 +800,16 @@ void ClaudeAgent::handleLine(const QByteArray &line)
         if (!decision.isEmpty())
             emit message(QString(decision == "deny" ? "[Declined by agentin's rules: " : "[Allowed by agentin's rules: ")
                          + verdict.reason + "]");
+    } else if (type == "context") {
+        emit contextUsage(event.value("used").toInteger(-1), event.value("window").toInteger(-1));
+    } else if (type == "compacted") {
+        busy_ = false;
+        compacting_ = false;
+        emit compactionFinished();
+        if (event.value("ok").toBool()) emit contextCompacted();
+        else emit message("[Could not compact " + name_ + " context: " + event.value("details").toString() + "]");
+        emit stateChanged();
+        sendNextPrompt();
     } else if (type == "writable") {
         QStringList directories;
         for (const QJsonValue &directory : event.value("directories").toArray())

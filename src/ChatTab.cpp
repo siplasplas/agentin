@@ -561,6 +561,11 @@ void ChatTab::setAgent(AgentBackend *agent)
         emit changed();
     });
     connect(agent, &AgentBackend::compactionFinished, this, &ChatTab::finishCompactionClock);
+    connect(agent, &AgentBackend::contextUsage, this, [this](qint64 used, qint64 window) {
+        conversationUsage_.contextUsed = used;
+        conversationUsage_.contextWindow = window;
+        emit changed();
+    });
     connect(agent, &AgentBackend::contextCompacted, this, [this] { appendText("\n[Context compacted]\n"); });
     connect(agent, &AgentBackend::historyRefreshStarted, this, [this] {
         historyRefreshCutoff_ = liveTranscript_.size();

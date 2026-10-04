@@ -174,6 +174,39 @@ class Bridge:
                 directories.append(root)
         return directories
 
+    async def report_context(self):
+        """Tells agentin how much of the context window the conversation uses, when the SDK can say."""
+        get = getattr(self.client, "get_context_usage", None)
+        if get is None:
+            return
+        try:
+            usage = await asyncio.wait_for(get(), timeout=5)
+        except Exception:
+            return
+        if isinstance(usage, dict) and isinstance(usage.get("totalTokens"), int):
+            send({"type": "context", "used": usage["totalTokens"],
+                  "window": usage.get("rawMaxTokens") or usage.get("maxTokens") or -1})
+
+    async def run_compact(self):
+        """Compacts the conversation's context with Claude Code's /compact command."""
+        ok, details = True, ""
+        try:
+            await self.client.query("/compact")
+            async for message in self.client.receive_response():
+                if isinstance(message, ResultMessage):
+                    if getattr(message, "session_id", None):
+                        self.session_id = message.session_id
+                        send({"type": "session", "id": self.session_id})
+                    if message.is_error:
+                        ok = False
+                        details = message.result or "; ".join(message.errors or []) or message.subtype
+            await self.report_context()
+        except Exception as exc:
+            ok, details = False, str(exc)
+        finally:
+            self.turn_task = None
+            send({"type": "compacted", "ok": ok, "details": details})
+
     def report_writable(self):
         """Tells agentin the directories besides the chat's own where this session may write, so that its
         directory lock holds them; the temporary directory is shared by everyone and is left out."""
@@ -224,6 +257,9 @@ class Bridge:
         await self.client.set_permission_mode("plan" if self.read_only else "default")
         self.connected = True
         send({"type": "ready"})
+        # A resumed conversation shows how full its context is before the first turn.
+        if resume:
+            await self.report_context()
 
     async def ask_agentin(self, message):
         """Sends a check to agentin and waits for its answer."""
@@ -433,6 +469,7 @@ class Bridge:
                     elif message.is_error:
                         status = "failed"
                         details = message.result or "; ".join(message.errors or []) or message.subtype
+            await self.report_context()
         except Exception as exc:
             status = "failed"
             details = str(exc)
@@ -451,6 +488,11 @@ class Bridge:
             text = command.get("text", "").strip()
             if text:
                 self.turn_task = asyncio.create_task(self.run_turn(text))
+        elif kind == "compact":
+            if self.turn_task is not None:
+                send({"type": "compacted", "ok": False, "details": "a turn is running"})
+                return
+            self.turn_task = asyncio.create_task(self.run_compact())
         elif kind == "steer":
             text = command.get("text")
             if self.turn_task is None or not isinstance(text, str) or not text.strip():

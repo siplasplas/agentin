@@ -312,6 +312,9 @@ signals:
     void compactionStarted();
     void compactionFinished();
     void contextCompacted();
+    // How many tokens the conversation's context holds now, and the model's context window (-1 when not known),
+    // for agents that report it apart from a turn's usage.
+    void contextUsage(qint64 used, qint64 window);
     void steerAccepted(const QString &text);
     void steerFailed(const QString &text, const QString &reason);
     // Refreshes stored history between turns while queued messages stay in the tab.

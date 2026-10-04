@@ -124,7 +124,11 @@ public:
     bool canInterrupt() const override { return busy_ && !stopRequested_; }
     // A message sent during a turn joins it at the model's next step, or is answered right after it.
     bool supportsSteering() const override { return true; }
-    bool canSteer() const override { return busy_ && !stopRequested_ && steeringText_.isEmpty(); }
+    bool canSteer() const override { return busy_ && !compacting_ && !stopRequested_ && steeringText_.isEmpty(); }
+    bool supportsCompaction() const override { return true; }
+    bool canCompact() const override;
+    bool isCompacting() const override { return compacting_; }
+    bool compact() override;
     bool isSteering() const override { return !steeringText_.isEmpty(); }
     bool steer(const QString &text) override;
     QString model() const override { return model_; }
@@ -184,6 +188,8 @@ private:
     QHash<int, CommandVerdict> approvalVerdicts_;
     // Hook checks that agentin's rules turned into approvals; they are answered as hook decisions.
     QSet<int> askedCommandChecks_;
+    // Claude Code compacts the context with its /compact command, run by the bridge apart from a turn.
+    bool compacting_ = false;
     // The directories besides the working directory where the session may write, as the bridge reports them.
     QStringList writableDirectories_;
     // Command prefixes trusted for this conversation; they count as Allow rules.

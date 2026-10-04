@@ -375,12 +375,15 @@ stops at the final duration when the operation ends and follows the selected tab
 The application log records each task and compaction duration, including operations
 that fail or are interrupted. Waiting for a directory lock is not timed.
 
-The **Compact** button above a Codex chat manually compacts its context when the
-chat is live and idle. The read-only field beside it shows current context tokens
-reported by App Server, with apostrophes grouping thousands (for example
-`100'000` or `1'000'000`). It updates with the server's usage reports, including
-after compaction; an em dash means no usage report has arrived yet. Compaction
-can be interrupted with **Stop** and does not count as a normal prompt completion.
+The **Compact** button above a Codex, Claude or GLM chat manually compacts its
+context when the chat is live and idle: Codex compacts its thread, and Claude Code
+runs its `/compact` command. The read-only field beside it shows the tokens the
+context holds, with apostrophes grouping thousands (for example `100'000` or
+`1'000'000`): Codex reports them with its usage, and a Claude or GLM chat after each
+turn, after compaction and when a conversation is resumed; its tooltip names the
+model's context window. An em dash means no report has arrived yet. Codex's
+compaction can be interrupted with **Stop**; a compaction does not count as a
+normal prompt completion, and a message sent meanwhile waits for it.
 
 After Codex compacts its context, a marker appears in the chat. When the running
 turn ends, the chat reloads its latest stored history from App Server before
@@ -457,8 +460,9 @@ Each sound can also be one of the short built-in sounds, generated when played
 (a click, a double click, a rising or a falling tone), or speech. A Codex chat's
 compaction plays its own sounds when it starts and when it ends, at every
 compaction, automatic or started with **Compact**; they do not interrupt an
-announcement that is playing, and muting silences them too. Claude and GLM do not
-report their compaction to agentin, so their chats play no compaction sounds. Where the desktop's sound themes are installed, as on Ubuntu,
+announcement that is playing, and muting silences them too. Claude and GLM chats
+play them for a compaction started with **Compact**; Claude Code's automatic
+compaction is not reported to agentin. Where the desktop's sound themes are installed, as on Ubuntu,
 unset sounds default to them: freedesktop's `bell.oga` when compaction starts,
 Yaru's `complete.oga` when it ends, and freedesktop's `screen-capture.oga` for an
 agent that waits. Elsewhere compaction uses the rising and falling tones.

@@ -410,13 +410,14 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     compactionRow->setContentsMargins(0, 0, 0, 0);
     compactButton_ = new QPushButton("Compact", compactionPanel_);
     compactButton_->setObjectName("compactButton");
-    compactButton_->setToolTip("Compact this chat's context when Codex is idle");
+    compactButton_->setToolTip("Compact this chat's context when the agent is idle: Codex compacts its thread, "
+                               "Claude Code runs /compact");
     contextTokens_ = new QLineEdit(compactionPanel_);
     contextTokens_->setObjectName("contextTokens");
     contextTokens_->setReadOnly(true);
     contextTokens_->setAlignment(Qt::AlignRight);
     contextTokens_->setFixedWidth(contextTokens_->fontMetrics().horizontalAdvance("9'999'999") + 20);
-    contextTokens_->setToolTip("Current context tokens reported by App Server; updated after compaction");
+    contextTokens_->setToolTip("Tokens in the chat's context, as the agent reports them; updated after compaction");
     compactionRow->addWidget(compactButton_);
     compactionRow->addWidget(contextTokens_);
     compactionRow->addWidget(new QLabel("tokens", compactionPanel_));
@@ -3022,7 +3023,7 @@ void MainWindow::updateStatus()
     compactionPanel_->setVisible(agent->supportsCompaction());
     compactButton_->setEnabled(tab->isLive() && !tab->isWaiting() && agent->canCompact());
     contextTokens_->setText(groupedTokens(conversation.contextUsed));
-    QString contextTip = "Current context tokens reported by App Server";
+    QString contextTip = "Tokens in the chat's context, as the agent reports them";
     if (conversation.contextWindow > 0)
         contextTip += "; context window: " + groupedTokens(conversation.contextWindow) + " tokens";
     contextTokens_->setToolTip(contextTip);
