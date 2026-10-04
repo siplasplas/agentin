@@ -2461,15 +2461,18 @@ void MainWindow::showNewConversationDialog()
     auto *buttons = new QDialogButtonBox(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
     buttons->button(QDialogButtonBox::Ok)->setText("Create chat");
     layout->addWidget(buttons);
-    const auto validatePath = [validation, buttons](const QString &path) {
-        const bool valid = !path.trimmed().isEmpty() && QFileInfo(path.trimmed()).isDir();
+    // A typed path may start with "~" for the home directory, as in the file dialogs.
+    const auto typedPath = [](const QString &text) { return QxFileDialog::expandHomePath(text.trimmed()); };
+    const auto validatePath = [validation, buttons, typedPath](const QString &text) {
+        const QString path = typedPath(text);
+        const bool valid = !path.isEmpty() && QFileInfo(path).isDir();
         validation->setText(valid ? "Directory exists" : "Directory does not exist");
         buttons->button(QDialogButtonBox::Ok)->setEnabled(valid);
     };
     connect(pathInput, &QLineEdit::textChanged, &dialog, validatePath);
-    connect(browse, &QPushButton::clicked, &dialog, [this, pathInput] {
-        const QString path = QxFileDialog::getExistingDirectory(this, "Choose working directory", pathInput->text(),
-                                                                recentDirectories_);
+    connect(browse, &QPushButton::clicked, &dialog, [this, pathInput, typedPath] {
+        const QString path = QxFileDialog::getExistingDirectory(this, "Choose working directory",
+                                                                typedPath(pathInput->text()), recentDirectories_);
         if (!path.isEmpty()) pathInput->setText(path);
     });
     connect(buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
@@ -2477,7 +2480,7 @@ void MainWindow::showNewConversationDialog()
     validatePath(currentPath);
     dialog.resize(560, dialog.sizeHint().height());
     if (dialog.exec() == QDialog::Accepted) {
-        const QString path = QDir::cleanPath(pathInput->text().trimmed());
+        const QString path = QDir::cleanPath(typedPath(pathInput->text()));
         rememberRecentDirectory(path);
         newConversation(offered.value(providerInput->currentIndex()), path, accessInput->currentData().toBool());
     }

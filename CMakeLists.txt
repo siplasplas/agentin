@@ -26,18 +26,18 @@ set(backward_exclude)
 if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.28)
     set(backward_exclude EXCLUDE_FROM_ALL)
 endif()
-# QxFileDialog and MruTabWidget come from qt-extra (github.com/siplasplas/qt-extra). An installed qt-extra 2.1
+# QxFileDialog and MruTabWidget come from qt-extra (github.com/siplasplas/qt-extra). An installed qt-extra 2.4
 # or later is used; otherwise CMake fetches the tag below and builds it into agentin, so nothing has to be
-# installed first. Version 2.1 adds optional file metadata and the chooser directory getter.
+# installed first. Version 2.4 reads a typed path starting with "~" as the home directory.
 FetchContent_Declare(
     qt-extra
     GIT_REPOSITORY https://github.com/siplasplas/qt-extra.git
-    GIT_TAG v2.3.0
+    GIT_TAG v2.4.0
     GIT_SHALLOW TRUE
     # Only built into agentin; its own install rules would add its library, headers and CMake package.
     ${backward_exclude}
     # The rest of the line goes to find_package(), so this comes last.
-    FIND_PACKAGE_ARGS 2.1
+    FIND_PACKAGE_ARGS 2.4
 )
 FetchContent_MakeAvailable(qt-extra)
 # The changes window shows a file's differences with DiffMerge's widgets (github.com/siplasplas/diffmerge,

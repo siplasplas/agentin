@@ -18,7 +18,7 @@ Requires Qt 6 Widgets, CMake 3.24 or newer, a C++20 compiler, libgit2 (`libgit2-
 and an installed `codex` CLI for Codex. The `qt-extra` library (the chat tabs and the
 directory chooser) and the widgets of [DiffMerge](https://github.com/siplasplas/diffmerge)
 (the diffs of the changes window, with the Kate syntax reader of `qcodeedit`) need
-no installing: an installed qt-extra 2.1, DiffMerge 1.2.1 or qcodeedit 1.6 or newer
+no installing: an installed qt-extra 2.4, DiffMerge 1.2.1 or qcodeedit 1.6 or newer
 is used, and otherwise CMake fetches them from GitHub when it configures the build
 and builds them into agentin, as it does with backward-cpp; that first
 configuration needs a network connection. Claude requires Python 3, `claude-agent-sdk`, and a configured API
@@ -212,7 +212,8 @@ directory…**, or type `new` to start a chat. Ctrl+W closes the current tab. In
 its **Access** (**Can change files**, the default, or **Read-only**, in which it
 reads and plans but changes nothing; the **Read-only** box switches it later),
 then enter a directory path or choose one with **Browse…**, which also lists
-recently used directories. The path starts as the directory selected in the
+recently used directories. A typed path, here and in **Browse…**, may start with
+`~` for the home directory, as in a shell: `~/src/app`. The path starts as the directory selected in the
 conversation tree, or the directory of the selected chat; otherwise, for
 example when an agent row is selected, it is the directory last chosen in this
 dialog. The **Create chat**
@@ -466,7 +467,7 @@ and scrolls to that file; an empty field starts in the last browsed directory.
 The audio chooser always shows the sortable duration column (`mm:ss.t`), without
 a checkbox. Image metadata is not enabled in this audio
 chooser. Pasted absolute or relative paths are handled by QxFileDialog, relative
-to its displayed directory. The
+to its displayed directory; a leading `~` is the home directory. The
 notification settings dialog also has **Stop playback** for cancelling **Play**
 previews while the dialog is open. Starting another sound or voice
 replaces the current playback, and closing the application stops it.
