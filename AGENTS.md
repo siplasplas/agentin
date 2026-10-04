@@ -28,7 +28,7 @@ The conversation language does not change the English-language requirements for 
 
 ## Building and running
 
-- Qt 6 only (Widgets; Test for the tests) and C++17. Do not add Qt 5 compatibility code.
+- Qt 6 only (Widgets; Test for the tests) and C++20. Do not add Qt 5 compatibility code.
 - Build: `cmake -S . -B build && cmake --build build`; run `./build/agentin -C /path/to/project`.
 - With tests: `cmake -S . -B build -DBUILD_TESTING=ON && cmake --build build`.
 - The Claude and GLM bridge (`claude/bridge.py`) runs in the project virtual environment `.venv` with `claude-agent-sdk`; the build copies the script next to the executable as `claude_bridge.py`.
@@ -37,7 +37,7 @@ The conversation language does not change the English-language requirements for 
 ## qt-extra
 
 - `QxFileDialog` and `MruTabWidget` come from qt-extra (source: a checkout beside agentin, `../qt-extra`; published as github.com/siplasplas/qt-extra). `CMakeLists.txt` takes it with `FetchContent` and `FIND_PACKAGE_ARGS`: an installed qt-extra 2.1 or newer (here in `/usr/local`) is used, and otherwise the pinned commit is fetched and built. Pin a commit or tag that is on GitHub, and move the pin when agentin needs a newer qt-extra.
-- The changes window colours code with qcodeedit's Kate reader (`qcodeedit::kate`, source: `../qcodeedit`; published as github.com/siplasplas/qcodeedit), taken the same way: an installed qcodeedit-kate 1.4 is used, otherwise the pinned tag is fetched and built without its demo, tests and downloader. qcodeedit builds as C++20 in its own directory; agentin includes only headers that are C++17. Fixes to it belong in qcodeedit, released with a new tag that the user pushes.
+- The changes window colours code with qcodeedit's Kate reader (`qcodeedit::kate`, source: `../qcodeedit`; published as github.com/siplasplas/qcodeedit), taken the same way: an installed qcodeedit-kate 1.4 is used, otherwise the pinned tag is fetched and built without its demo, tests and downloader. Fixes to it belong in qcodeedit, released with a new tag that the user pushes.
 - Changes to those widgets belong in qt-extra, which has its own `AGENTS.md` and semver rules; gemini-commander uses the same package. Installing needs `sudo`, so the user does it. For larger changes, write a handoff note in the qt-extra directory and let the user start a session there.
 
 ## Tests
@@ -55,6 +55,6 @@ The conversation language does not change the English-language requirements for 
 - `ChatTab` is the model of one tab: its chat session, text document, preview or live state, and history. `MainWindow` owns the providers, the conversation tree, the tabs and one chat view that moves into the current tab.
 - `ConversationIndex` keeps a provider's local JSON index; `ProcessLocks` detects conversations held open by other tools.
 - A new agent needs a provider and a chat class; `MainWindow` should not need provider-specific branches.
-- `libdiffcore/` is the O(NP) line diff, taken from diffmerge and maintained here as part of agentin (C++17, Qt Core only); `countLineChanges` in `src/LineChanges.h` counts added and removed lines with the limits of the changed files view. `GitBaseline` (`src/GitBaseline.h`, libgit2) records a Git work tree at the start of a turn and lists the files changed since. `ChangeTracker` keeps a chat's baselines in a worker thread, where libgit2 objects must stay, and counts the changes of its latest turn. `ChangesWindow` shows them with the diff of the selected file, whose code `DiffHighlighter` colours with qcodeedit's Kate reader.
+- `libdiffcore/` is the O(NP) line diff, taken from diffmerge and maintained here as part of agentin (Qt Core only); `countLineChanges` in `src/LineChanges.h` counts added and removed lines with the limits of the changed files view. `GitBaseline` (`src/GitBaseline.h`, libgit2) records a Git work tree at the start of a turn and lists the files changed since. `ChangeTracker` keeps a chat's baselines in a worker thread, where libgit2 objects must stay, and counts the changes of its latest turn. `ChangesWindow` shows them with the diff of the selected file, whose code `DiffHighlighter` colours with qcodeedit's Kate reader.
 - `src/shell/` (Qt Core only) reads Bash command lines for the command approvals: `parseBash` (`ShellAst.h`, `BashParser.cpp`) gives a tree, `evaluate` (`ShellEvaluator.h`) follows the directory and the variables through it and gives one `CommandUse` per command, and `classifyProgram` (`CommandCatalog.h`) tells what a known program reads, writes and runs. None of them touches the file system. A program is in the catalog as reading only when no option of it writes or runs something; anything not understood is `Unknown` or a problem, never a guess. `commandRuleVerdict` in `CommandApproval.cpp` turns the commands of a line into Allow, Ask or Deny with the rules of `approvals.json` and a `CommandContext` (directory, writable directories, chat trust) that each agent fills in; a change there needs a row in `tests/ShellApprovalTest.cpp` or the corpus.
 - Match the surrounding code style. User-visible behavior changes go into `README.md`.

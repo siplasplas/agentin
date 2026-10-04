@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.24)
 project(agentin VERSION 2.2.0 LANGUAGES CXX)
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 # Installs for the current user unless a prefix is given, so that no root rights are needed.
@@ -42,8 +42,7 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(qt-extra)
 # The changes window colours the code of a diff with qcodeedit's reader of Kate syntax definitions
 # (github.com/siplasplas/qcodeedit, LGPL-3.0-or-later). An installed qcodeedit-kate 1.4 is used; otherwise the
-# tag below is fetched and built into agentin, without its demo, tests and downloader. It builds as C++20 in
-# its own directory; the headers agentin includes are C++17.
+# tag below is fetched and built into agentin, without its demo, tests and downloader.
 find_package(qcodeedit-kate 1.4 QUIET)
 if(NOT TARGET qcodeedit::kate)
     set(QCE_BUILD_DEMO OFF)

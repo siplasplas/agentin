@@ -14,7 +14,7 @@ saved tabs are not reopened at startup.
 
 ## Build and run
 
-Requires Qt 6 Widgets, CMake 3.24 or newer, a C++17 compiler, libgit2 (`libgit2-dev`),
+Requires Qt 6 Widgets, CMake 3.24 or newer, a C++20 compiler, libgit2 (`libgit2-dev`),
 and an installed `codex` CLI for Codex. The `qt-extra` library (the chat tabs and the
 directory chooser) and the Kate syntax reader of `qcodeedit` (the colours of the
 changes window) need no installing: an installed qt-extra 2.1 or qcodeedit-kate
