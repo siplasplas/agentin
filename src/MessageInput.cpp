@@ -139,7 +139,9 @@ bool MessageInput::enterSends() const
 
 void MessageInput::insertLineBreak()
 {
+    // insertPlainText() does not scroll as typing does, so the new line could stay below the visible ones.
     insertPlainText("\n");
+    ensureCursorVisible();
     typed_ = true;
     typedLineBreak_ = true;
     updateEnterAction();
@@ -201,6 +203,14 @@ void MessageInput::insertFromMimeData(const QMimeData *source)
         typedLineBreak_ = false;
         updateEnterAction();
     }
+}
+
+// The field grows after its text has changed, when the scrolling has already been decided for the smaller
+// height; the cursor is brought into view again at the new size.
+void MessageInput::resizeEvent(QResizeEvent *event)
+{
+    QPlainTextEdit::resizeEvent(event);
+    if (hasFocus()) ensureCursorVisible();
 }
 
 void MessageInput::mousePressEvent(QMouseEvent *event)

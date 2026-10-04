@@ -47,6 +47,7 @@ protected:
     void keyPressEvent(QKeyEvent *event) override;
     void mousePressEvent(QMouseEvent *event) override;
     void insertFromMimeData(const QMimeData *source) override;
+    void resizeEvent(QResizeEvent *event) override;
 
 private:
     bool onFirstLine() const;

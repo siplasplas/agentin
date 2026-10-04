@@ -3,6 +3,7 @@
 #include "ChatView.h"
 #include "CommandApproval.h"
 #include "DiffHighlighter.h"
+#include "MessageInput.h"
 #include "CodexAgent.h"
 #include "CodexConnection.h"
 #include <QJsonDocument>
@@ -72,6 +73,7 @@ private slots:
     void geminiAttachRespectsExternalLock();
     void newChatAfterClosingAllTabs();
     void approvalsFileVersions();
+    void messageInputKeepsCursorVisible();
     void diffHighlighting();
     void codexSessionApprovalsWithdrawn();
 };
@@ -1008,6 +1010,24 @@ void MainWindowTest::diffHighlighting()
     QVERIFY(DiffHighlighter::highlight("notes.txt", {"alpha"}, false).isEmpty());
     // A dark window without a dark theme is not coloured.
     QVERIFY(DiffHighlighter::highlight("main.probe", {"alpha"}, true).isEmpty());
+}
+
+// A line break inserted by Enter or Shift+Enter scrolls as typing does: the cursor stays visible while the
+// field grows and after it has reached its largest height.
+void MainWindowTest::messageInputKeepsCursorVisible()
+{
+    MessageInput input;
+    input.setEnterPolicy(MessageInput::EnterPolicy::NewLine);
+    input.resize(400, 40);
+    input.show();
+    input.setFocus();
+    QVERIFY(QTest::qWaitForWindowExposed(&input));
+    for (int line = 0; line < 14; ++line) {
+        QTest::keyClicks(&input, QString("line %1").arg(line));
+        QTest::keyClick(&input, Qt::Key_Return, line % 2 ? Qt::ShiftModifier : Qt::NoModifier);
+        QCoreApplication::processEvents();
+        QVERIFY2(input.viewport()->rect().contains(input.cursorRect()), qPrintable(QString("after line %1").arg(line)));
+    }
 }
 
 // approvals.json of version 1 loads with the default lists and is written again as version 2; the lists of a
