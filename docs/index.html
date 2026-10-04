@@ -129,7 +129,8 @@
       <div class="card">
         <h3>See what a turn changed</h3>
         <p>A changes window lists the files a turn, the chat or <code>HEAD</code> changed, with unified or side-by-side
-          diffs, folding and syntax colours from Kate definitions, read with
+          diffs from <a href="https://github.com/siplasplas/diffmerge">DiffMerge</a>: changed words and characters,
+          folded unchanged lines and syntax colours from Kate definitions, read with
           <a href="https://github.com/siplasplas/qcodeedit">qcodeedit</a>.</p>
       </div>
       <div class="card">
@@ -165,7 +166,7 @@ cmake -S . -B build
 cmake --build build
 ./build/agentin -C /path/to/project</code></pre>
     <p class="note">The first configuration fetches its other libraries from GitHub when they are not installed:
-      qt-extra, qcodeedit and backward-cpp. Codex needs the <code>codex</code> CLI; Claude Code and GLM need Python 3
+      qt-extra, DiffMerge, qcodeedit and backward-cpp. Codex needs the <code>codex</code> CLI; Claude Code and GLM need Python 3
       with <code>claude-agent-sdk</code>. The <a href="https://github.com/siplasplas/agentin#readme">README</a> has
       the details.</p>
   </section>
@@ -185,7 +186,7 @@ cmake --build build
       </div>
       <div class="card">
         <h3>Free software</h3>
-        <p>GPL-3.0-only. Built with Qt 6, qtermwidget, libgit2, qt-extra and qcodeedit.</p>
+        <p>GPL-3.0-only. Built with Qt 6, qtermwidget, libgit2, qt-extra, DiffMerge and qcodeedit.</p>
       </div>
     </div>
   </section>

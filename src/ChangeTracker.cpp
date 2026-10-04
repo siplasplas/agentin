@@ -4,7 +4,6 @@
 #include <QFileInfo>
 #include <QThread>
 
-#include <diffcore/DiffEngine.h>
 
 #include <map>
 #include <vector>
@@ -64,18 +63,15 @@ public:
         emit counted(result);
     }
 
-    // New, binary, too large and rewritten files get a note instead of a diff.
+    // Binary, too large and rewritten files get a note instead of a diff.
     void diff(const FileChange &change)
     {
-        FileDiff result{change.root, change.file.path, {}, {}, {}, {}, false};
+        FileDiff result{change.root, change.file.path, {}, {}};
         GitBaseline *baseline = nullptr;
         for (const auto &candidate : baselines_[change.since])
             if (candidate->root() == change.root) baseline = candidate.get();
         if (!baseline) {
             result.note = "This file is no longer tracked.";
-        } else if (change.file.status == ChangedFile::Status::New && change.lines.kind == LineChanges::Kind::Counted) {
-            result.newFile = true;
-            result.after = splitLines(baseline->contentAfter(change.file));
         } else if (change.lines.kind == LineChanges::Kind::Binary || change.file.status == ChangedFile::Status::Binary) {
             result.note = "Binary file; it is compared by content only.";
         } else if (change.lines.kind == LineChanges::Kind::TooLarge) {
@@ -84,10 +80,17 @@ public:
             result.note = QString("The file was largely rewritten (%1 lines before, %2 now); its differences are not shown.")
                               .arg(change.lines.linesBefore).arg(change.lines.linesAfter);
         } else {
-            result.before = splitLines(baseline->contentBefore(change.file));
-            result.after = splitLines(baseline->contentAfter(change.file));
-            const diffcore::DiffResult computed = diffcore::DiffEngine().compute(result.before, result.after);
-            result.hunks = QList<diffcore::Hunk>(computed.hunks.begin(), computed.hunks.end());
+            using namespace diffmerge::gui;
+            // The file's name chooses the syntax colours of both sides.
+            const QString name = QFileInfo(change.file.path).fileName();
+            const QByteArray before = change.file.status == ChangedFile::Status::New ? QByteArray()
+                                                                                      : baseline->contentBefore(change.file);
+            const PrepareResult prepared =
+                prepareComparison(TextSnapshot::fromText(QString::fromUtf8(before), "Before", name),
+                                  TextSnapshot::fromText(QString::fromUtf8(baseline->contentAfter(change.file)), "After", name));
+            if (prepared.status == PreparationStatus::Ready) result.comparison = prepared.comparison;
+            else if (prepared.status == PreparationStatus::ResourceLimit) result.note = "The file is too large to show its differences.";
+            else result.note = "The differences could not be computed: " + prepared.message;
         }
         emit diffComputed(result);
     }

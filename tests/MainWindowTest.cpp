@@ -1,8 +1,9 @@
 #include "CodexLocator.h"
 #include "ChatTab.h"
 #include "ChatView.h"
+#include "ChangesWindow.h"
+#include "ChangeTracker.h"
 #include "CommandApproval.h"
-#include "DiffHighlighter.h"
 #include "MessageInput.h"
 #include "CodexAgent.h"
 #include "CodexConnection.h"
@@ -34,6 +35,7 @@
 #include <QTemporaryDir>
 #include <QTimer>
 #include <QTreeWidget>
+#include <QTreeWidgetItemIterator>
 #include <QStandardPaths>
 #include <QSplitter>
 #include <QTabWidget>
@@ -42,7 +44,8 @@
 #include <QScrollBar>
 #include <QtTest>
 
-#include <qce/kate/KatePaths.h>
+#include <diffmerge/FileDiffWidget.h>
+
 
 static void startChat(MainWindow &window, const QString &provider, const QString &path);
 
@@ -79,10 +82,10 @@ private slots:
     void claudeToolsBetweenText();
     void claudeCompaction();
     void messageInputKeepsCursorVisible();
-    void diffHighlighting();
     void codexSessionApprovalsWithdrawn();
     void conversationRenaming();
     void tabsKeepTheirScrollPosition();
+    void changesWindowShowsDiff();
 };
 
 void MainWindowTest::foldedOutputScrolling()
@@ -963,60 +966,6 @@ for line in sys.stdin:
     QCOMPARE(chat.sessionId(), QString("kept-thread"));
     QVERIFY(std::any_of(messages.cbegin(), messages.cend(),
                         [](const QList<QVariant> &message) { return message.first().toString() == "[Codex session approvals withdrawn]"; }));
-}
-
-// The changes window colours code with the Kate definitions in qcodeedit's data directory: a whole file, so
-// that a construct spanning lines keeps its colour; nothing for a file no definition fits.
-void MainWindowTest::diffHighlighting()
-{
-    QTemporaryDir data;
-    QVERIFY(data.isValid());
-    QVERIFY(QDir(data.path()).mkpath("syntax"));
-    QFile definition(data.filePath("syntax/probe.xml"));
-    QVERIFY(definition.open(QIODevice::WriteOnly));
-    definition.write(R"XML(<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE language>
-<language name="Probe" section="Sources" extensions="*.probe" version="1" kateversion="5.0">
-  <highlighting>
-    <list name="keywords"><item>alpha</item></list>
-    <contexts>
-      <context name="Normal" attribute="Normal Text" lineEndContext="#stay">
-        <keyword attribute="Keyword" context="#stay" String="keywords"/>
-        <Detect2Chars attribute="Comment" context="Block" char="/" char1="*"/>
-      </context>
-      <context name="Block" attribute="Comment" lineEndContext="#stay">
-        <Detect2Chars attribute="Comment" context="#pop" char="*" char1="/"/>
-      </context>
-    </contexts>
-    <itemDatas>
-      <itemData name="Normal Text" defStyleNum="dsNormal"/>
-      <itemData name="Keyword" defStyleNum="dsKeyword"/>
-      <itemData name="Comment" defStyleNum="dsComment"/>
-    </itemDatas>
-  </highlighting>
-</language>
-)XML");
-    definition.close();
-    qce::kate::setDataDirOverride(data.path());
-    const auto restore = qScopeGuard([] { qce::kate::setDataDirOverride({}); });
-
-    const QList<QList<DiffHighlighter::Span>> colours =
-        DiffHighlighter::highlight("main.probe", {"alpha beta", "x /* open", "still inside", "*/ alpha"}, false);
-    QCOMPARE(colours.size(), 4);
-    const auto spanAt = [&colours](int line, int column) -> const DiffHighlighter::Span * {
-        for (const DiffHighlighter::Span &span : colours.at(line))
-            if (column >= span.start && column < span.start + span.length) return &span;
-        return nullptr;
-    };
-    QVERIFY(spanAt(0, 0) && spanAt(0, 0)->format.foreground().style() != Qt::NoBrush);
-    QVERIFY(!spanAt(0, 7) || spanAt(0, 7)->format != spanAt(0, 0)->format);
-    // The comment opened on line 2 colours line 3, which a diff may show apart from it.
-    QVERIFY(spanAt(1, 3) && spanAt(2, 0));
-    QCOMPARE(spanAt(2, 0)->format.foreground(), spanAt(1, 3)->format.foreground());
-    QVERIFY(spanAt(3, 4) && spanAt(3, 4)->format.foreground() == spanAt(0, 0)->format.foreground());
-    QVERIFY(DiffHighlighter::highlight("notes.txt", {"alpha"}, false).isEmpty());
-    // A dark window without a dark theme is not coloured.
-    QVERIFY(DiffHighlighter::highlight("main.probe", {"alpha"}, true).isEmpty());
 }
 
 // A line break inserted by Enter or Shift+Enter scrolls as typing does: the cursor stays visible while the
@@ -2401,6 +2350,83 @@ for line in sys.stdin:
     showTab(0);
     showTab(1);
     QCOMPARE(bar->value(), bar->maximum());
+}
+
+// The changes window lists what a turn changed and shows the selected file with DiffMerge: unified by default,
+// side by side on request, with the changed characters of a changed line marked; a new file is all added.
+void MainWindowTest::changesWindowShowsDiff()
+{
+    const QString git = QStandardPaths::findExecutable("git");
+    if (git.isEmpty()) QSKIP("Git is unavailable");
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const auto run = [&](const QStringList &arguments) {
+        QProcess process;
+        process.setWorkingDirectory(directory.path());
+        process.start(git, arguments);
+        return process.waitForFinished() && process.exitCode() == 0;
+    };
+    const auto write = [&](const QString &name, const QString &text) {
+        QFile file(directory.filePath(name));
+        return file.open(QIODevice::WriteOnly | QIODevice::Truncate) && file.write(text.toUtf8()) == text.toUtf8().size();
+    };
+    QStringList lines;
+    for (int i = 0; i < 30; ++i) lines.append(QString("int value%1 = %1;").arg(i));
+    QVERIFY(write("main.cpp", lines.join('\n') + '\n'));
+    QVERIFY(run({"init", "-q"}));
+    QVERIFY(run({"-c", "user.name=Test", "-c", "user.email=test@example.com", "add", "main.cpp"}));
+    QVERIFY(run({"-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-q", "-m", "start"}));
+
+    ChangeTracker tracker;
+    // The baseline is recorded in the tracker's thread; the count that follows it says that it has been.
+    QSignalSpy updated(&tracker, &ChangeTracker::changesUpdated);
+    tracker.turnStarted({directory.path()});
+    QTRY_COMPARE(updated.size(), 2);
+    lines[15] = "int value15 = 51;";
+    QVERIFY(write("main.cpp", lines.join('\n') + '\n'));
+    QVERIFY(write("added.txt", "first\nsecond\n"));
+    tracker.refresh();
+    QTRY_COMPARE(tracker.changes().size(), 2);
+
+    ChangesWindow window(&tracker, "Test");
+    window.show();
+    auto *list = window.findChild<QTreeWidget *>("changedFiles");
+    auto *diff = window.findChild<diffmerge::gui::FileDiffWidget *>("fileDiff");
+    auto *view = window.findChild<QComboBox *>("diffView");
+    auto *skip = window.findChild<QCheckBox *>("skipUnchanged");
+    QVERIFY(list && diff && view && skip);
+    const auto select = [list](const QString &name) {
+        for (QTreeWidgetItemIterator it(list); *it; ++it) {
+            if ((*it)->text(1).endsWith(name)) {
+                list->setCurrentItem(*it);
+                return true;
+            }
+        }
+        return false;
+    };
+    QTRY_VERIFY(select("main.cpp"));
+    QTRY_VERIFY(diff->isVisible() && diff->comparison());
+    QCOMPARE(diff->changeCount(), 1);
+    QCOMPARE(diff->viewMode(), diffmerge::gui::ViewMode::Unified);
+    QVERIFY(diff->unchangedLinesSkipped());
+    QCOMPARE(diff->contextLines(), 3);
+    QCOMPARE(diff->changes().first().rightRange.start, 15);
+    // Only the changed digits of the changed line are marked, not the whole line.
+    const auto &ranges = diff->comparison()->highlights().rightRanges.at(15);
+    QVERIFY(!ranges.isEmpty());
+    int marked = 0;
+    for (const auto &range : ranges) marked += range.length;
+    QVERIFY(marked < lines[15].size() / 2);
+    view->setCurrentIndex(1);
+    QCOMPARE(diff->viewMode(), diffmerge::gui::ViewMode::SideBySide);
+    skip->setChecked(false);
+    QVERIFY(!diff->unchangedLinesSkipped());
+
+    QVERIFY(select("added.txt"));
+    QTRY_VERIFY(diff->comparison()
+                && diff->comparison()->snapshot(diffmerge::gui::Side::Right).lines == QStringList({"first", "second"}));
+    QCOMPARE(diff->changeCount(), 1);
+    QCOMPARE(diff->changes().first().type, diffcore::ChangeType::Insert);
 }
 
 QTEST_MAIN(MainWindowTest)

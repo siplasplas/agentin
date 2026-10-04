@@ -1,7 +1,6 @@
 #pragma once
 
 #include "ChangeTracker.h"
-#include "DiffHighlighter.h"
 
 #include <QHash>
 #include <QPointer>
@@ -15,15 +14,19 @@ class QCheckBox;
 class QComboBox;
 class QTimer;
 class QLabel;
-class QPlainTextEdit;
 class QStackedWidget;
 class QToolButton;
 class QTreeWidget;
 class QTreeWidgetItem;
 
+namespace diffmerge::gui {
+class FileDiffWidget;
+}
+
 // The files a chat changed since a chosen point, with lines added and removed, and the diff of the selected
-// file, unified or side by side. Long unchanged stretches are folded and open with a click. It follows the
-// tracker live while a turn runs. A file opens with the application the system associates with its type.
+// file in DiffMerge's view: unified or side by side, with changed words and characters marked, and long
+// unchanged stretches folded until clicked. It follows the tracker live while a turn runs. A file opens with
+// the application the system associates with its type.
 class ChangesWindow : public QWidget
 {
     Q_OBJECT
@@ -35,29 +38,16 @@ public:
     void setOpener(std::function<void(const QString &path, int line)> opener) { opener_ = std::move(opener); }
 
 protected:
-    bool eventFilter(QObject *object, QEvent *event) override;
     void closeEvent(QCloseEvent *event) override;
 
 private:
-    // One row of the diff view; Changed pairs a removed and an added line side by side.
-    struct Row
-    {
-        enum Kind { Context, Removed, Added, Changed, Fold };
-        Kind kind = Context;
-        int before = -1;
-        int after = -1;
-        // For Fold: the first hidden line in the diff's sequence and the number of hidden lines.
-        int fold = -1;
-        int count = 0;
-    };
-
     ChangesSince since() const;
     void updateList();
     void showSelected();
-    void render();
-    QList<Row> rows(bool sideBySide) const;
+    // Shows the received diff, or a message in its place.
+    void showDiff();
+    void showMessage(const QString &text);
     void sortChanges(QList<FileChange> &changes) const;
-    void moveToChange(int step);
     void openFile(QTreeWidgetItem *item) const;
     void showMenu(const QPoint &position);
     std::optional<FileChange> selectedChange() const;
@@ -70,12 +60,12 @@ private:
     QCheckBox *groupNew_;
     QTreeWidget *list_;
     QComboBox *view_;
+    QCheckBox *skipUnchanged_;
     QToolButton *previous_;
     QToolButton *next_;
     QStackedWidget *pages_;
-    QPlainTextEdit *unified_;
-    QPlainTextEdit *before_;
-    QPlainTextEdit *after_;
+    QLabel *message_;
+    diffmerge::gui::FileDiffWidget *diffView_;
     // The file whose diff is shown or requested, and the state it was requested in.
     QString shownKey_;
     QString shownState_;
@@ -87,11 +77,4 @@ private:
     int sortColumn_ = 1;
     QTimer *flashEnd_;
     std::optional<FileDiff> diff_;
-    // The syntax colours of the shown diff's old and new content, per line; empty when it is not coloured.
-    QList<QList<DiffHighlighter::Span>> beforeColours_;
-    QList<QList<DiffHighlighter::Span>> afterColours_;
-    QSet<int> openedFolds_;
-    // Rows where a run of changes starts, and the one moved to last.
-    QList<int> changeStarts_;
-    int currentChange_ = -1;
 };

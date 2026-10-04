@@ -40,24 +40,20 @@ FetchContent_Declare(
     FIND_PACKAGE_ARGS 2.1
 )
 FetchContent_MakeAvailable(qt-extra)
-# The changes window colours the code of a diff with qcodeedit's reader of Kate syntax definitions
-# (github.com/siplasplas/qcodeedit, LGPL-3.0-or-later). An installed qcodeedit-kate 1.4 is used; otherwise the
-# tag below is fetched and built into agentin, without its demo, tests and downloader.
-find_package(qcodeedit-kate 1.4 QUIET)
-if(NOT TARGET qcodeedit::kate)
-    set(QCE_BUILD_DEMO OFF)
-    set(QCE_BUILD_TESTS OFF)
-    set(QCE_BUILD_KATE ON)
-    set(QCE_BUILD_KATE_DOWNLOADER OFF)
-    FetchContent_Declare(
-        qcodeedit
-        GIT_REPOSITORY https://github.com/siplasplas/qcodeedit.git
-        GIT_TAG v1.4.1
-        GIT_SHALLOW TRUE
-        ${backward_exclude}
-    )
-    FetchContent_MakeAvailable(qcodeedit)
-endif()
+# The changes window shows a file's differences with DiffMerge's widgets (github.com/siplasplas/diffmerge,
+# LGPL-3.0-only): line, word and character differences, unified or side by side, with syntax colours from
+# Kate definitions read by qcodeedit, and the bounded line counting of the changed files list. An installed
+# DiffMerge 1.2.1 or later is used; otherwise the tag below is fetched and built into agentin, only its libraries. It
+# finds an installed qcodeedit 1.6 itself, or fetches it.
+FetchContent_Declare(
+    DiffMerge
+    GIT_REPOSITORY https://github.com/siplasplas/diffmerge.git
+    GIT_TAG v1.2.1
+    GIT_SHALLOW TRUE
+    ${backward_exclude}
+    FIND_PACKAGE_ARGS 1.2.1 CONFIG COMPONENTS Widgets
+)
+FetchContent_MakeAvailable(DiffMerge)
 FetchContent_Declare(
     backward
     GIT_REPOSITORY https://github.com/bombela/backward-cpp.git
@@ -119,13 +115,11 @@ add_executable(agentin
     src/ChangeTracker.h
     src/ChangesWindow.cpp
     src/ChangesWindow.h
-    src/DiffHighlighter.cpp
-    src/DiffHighlighter.h
     src/FileOpener.cpp
     src/FileOpener.h
 )
-target_link_libraries(agentin PRIVATE Qt6::Widgets qt-extra Backward::Object diffcore::diffcore PkgConfig::LIBGIT2 qtermwidget6
-                      qcodeedit::kate)
+target_link_libraries(agentin PRIVATE Qt6::Widgets qt-extra Backward::Object DiffMerge::Widgets PkgConfig::LIBGIT2
+                      qtermwidget6)
 # The window icon; Qt draws it with its SVG image format plugin.
 qt_add_resources(agentin icons PREFIX "/" FILES icons/agentin.svg)
 target_include_directories(agentin PRIVATE src)
@@ -149,8 +143,6 @@ install(CODE "execute_process(COMMAND update-desktop-database \"\${CMAKE_INSTALL
 
 option(BUILD_TESTING "Build tests" OFF)
 include(CTest)
-# The O(NP) line diff, part of agentin's sources.
-add_subdirectory(libdiffcore)
 if(BUILD_TESTING)
     find_package(Qt6 REQUIRED COMPONENTS Test)
     find_package(Python3 COMPONENTS Interpreter)
@@ -205,13 +197,11 @@ if(BUILD_TESTING)
         src/ChangeTracker.h
         src/ChangesWindow.cpp
         src/ChangesWindow.h
-        src/DiffHighlighter.cpp
-        src/DiffHighlighter.h
         src/FileOpener.cpp
         src/FileOpener.h
     )
-    target_link_libraries(agentin_test PRIVATE Qt6::Widgets Qt6::Test qt-extra diffcore::diffcore PkgConfig::LIBGIT2 qtermwidget6
-                          qcodeedit::kate)
+    target_link_libraries(agentin_test PRIVATE Qt6::Widgets Qt6::Test qt-extra DiffMerge::Widgets PkgConfig::LIBGIT2
+                          qtermwidget6)
     target_include_directories(agentin_test PRIVATE src)
     add_test(NAME agentin_test COMMAND agentin_test)
     # Decisions about shell command lines, against a corpus of real commands; no window, milliseconds.

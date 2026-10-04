@@ -3,7 +3,7 @@
 #include "GitBaseline.h"
 #include "LineChanges.h"
 
-#include <diffcore/DiffTypes.h>
+#include <diffmerge/Comparison.h>
 
 #include <QDateTime>
 #include <QHash>
@@ -32,17 +32,14 @@ struct FileChange
 };
 Q_DECLARE_METATYPE(QList<FileChange>)
 
-// The diff of one changed file, or the reason it has none.
+// The diff of one changed file, prepared for DiffMerge's view, or the reason it has none. A new file is
+// compared with an empty one.
 struct FileDiff
 {
     QString root;
     QString path;
-    QStringList before;
-    QStringList after;
-    QList<diffcore::Hunk> hunks;
+    std::shared_ptr<const diffmerge::gui::PreparedComparison> comparison;
     QString note;
-    // A new file is shown as its content, in after, without a diff.
-    bool newFile = false;
 };
 Q_DECLARE_METATYPE(FileDiff)
 

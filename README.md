@@ -16,11 +16,12 @@ saved tabs are not reopened at startup.
 
 Requires Qt 6 Widgets, CMake 3.24 or newer, a C++20 compiler, libgit2 (`libgit2-dev`),
 and an installed `codex` CLI for Codex. The `qt-extra` library (the chat tabs and the
-directory chooser) and the Kate syntax reader of `qcodeedit` (the colours of the
-changes window) need no installing: an installed qt-extra 2.1 or qcodeedit-kate
-1.4 or newer is used, and otherwise CMake fetches them from GitHub when it
-configures the build and builds them into agentin, as it does with backward-cpp;
-that first configuration needs a network connection. Claude requires Python 3, `claude-agent-sdk`, and a configured API
+directory chooser) and the widgets of [DiffMerge](https://github.com/siplasplas/diffmerge)
+(the diffs of the changes window, with the Kate syntax reader of `qcodeedit`) need
+no installing: an installed qt-extra 2.1, DiffMerge 1.2.1 or qcodeedit 1.6 or newer
+is used, and otherwise CMake fetches them from GitHub when it configures the build
+and builds them into agentin, as it does with backward-cpp; that first
+configuration needs a network connection. Claude requires Python 3, `claude-agent-sdk`, and a configured API
 key. GLM uses the same Python SDK with a Z.AI API key. Gemini requires an
 installed and authenticated Gemini CLI. Antigravity requires an installed and
 authenticated `agy` CLI. The optional test also requires Qt 6
@@ -357,18 +358,19 @@ with its status (`m` modified, `n` new, `d` deleted, `r` renamed in the index,
 `b` binary) and its added and removed lines, a new file's lines counted as added.
 Clicking **File**, **+** or **−** sorts the list by it, the largest numbers first;
 equal counts go by the other count, then by path. The window shows
-the diff of the selected file, unified or side by side, with line numbers and three lines of context;
-longer unchanged stretches are folded into one line that opens with a click, and
-the arrow buttons (or Alt+Up and Alt+Down) move between changes. The code is
-coloured by its syntax with the Kate syntax definitions that qcodeedit keeps in
+the diff of the selected file with DiffMerge's view, unified or side by side, with
+line numbers. A changed line shows which words and characters changed. With
+**Skip unchanged lines** (on by default), three lines of context stay around each
+change and longer unchanged stretches are folded into one line that opens with a
+click; the arrow buttons (or Alt+Up and Alt+Down) move between changes. The code
+is coloured by its syntax with the Kate syntax definitions that qcodeedit keeps in
 `~/.local/share/qcodeedit/kate-<version>/syntax` (shared with other editors built
-on qcodeedit, such as qceditor), chosen by the file's name; a dark window uses the
-Breeze Dark theme from the `themes` directory beside them. Without the
-definitions, or for a file of more than 50 000 lines, the diff is shown without
-syntax colours. agentin does not download the definitions. The list starts
+on qcodeedit, such as qceditor and the DiffMerge application), chosen by the
+file's name; without them the diff is shown without syntax colours. agentin does
+not download the definitions. The list starts
 from the latest turn; it can also show the changes since the chat's first turn,
 or against `HEAD` as Git sees them, including changes made before the chat. A new
-file shows its whole content with line numbers and no diff colors; binary, too
+file is shown as compared with an empty one, all its lines added; binary, too
 large and largely rewritten files get a note instead of a diff. Double-click or
 Enter opens a file; the context menu also opens its folder or copies its path.
 
