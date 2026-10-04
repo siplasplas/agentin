@@ -77,8 +77,9 @@ public:
     bool hasMoreHistory() const { return hasMore_; }
     // The user's messages in this conversation as far as loaded, oldest first, for recalling them.
     // The messages the up and down keys recall: all the conversation's, when the agent reports them, then those
-    // of the loaded history and those sent here. The message field keeps the latest of repeated ones.
-    QStringList userMessages() const { return allUserMessages_ + historyMessages_ + sentMessages_; }
+    // of the loaded history and those sent here, without the texts an agent records as the user's but the user
+    // did not write. The message field keeps the latest of repeated ones.
+    QStringList userMessages() const;
     // The user's messages with the agent's text answers, without tools and reasoning, oldest first.
     struct Exchange
     {

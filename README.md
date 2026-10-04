@@ -677,14 +677,19 @@ chat. Claude, GLM and Gemini take them from the session they read anyway; Codex
 reads its turns' summaries, which hold each turn's first message without the
 commands and their output, so a message sent to a running turn is recalled only
 from the loaded part of the chat. Antigravity offers no history, so only the
-messages sent in the tab are recalled. A message you wrote several times is
-recalled once, at the place of its latest use. Alt+Down, or the arrow button
+messages sent in the tab are recalled. Texts an agent records as yours though
+you did not write them are left out: Claude Code's task notifications, the
+output of local commands such as `/model`, reminders, interruption notes and
+the summary a continued session starts with, and the context Codex adds; what
+you pasted stays. A message you wrote several times is recalled once, at the
+place of its latest use. Alt+Down, or the arrow button
 beside the field, lists the messages as a combo box does, oldest first and the
 newest selected nearest the field. Each row shows a message's beginning: up to
 its first line break, or what fits on the field's first line at its current
 width when a long line would wrap, with `…` when more follows; the tooltip
 shows all of it. Enter or a click puts the chosen message into the field as Page Up
-would, so Enter sends it unchanged and the arrow keys continue from it.
+would, so Enter sends it unchanged and the arrow keys continue from it. Escape,
+or a click anywhere outside the list, closes it and leaves the field as it was.
 
 Two agents never work on turns in the same directory, or in a directory and one
 of its subdirectories, at the same time. A turn holds its working directory and

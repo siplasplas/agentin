@@ -198,6 +198,29 @@ QString ChatTab::key() const
     return key(provider_->name(), id_);
 }
 
+namespace {
+// Texts agents record in the user's role: Claude Code's task notifications, the output and caveats of local
+// commands such as /model, reminders, interruptions and the summary a continued session starts with, and the
+// context Codex adds. What the user pasted stays.
+bool writtenByUser(const QString &text)
+{
+    static const QRegularExpression injected(
+        R"(^\s*(<(task-notification|local-command-caveat|local-command-stdout|local-command-stderr|command-name|)"
+        R"(command-message|command-args|system-reminder|bash-stdout|bash-stderr|environment_context|)"
+        R"(user_instructions|turn_aborted)[\s>]|\[Request interrupted |This session is being continued from ))");
+    return !injected.match(text).hasMatch();
+}
+}
+
+QStringList ChatTab::userMessages() const
+{
+    QStringList messages;
+    for (const QStringList *list : {&allUserMessages_, &historyMessages_, &sentMessages_})
+        for (const QString &message : *list)
+            if (writtenByUser(message)) messages.append(message);
+    return messages;
+}
+
 QString ChatTab::headerText(bool withChanges) const
 {
     // A new chat is named after its first message, which may be long; the header shows its beginning.

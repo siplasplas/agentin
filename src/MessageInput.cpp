@@ -3,6 +3,7 @@
 #include <QSet>
 #include <QKeyEvent>
 #include <QListWidget>
+#include <QMouseEvent>
 #include <QScrollBar>
 #include <QMimeData>
 #include <QTextBlock>
@@ -55,10 +56,39 @@ void MessageInput::setHistory(const QStringList &messages)
     emit historyChanged();
 }
 
+namespace {
+// A list shown as a popup closes like a combo box's: on Escape, on a click outside it and when its window
+// stops being active. A list view handles mouse presses itself, so the popup's own close on an outside
+// click has to be repeated here.
+class HistoryList : public QListWidget
+{
+public:
+    using QListWidget::QListWidget;
+
+protected:
+    void keyPressEvent(QKeyEvent *event) override
+    {
+        if (event->key() == Qt::Key_Escape) close();
+        else QListWidget::keyPressEvent(event);
+    }
+    void mousePressEvent(QMouseEvent *event) override
+    {
+        if (!rect().contains(event->position().toPoint())) close();
+        else QListWidget::mousePressEvent(event);
+    }
+    bool event(QEvent *event) override
+    {
+        if (event->type() == QEvent::WindowDeactivate) close();
+        return QListWidget::event(event);
+    }
+};
+}
+
 void MessageInput::showHistoryList()
 {
     if (history_.isEmpty()) return;
-    auto *list = new QListWidget;
+    // A parent makes it a popup of this window, also on Wayland.
+    auto *list = new HistoryList(this);
     list->setWindowFlags(Qt::Popup);
     list->setAttribute(Qt::WA_DeleteOnClose);
     list->setObjectName("messageHistory");

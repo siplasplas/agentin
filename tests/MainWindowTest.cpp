@@ -1743,7 +1743,9 @@ import sys
 if "--read-session" in sys.argv:
     assert sys.argv[sys.argv.index("--read-session") + 1] == "claude-1"
     limit = int(sys.argv[sys.argv.index("--limit") + 1])
-    entries = []
+    # Texts Claude Code records as the user's though the user did not write them.
+    entries = [{"role": "user", "text": "<task-notification>\n<task-id>b1</task-id>\n<status>completed</status>"},
+               {"role": "user", "text": "[Request interrupted by user for tool use]"}]
     for i in range(21):
         text = f"Question {i}" + ("\nwith a second line" if i == 5 else "")
         if i == 7:
@@ -1790,8 +1792,8 @@ if "--list-sessions" in sys.argv:
     QTRY_VERIFY(chat->toPlainText().contains("Claude: Answer 20"));
     QVERIFY(chat->toPlainText().contains("[Claude tool: Read]"));
     QVERIFY(!chat->toPlainText().contains("Question 0"));
-    // The message field recalls every question of the session, also those not shown yet; its list shows their
-    // beginnings, oldest first.
+    // The message field recalls every question of the session, also those not shown yet, and nothing the user
+    // did not write; its list shows their beginnings, oldest first.
     auto *input = window.findChild<MessageInput *>("commandInput");
     QVERIFY(input);
     input->setFocus();
@@ -2548,6 +2550,21 @@ for line in sys.stdin:
     QCOMPARE(list->item(0)->text(), QString("second"));
     QCOMPARE(list->item(2)->text(), QString("first"));
     QCOMPARE(list->currentRow(), 2);
+    // Like a combo box's list, it closes on Escape and on a click outside it, leaving the field as it was.
+    QPointer<QListWidget> open(list);
+    QTest::keyClick(list, Qt::Key_Escape);
+    QTRY_VERIFY(!open || !open->isVisible());
+    QVERIFY(input->toPlainText().isEmpty());
+    QTest::keyClick(input, Qt::Key_Down, Qt::AltModifier);
+    list = qobject_cast<QListWidget *>(QApplication::activePopupWidget());
+    QVERIFY(list);
+    open = list;
+    QTest::mouseClick(list, Qt::LeftButton, {}, QPoint(-20, -20));
+    QTRY_VERIFY(!open || !open->isVisible());
+    QVERIFY(input->toPlainText().isEmpty());
+    QTest::mouseClick(historyButton, Qt::LeftButton);
+    list = qobject_cast<QListWidget *>(QApplication::activePopupWidget());
+    QVERIFY(list);
     list->setCurrentRow(1);
     QTest::keyClick(list, Qt::Key_Return);
     QCOMPARE(input->toPlainText(), QString("third"));
