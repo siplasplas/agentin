@@ -59,6 +59,9 @@ private:
     bool onLastLine() const;
     void recall(int step);
     void recallAt(qsizetype position);
+    // The beginning of a message as the field would show it: up to its first line break or the end of its
+    // first wrapped line at the field's width, with " …" when more follows.
+    QString beginning(const QString &message) const;
     void updateEnterAction();
     void insertLineBreak();
     void submit();

@@ -7,6 +7,7 @@
 #include <QMimeData>
 #include <QTextBlock>
 #include <QTextLayout>
+#include <QTextOption>
 
 namespace {
 constexpr int kMaximumVisibleLines = 8;
@@ -63,13 +64,12 @@ void MessageInput::showHistoryList()
     list->setObjectName("messageHistory");
     list->setFont(font());
     list->setUniformItemSizes(true);
-    const QFontMetrics metrics(font());
-    const int width = this->width();
+    // Wide enough for the field's first line with the marker and the scroll bar beside it.
+    const int width = this->width() + list->verticalScrollBar()->sizeHint().width()
+                      + QFontMetrics(font()).horizontalAdvance(" …");
     for (const QString &message : history_) {
-        // A message of several lines shows its first line; the tooltip has all of it.
-        const QString first = message.section('\n', 0, 0);
-        QString text = first == message ? first : first + " …";
-        auto *item = new QListWidgetItem(metrics.elidedText(text, Qt::ElideRight, width - 40), list);
+        // A row shows the message's beginning; the tooltip has all of it.
+        auto *item = new QListWidgetItem(beginning(message), list);
         item->setToolTip(message);
     }
     // The current message, or the newest, is selected; it stands nearest to the field.
@@ -223,6 +223,24 @@ void MessageInput::recall(int step)
     if (target < 0 || target > history_.size()) return;
     recallAt(target);
     moveCursor(step < 0 ? QTextCursor::End : QTextCursor::Start);
+}
+
+QString MessageInput::beginning(const QString &message) const
+{
+    const QString paragraph = message.section('\n', 0, 0);
+    QTextLayout layout(paragraph, font());
+    QTextOption option = document()->defaultTextOption();
+    option.setWrapMode(wordWrapMode());
+    layout.setTextOption(option);
+    layout.beginLayout();
+    QTextLine line = layout.createLine();
+    if (line.isValid()) line.setLineWidth(qMax(1.0, viewport()->width() - 2 * document()->documentMargin()));
+    layout.endLayout();
+    const int length = line.isValid() ? line.textLength() : int(paragraph.size());
+    QString first = paragraph.left(length);
+    while (!first.isEmpty() && first.back().isSpace()) first.chop(1);
+    const bool more = length < paragraph.size() || !message.mid(paragraph.size()).trimmed().isEmpty();
+    return more ? first + " …" : first;
 }
 
 // Shows the message at this place of the history, or the draft past its end, as recalled and untouched.

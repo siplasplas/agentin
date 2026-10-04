@@ -1746,6 +1746,8 @@ if "--read-session" in sys.argv:
     entries = []
     for i in range(21):
         text = f"Question {i}" + ("\nwith a second line" if i == 5 else "")
+        if i == 7:
+            text += " " + " ".join(["word"] * 300)
         entries += [{"role": "user", "text": text}, {"role": "assistant", "text": f"Answer {i}"}]
     entries.append({"role": "tool", "text": "Read"})
     print(json.dumps({"type": "history", "entries": entries[-limit:], "total": len(entries)}), flush=True)
@@ -1800,6 +1802,12 @@ if "--list-sessions" in sys.argv:
     QCOMPARE(list->item(0)->text(), QString("Question 0"));
     QCOMPARE(list->item(5)->text(), QString("Question 5 …"));
     QCOMPARE(list->item(5)->toolTip(), QString("Question 5\nwith a second line"));
+    // A long line without a line break shows what fits on the field's first line, ending at a whole word.
+    const QString longBeginning = list->item(7)->text();
+    QVERIFY(longBeginning.startsWith("Question 7 word"));
+    QVERIFY(longBeginning.endsWith("word …"));
+    QVERIFY(longBeginning.size() < 200);
+    QVERIFY(QFontMetrics(input->font()).horizontalAdvance(longBeginning.chopped(2)) <= input->viewport()->width());
     QCOMPARE(list->currentRow(), 20);
     list->close();
     QVERIFY(loadEarlier->isVisible());
