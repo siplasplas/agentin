@@ -16,10 +16,11 @@ saved tabs are not reopened at startup.
 
 Requires Qt 6 Widgets, CMake 3.24 or newer, a C++17 compiler, libgit2 (`libgit2-dev`),
 and an installed `codex` CLI for Codex. The `qt-extra` library (the chat tabs and the
-directory chooser) needs no installing: an installed version 2.1 or newer is used,
-and otherwise CMake fetches it from GitHub when it configures the build and builds
-it into agentin, as it does with backward-cpp; that first configuration needs a
-network connection. Claude requires Python 3, `claude-agent-sdk`, and a configured API
+directory chooser) and the Kate syntax reader of `qcodeedit` (the colours of the
+changes window) need no installing: an installed qt-extra 2.1 or qcodeedit-kate
+1.4 or newer is used, and otherwise CMake fetches them from GitHub when it
+configures the build and builds them into agentin, as it does with backward-cpp;
+that first configuration needs a network connection. Claude requires Python 3, `claude-agent-sdk`, and a configured API
 key. GLM uses the same Python SDK with a Z.AI API key. Gemini requires an
 installed and authenticated Gemini CLI. Antigravity requires an installed and
 authenticated `agy` CLI. The optional test also requires Qt 6
@@ -345,7 +346,13 @@ Clicking **File**, **+** or **−** sorts the list by it, the largest numbers fi
 equal counts go by the other count, then by path. The window shows
 the diff of the selected file, unified or side by side, with line numbers and three lines of context;
 longer unchanged stretches are folded into one line that opens with a click, and
-the arrow buttons (or Alt+Up and Alt+Down) move between changes. The list starts
+the arrow buttons (or Alt+Up and Alt+Down) move between changes. The code is
+coloured by its syntax with the Kate syntax definitions that qcodeedit keeps in
+`~/.local/share/qcodeedit/kate-<version>/syntax` (shared with other editors built
+on qcodeedit, such as qceditor), chosen by the file's name; a dark window uses the
+Breeze Dark theme from the `themes` directory beside them. Without the
+definitions, or for a file of more than 50 000 lines, the diff is shown without
+syntax colours. agentin does not download the definitions. The list starts
 from the latest turn; it can also show the changes since the chat's first turn,
 or against `HEAD` as Git sees them, including changes made before the chat. A new
 file shows its whole content with line numbers and no diff colors; binary, too

@@ -14,20 +14,6 @@ The changes window lists the files a turn changed, with their diffs, side by sid
   one restored.
 - **Comparing earlier turns:** keep the baseline of each turn of a chat, not only of the latest and of the
   chat's first, so that "Since" can offer any earlier turn.
-- **Syntax highlighting** of the diff, with qcodeedit (github.com/siplasplas/qcodeedit, LGPL-3.0-or-later):
-  - Taken with `FetchContent` at a fixed tag (v1.4.0 or later) and its `FIND_PACKAGE_ARGS`, so that an
-    installed qcodeedit is used and otherwise CMake fetches and builds it, with its demo and tests off; no
-    one has to install it first. This needs CMake 3.24.
-  - qcodeedit is built as C++20, and some of its public headers need it, so agentin would move from C++17
-    to C++20 (`AGENTS.md` says C++17 today; libdiffcore builds as C++20 too).
-  - `qcodeedit-kate` gives `KateSyntaxIndex` and `RulesHighlighter`; the definitions are the Kate XML files
-    in `qce::kate::dataDir()` (`~/.local/share/qcodeedit`), which qceditor shares. Without them the diff is
-    shown as today. Downloading them with `qcodeedit-katedata` (Qt Network) can come later.
-  - The changes window keeps its view: an adapter colours each line with `RulesHighlighter::highlightLine`,
-    keeping the highlighting state apart for the old and the new side, which interleave in the unified
-    view.
-- **qt-extra the same way:** it is required and found only when installed today; `FetchContent` with
-  `FIND_PACKAGE_ARGS` would let anyone clone and build agentin without installing it first.
 
 ## Windows
 

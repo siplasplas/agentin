@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ChangeTracker.h"
+#include "DiffHighlighter.h"
 
 #include <QHash>
 #include <QPointer>
@@ -86,6 +87,9 @@ private:
     int sortColumn_ = 1;
     QTimer *flashEnd_;
     std::optional<FileDiff> diff_;
+    // The syntax colours of the shown diff's old and new content, per line; empty when it is not coloured.
+    QList<QList<DiffHighlighter::Span>> beforeColours_;
+    QList<QList<DiffHighlighter::Span>> afterColours_;
     QSet<int> openedFolds_;
     // Rows where a run of changes starts, and the one moved to last.
     QList<int> changeStarts_;

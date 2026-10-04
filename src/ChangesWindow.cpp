@@ -196,6 +196,12 @@ ChangesWindow::ChangesWindow(ChangeTracker *tracker, const QString &title, QWidg
             currentChange_ = -1;
         }
         diff_ = diff;
+        // Both contents are coloured whole, so that a construct spanning lines, such as a comment, keeps its
+        // colour on lines the diff shows apart.
+        const bool dark = palette().color(QPalette::Base).lightness() < 128;
+        const QString name = QFileInfo(diff.path).fileName();
+        beforeColours_ = diff.newFile ? QList<QList<DiffHighlighter::Span>>() : DiffHighlighter::highlight(name, diff.before, dark);
+        afterColours_ = DiffHighlighter::highlight(name, diff.after, dark);
         render();
     });
     // The window belongs to the chat; it goes when the chat's tab closes.
@@ -464,17 +470,34 @@ void ChangesWindow::render()
         next_->setEnabled(false);
         return;
     }
+    // A line with its number before it and the code in its syntax colours, when there are any.
+    const auto insertLine = [](QTextCursor &cursor, const QString &prefix, const QString &code,
+                               const QList<QList<DiffHighlighter::Span>> &colours, int line) {
+        cursor.insertText(prefix, QTextCharFormat());
+        const QList<DiffHighlighter::Span> spans = line >= 0 ? colours.value(line) : QList<DiffHighlighter::Span>();
+        int at = 0;
+        for (const DiffHighlighter::Span &span : spans) {
+            if (span.start < at || span.start >= code.size()) continue;
+            if (span.start > at) cursor.insertText(code.mid(at, span.start - at), QTextCharFormat());
+            cursor.insertText(code.mid(span.start, span.length), span.format);
+            at = qMin(int(code.size()), span.start + span.length);
+        }
+        if (at < code.size()) cursor.insertText(code.mid(at), QTextCharFormat());
+    };
     if (diff_->newFile) {
         // A new file is read as it is: its whole content with line numbers, without diff colors.
         const int width = QString::number(diff_->after.size()).size();
-        QStringList lines;
-        lines.reserve(qMin(int(diff_->after.size()), kMaximumShownLines));
-        for (int i = 0; i < diff_->after.size() && i < kMaximumShownLines; ++i)
-            lines.append(QString::number(i + 1).rightJustified(width) + "  " + diff_->after.at(i));
-        if (diff_->after.size() > kMaximumShownLines)
-            lines.append(QString("\u2026 the file is cut after %1 lines").arg(kMaximumShownLines));
-        unified_->setPlainText(lines.join('\n'));
-        after_->setPlainText(lines.join('\n'));
+        for (QPlainTextEdit *view : {unified_, after_}) {
+            QTextCursor cursor(view->document());
+            cursor.beginEditBlock();
+            for (int i = 0; i < diff_->after.size() && i < kMaximumShownLines; ++i) {
+                if (i > 0) cursor.insertBlock(QTextBlockFormat(), QTextCharFormat());
+                insertLine(cursor, QString::number(i + 1).rightJustified(width) + "  ", diff_->after.at(i), afterColours_, i);
+            }
+            if (diff_->after.size() > kMaximumShownLines)
+                cursor.insertText(QString("\n\u2026 the file is cut after %1 lines").arg(kMaximumShownLines), QTextCharFormat());
+            cursor.endEditBlock();
+        }
         before_->setPlainText(QString("New file with %1 %2").arg(diff_->after.size()).arg(diff_->after.size() == 1 ? "line" : "lines"));
         (sideBySide ? after_ : unified_)->verticalScrollBar()->setValue(scroll);
         previous_->setEnabled(false);
@@ -507,13 +530,16 @@ void ChangesWindow::render()
     QTextCursor right(after_->document());
     for (QTextCursor *cursor : {&unified, &left, &right}) cursor->beginEditBlock();
     bool first = true;
-    const auto add = [&first](QTextCursor &cursor, const QString &text, const QTextBlockFormat &format, int fold) {
-        if (!first) cursor.insertBlock();
+    const auto add = [&first, &insertLine](QTextCursor &cursor, const QString &prefix, const QString &code,
+                                           const QList<QList<DiffHighlighter::Span>> &colours, int line,
+                                           const QTextBlockFormat &format, int fold) {
+        if (!first) cursor.insertBlock(format, QTextCharFormat());
         cursor.setBlockFormat(format);
-        cursor.insertText(text);
+        insertLine(cursor, prefix, code, colours, line);
         // Folded rows remember where they start, so a click can open them.
         cursor.block().setUserState(fold);
     };
+    const QList<QList<DiffHighlighter::Span>> none;
     const QList<Row> shownRows = rows(sideBySide);
     for (int i = 0; i < shownRows.size() && i < kMaximumShownLines; ++i) {
         const Row &row = shownRows.at(i);
@@ -525,33 +551,34 @@ void ChangesWindow::render()
         if (row.kind == Row::Fold) {
             const QString text = QString("⋯ %1 unchanged %2 — click to show").arg(row.count).arg(row.count == 1 ? "line" : "lines");
             if (sideBySide) {
-                add(left, text, foldFormat, row.fold);
-                add(right, text, foldFormat, row.fold);
+                add(left, text, {}, none, -1, foldFormat, row.fold);
+                add(right, text, {}, none, -1, foldFormat, row.fold);
             } else {
-                add(unified, text, foldFormat, row.fold);
+                add(unified, text, {}, none, -1, foldFormat, row.fold);
             }
         } else if (sideBySide) {
             const bool leftUsed = row.before >= 0;
             const bool rightUsed = row.after >= 0;
-            add(left, leftUsed ? number(row.before) + "  " + beforeText : QString(),
-                !leftUsed ? emptyFormat : row.kind == Row::Context ? plainFormat : removedFormat, -1);
-            add(right, rightUsed ? number(row.after) + "  " + afterText : QString(),
-                !rightUsed ? emptyFormat : row.kind == Row::Context ? plainFormat : addedFormat, -1);
+            add(left, leftUsed ? number(row.before) + "  " : QString(), leftUsed ? beforeText : QString(), beforeColours_,
+                row.before, !leftUsed ? emptyFormat : row.kind == Row::Context ? plainFormat : removedFormat, -1);
+            add(right, rightUsed ? number(row.after) + "  " : QString(), rightUsed ? afterText : QString(), afterColours_,
+                row.after, !rightUsed ? emptyFormat : row.kind == Row::Context ? plainFormat : addedFormat, -1);
         } else {
             const char marker = row.kind == Row::Removed ? '-' : row.kind == Row::Added ? '+' : ' ';
-            const QString text = row.kind == Row::Added ? afterText : beforeText;
-            add(unified, number(row.before) + ' ' + number(row.after) + "  " + QChar(marker) + ' ' + text,
-                row.kind == Row::Removed ? removedFormat : row.kind == Row::Added ? addedFormat : plainFormat, -1);
+            const bool added = row.kind == Row::Added;
+            add(unified, number(row.before) + ' ' + number(row.after) + "  " + QChar(marker) + ' ', added ? afterText : beforeText,
+                added ? afterColours_ : beforeColours_, added ? row.after : row.before,
+                row.kind == Row::Removed ? removedFormat : added ? addedFormat : plainFormat, -1);
         }
         first = false;
     }
     if (shownRows.size() > kMaximumShownLines) {
         const QString text = QString("… the diff is cut after %1 lines").arg(kMaximumShownLines);
         if (sideBySide) {
-            add(left, text, foldFormat, -1);
-            add(right, text, foldFormat, -1);
+            add(left, text, {}, none, -1, foldFormat, -1);
+            add(right, text, {}, none, -1, foldFormat, -1);
         } else {
-            add(unified, text, foldFormat, -1);
+            add(unified, text, {}, none, -1, foldFormat, -1);
         }
     }
     for (QTextCursor *cursor : {&unified, &left, &right}) cursor->endEditBlock();

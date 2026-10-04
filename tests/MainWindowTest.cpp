@@ -2,6 +2,7 @@
 #include "ChatTab.h"
 #include "ChatView.h"
 #include "CommandApproval.h"
+#include "DiffHighlighter.h"
 #include "CodexAgent.h"
 #include "CodexConnection.h"
 #include <QJsonDocument>
@@ -37,6 +38,8 @@
 #include <QScrollBar>
 #include <QtTest>
 
+#include <qce/kate/KatePaths.h>
+
 static void startChat(MainWindow &window, const QString &provider, const QString &path);
 
 class MainWindowTest : public QObject
@@ -69,6 +72,7 @@ private slots:
     void geminiAttachRespectsExternalLock();
     void newChatAfterClosingAllTabs();
     void approvalsFileVersions();
+    void diffHighlighting();
     void codexSessionApprovalsWithdrawn();
 };
 
@@ -950,6 +954,60 @@ for line in sys.stdin:
     QCOMPARE(chat.sessionId(), QString("kept-thread"));
     QVERIFY(std::any_of(messages.cbegin(), messages.cend(),
                         [](const QList<QVariant> &message) { return message.first().toString() == "[Codex session approvals withdrawn]"; }));
+}
+
+// The changes window colours code with the Kate definitions in qcodeedit's data directory: a whole file, so
+// that a construct spanning lines keeps its colour; nothing for a file no definition fits.
+void MainWindowTest::diffHighlighting()
+{
+    QTemporaryDir data;
+    QVERIFY(data.isValid());
+    QVERIFY(QDir(data.path()).mkpath("syntax"));
+    QFile definition(data.filePath("syntax/probe.xml"));
+    QVERIFY(definition.open(QIODevice::WriteOnly));
+    definition.write(R"XML(<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE language>
+<language name="Probe" section="Sources" extensions="*.probe" version="1" kateversion="5.0">
+  <highlighting>
+    <list name="keywords"><item>alpha</item></list>
+    <contexts>
+      <context name="Normal" attribute="Normal Text" lineEndContext="#stay">
+        <keyword attribute="Keyword" context="#stay" String="keywords"/>
+        <Detect2Chars attribute="Comment" context="Block" char="/" char1="*"/>
+      </context>
+      <context name="Block" attribute="Comment" lineEndContext="#stay">
+        <Detect2Chars attribute="Comment" context="#pop" char="*" char1="/"/>
+      </context>
+    </contexts>
+    <itemDatas>
+      <itemData name="Normal Text" defStyleNum="dsNormal"/>
+      <itemData name="Keyword" defStyleNum="dsKeyword"/>
+      <itemData name="Comment" defStyleNum="dsComment"/>
+    </itemDatas>
+  </highlighting>
+</language>
+)XML");
+    definition.close();
+    qce::kate::setDataDirOverride(data.path());
+    const auto restore = qScopeGuard([] { qce::kate::setDataDirOverride({}); });
+
+    const QList<QList<DiffHighlighter::Span>> colours =
+        DiffHighlighter::highlight("main.probe", {"alpha beta", "x /* open", "still inside", "*/ alpha"}, false);
+    QCOMPARE(colours.size(), 4);
+    const auto spanAt = [&colours](int line, int column) -> const DiffHighlighter::Span * {
+        for (const DiffHighlighter::Span &span : colours.at(line))
+            if (column >= span.start && column < span.start + span.length) return &span;
+        return nullptr;
+    };
+    QVERIFY(spanAt(0, 0) && spanAt(0, 0)->format.foreground().style() != Qt::NoBrush);
+    QVERIFY(!spanAt(0, 7) || spanAt(0, 7)->format != spanAt(0, 0)->format);
+    // The comment opened on line 2 colours line 3, which a diff may show apart from it.
+    QVERIFY(spanAt(1, 3) && spanAt(2, 0));
+    QCOMPARE(spanAt(2, 0)->format.foreground(), spanAt(1, 3)->format.foreground());
+    QVERIFY(spanAt(3, 4) && spanAt(3, 4)->format.foreground() == spanAt(0, 0)->format.foreground());
+    QVERIFY(DiffHighlighter::highlight("notes.txt", {"alpha"}, false).isEmpty());
+    // A dark window without a dark theme is not coloured.
+    QVERIFY(DiffHighlighter::highlight("main.probe", {"alpha"}, true).isEmpty());
 }
 
 // approvals.json of version 1 loads with the default lists and is written again as version 2; the lists of a

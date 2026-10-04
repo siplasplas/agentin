@@ -40,6 +40,25 @@ FetchContent_Declare(
     FIND_PACKAGE_ARGS 2.1
 )
 FetchContent_MakeAvailable(qt-extra)
+# The changes window colours the code of a diff with qcodeedit's reader of Kate syntax definitions
+# (github.com/siplasplas/qcodeedit, LGPL-3.0-or-later). An installed qcodeedit-kate 1.4 is used; otherwise the
+# tag below is fetched and built into agentin, without its demo, tests and downloader. It builds as C++20 in
+# its own directory; the headers agentin includes are C++17.
+find_package(qcodeedit-kate 1.4 QUIET)
+if(NOT TARGET qcodeedit::kate)
+    set(QCE_BUILD_DEMO OFF)
+    set(QCE_BUILD_TESTS OFF)
+    set(QCE_BUILD_KATE ON)
+    set(QCE_BUILD_KATE_DOWNLOADER OFF)
+    FetchContent_Declare(
+        qcodeedit
+        GIT_REPOSITORY https://github.com/siplasplas/qcodeedit.git
+        GIT_TAG v1.4.1
+        GIT_SHALLOW TRUE
+        ${backward_exclude}
+    )
+    FetchContent_MakeAvailable(qcodeedit)
+endif()
 FetchContent_Declare(
     backward
     GIT_REPOSITORY https://github.com/bombela/backward-cpp.git
@@ -101,10 +120,13 @@ add_executable(agentin
     src/ChangeTracker.h
     src/ChangesWindow.cpp
     src/ChangesWindow.h
+    src/DiffHighlighter.cpp
+    src/DiffHighlighter.h
     src/FileOpener.cpp
     src/FileOpener.h
 )
-target_link_libraries(agentin PRIVATE Qt6::Widgets qt-extra Backward::Object diffcore::diffcore PkgConfig::LIBGIT2 qtermwidget6)
+target_link_libraries(agentin PRIVATE Qt6::Widgets qt-extra Backward::Object diffcore::diffcore PkgConfig::LIBGIT2 qtermwidget6
+                      qcodeedit::kate)
 # The window icon; Qt draws it with its SVG image format plugin.
 qt_add_resources(agentin icons PREFIX "/" FILES icons/agentin.svg)
 target_include_directories(agentin PRIVATE src)
@@ -184,10 +206,13 @@ if(BUILD_TESTING)
         src/ChangeTracker.h
         src/ChangesWindow.cpp
         src/ChangesWindow.h
+        src/DiffHighlighter.cpp
+        src/DiffHighlighter.h
         src/FileOpener.cpp
         src/FileOpener.h
     )
-    target_link_libraries(agentin_test PRIVATE Qt6::Widgets Qt6::Test qt-extra diffcore::diffcore PkgConfig::LIBGIT2 qtermwidget6)
+    target_link_libraries(agentin_test PRIVATE Qt6::Widgets Qt6::Test qt-extra diffcore::diffcore PkgConfig::LIBGIT2 qtermwidget6
+                          qcodeedit::kate)
     target_include_directories(agentin_test PRIVATE src)
     add_test(NAME agentin_test COMMAND agentin_test)
     # Decisions about shell command lines, against a corpus of real commands; no window, milliseconds.
