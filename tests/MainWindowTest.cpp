@@ -2562,6 +2562,18 @@ for line in sys.stdin:
     QTest::mouseClick(list, Qt::LeftButton, {}, QPoint(-20, -20));
     QTRY_VERIFY(!open || !open->isVisible());
     QVERIFY(input->toPlainText().isEmpty());
+    // A click on another widget of the window closes it too, whether or not the platform passes it to the list.
+    QTest::keyClick(input, Qt::Key_Down, Qt::AltModifier);
+    list = qobject_cast<QListWidget *>(QApplication::activePopupWidget());
+    QVERIFY(list);
+    open = list;
+    auto *chatView = window.findChild<QPlainTextEdit *>("chatView");
+    QVERIFY(chatView);
+    QMouseEvent press(QEvent::MouseButtonPress, QPointF(5, 5), chatView->viewport()->mapToGlobal(QPointF(5, 5)),
+                      Qt::LeftButton, Qt::LeftButton, Qt::NoModifier);
+    QVERIFY(QApplication::sendEvent(chatView->viewport(), &press));
+    QTRY_VERIFY(!open || !open->isVisible());
+    QVERIFY(input->toPlainText().isEmpty());
     QTest::mouseClick(historyButton, Qt::LeftButton);
     list = qobject_cast<QListWidget *>(QApplication::activePopupWidget());
     QVERIFY(list);

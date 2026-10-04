@@ -2,7 +2,9 @@
 
 #include <QSet>
 #include <QKeyEvent>
+#include <QApplication>
 #include <QListWidget>
+#include <QWindow>
 #include <QMouseEvent>
 #include <QScrollBar>
 #include <QMimeData>
@@ -57,24 +59,38 @@ void MessageInput::setHistory(const QStringList &messages)
 }
 
 namespace {
-// A list shown as a popup closes like a combo box's: on Escape, on a click outside it and when its window
-// stops being active. A list view handles mouse presses itself, so the popup's own close on an outside
-// click has to be repeated here.
+// A list shown as a popup closes like a combo box's: on Escape, on a click outside it and when the application
+// stops being active. The whole application's clicks are watched while it is open, and such a click only closes
+// it. On Wayland a click elsewhere in the window comes to the list itself, outside its rectangle; Qt's own
+// check misses it, as it compares global positions, which Wayland does not give, and a scroll area passes
+// clicks on its frame to no mouse handler.
 class HistoryList : public QListWidget
 {
 public:
-    using QListWidget::QListWidget;
+    explicit HistoryList(QWidget *parent) : QListWidget(parent) { qApp->installEventFilter(this); }
 
 protected:
+    bool eventFilter(QObject *object, QEvent *event) override
+    {
+        if (event->type() == QEvent::ApplicationDeactivate) {
+            close();
+        } else if (isVisible() && (event->type() == QEvent::MouseButtonPress || event->type() == QEvent::MouseButtonDblClick)) {
+            bool inside = false;
+            if (object == this || object == windowHandle())
+                inside = rect().contains(static_cast<QMouseEvent *>(event)->position().toPoint());
+            else if (auto *widget = qobject_cast<QWidget *>(object))
+                inside = isAncestorOf(widget);
+            if (!inside) {
+                close();
+                return true;
+            }
+        }
+        return QListWidget::eventFilter(object, event);
+    }
     void keyPressEvent(QKeyEvent *event) override
     {
         if (event->key() == Qt::Key_Escape) close();
         else QListWidget::keyPressEvent(event);
-    }
-    void mousePressEvent(QMouseEvent *event) override
-    {
-        if (!rect().contains(event->position().toPoint())) close();
-        else QListWidget::mousePressEvent(event);
     }
     bool event(QEvent *event) override
     {
