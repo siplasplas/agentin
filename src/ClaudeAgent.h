@@ -67,6 +67,12 @@ public:
     bool supportsSuggestions() const override { return !pythonProgram_.isEmpty() && !scriptPath_.isEmpty(); }
     void suggest(const QString &workingDirectory, const QString &prompt, QObject *context,
                  const std::function<void(const QString &text, const QString &error)> &done) override;
+    bool supportsRenaming() const override { return supportsSuggestions(); }
+    void renameConversation(const QString &id, const QString &workingDirectory, const QString &title, QObject *context,
+                            const std::function<void(const QString &error)> &done) override;
+    void readConversationStart(const QString &id, const QString &workingDirectory, QObject *context,
+                               const std::function<void(const QList<ChatEntry> &entries,
+                                                        const QString &error)> &done) override;
     QList<UsageLimit> usageLimits() const override { return usage_.values(); }
     AgentBackend *createChat(const QString &workingDirectory, QObject *parent) override;
 

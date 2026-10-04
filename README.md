@@ -170,6 +170,13 @@ Directories appear under an agent only when they contain a discovered chat.
 Chat previews are shortened in the tree; hover over one to read the longer stored preview.
 A right click on a chat or a directory offers **Copy**, which puts the text of its
 tooltip on the clipboard: a chat's preview, details and ID, or a directory's path.
+A Codex, Claude or GLM chat also offers **Rename…**, which asks for a new name, and
+**Suggest a name**, which asks the chat's own agent for one name with its cheapest
+model (Codex's nano or mini model, Claude's Haiku, GLM's flash model), from the user's
+first messages and the beginning of the answers, and offers it in the same dialog for
+editing before it is saved. The name is saved where the agent keeps it: Codex stores
+it as the thread's name, Claude Code as the session's title, as its `/rename` does, so
+the agents' own lists show it too.
 Codex previews in the local JSON index are limited to 200 characters.
 
 Expanding Claude lists SDK sessions across all Claude projects. Expanding

@@ -762,13 +762,30 @@ async def suggest(prompt, provider):
     return text
 
 
-def read_session(session_id, directory, limit):
+def read_session(session_id, directory, limit, head=False):
+    """Reads a session's chat entries: its last limit entries, or with head its first ones; all when limit is 0."""
     from claude_agent_sdk import get_session_messages
 
     entries = []
     for message in get_session_messages(session_id, directory=directory):
         entries.extend(message_entries(message))
-    return {"type": "history", "entries": entries[-limit:] if limit > 0 else entries, "total": len(entries)}
+    if limit > 0:
+        selected = entries[:limit] if head else entries[-limit:]
+    else:
+        selected = entries
+    return {"type": "history", "entries": selected, "total": len(entries)}
+
+
+def rename_session(session_id, directory, title):
+    """Gives a session the title Claude Code shows for it, as its /rename command does."""
+    from claude_agent_sdk import rename_session as rename
+
+    try:
+        rename(session_id, title, directory=directory)
+    except FileNotFoundError:
+        # A session recorded under another project directory, for example after the directory moved.
+        rename(session_id, title)
+    return {"type": "renamed", "id": session_id, "title": title.strip()}
 
 
 if __name__ == "__main__":
@@ -782,8 +799,18 @@ if __name__ == "__main__":
     parser.add_argument("--directories", default="[]")
     parser.add_argument("--read-session")
     parser.add_argument("--limit", type=int, default=20)
+    parser.add_argument("--head", action="store_true", help="read the first entries of a session, not the last")
     parser.add_argument("--suggest")
+    parser.add_argument("--rename", metavar="SESSION")
+    parser.add_argument("--title")
     args = parser.parse_args()
+    if args.rename:
+        try:
+            send(rename_session(args.rename, args.cwd, args.title or ""))
+        except Exception as exc:
+            send({"type": "error", "message": f"Could not rename the session: {exc}"})
+            raise SystemExit(1)
+        raise SystemExit(0)
     if args.suggest:
         try:
             send({"type": "suggestions", "text": asyncio.run(suggest(args.suggest, args.provider))})
@@ -793,7 +820,7 @@ if __name__ == "__main__":
         raise SystemExit(0)
     if args.read_session:
         try:
-            send(read_session(args.read_session, args.cwd, args.limit))
+            send(read_session(args.read_session, args.cwd, args.limit, args.head))
         except Exception as exc:
             send({"type": "error", "message": f"Could not read Claude Agent SDK session: {exc}"})
             raise SystemExit(1)

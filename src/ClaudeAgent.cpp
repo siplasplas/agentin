@@ -296,6 +296,61 @@ void ClaudeProvider::suggest(const QString &workingDirectory, const QString &pro
     });
 }
 
+namespace {
+// The bridge's JSON answer of a one-shot helper, or its error message.
+QJsonObject helperResult(QProcess *process, bool started, const QString &type, QString &error)
+{
+    if (!started) {
+        error = process->errorString();
+        return {};
+    }
+    const QJsonObject result = QJsonDocument::fromJson(process->readAllStandardOutput().trimmed()).object();
+    if (process->exitStatus() == QProcess::NormalExit && process->exitCode() == 0 && result.value("type") == type)
+        return result;
+    error = result.value("message").toString();
+    if (error.isEmpty()) error = QString::fromUtf8(process->readAllStandardError()).trimmed();
+    if (error.isEmpty()) error = "the Claude Agent SDK bridge failed";
+    return {};
+}
+}
+
+// The SDK records the title in the session, where Claude Code's own list finds it; the index keeps it for the tree.
+void ClaudeProvider::renameConversation(const QString &id, const QString &workingDirectory, const QString &title,
+                                        QObject *context, const std::function<void(const QString &error)> &done)
+{
+    const QPointer<QObject> guard(context);
+    runHelper({"--provider", kind_, "--rename", id, "--title", title}, workingDirectory, this,
+              [this, id, guard, done](QProcess *process, bool started) {
+        QString error;
+        const QJsonObject result = helperResult(process, started, "renamed", error);
+        if (error.isEmpty() && index_.contains(id)) {
+            QJsonObject entry = index_.value(id);
+            entry.insert("title", result.value("title").toString());
+            entry.insert("customTitle", result.value("title").toString());
+            if (index_.insert(entry)) reportIndexError(index_.save());
+            emit conversationsChanged();
+        }
+        if (guard) done(error);
+    });
+}
+
+void ClaudeProvider::readConversationStart(const QString &id, const QString &workingDirectory, QObject *context,
+                                           const std::function<void(const QList<ChatEntry> &entries,
+                                                                    const QString &error)> &done)
+{
+    runHelper({"--provider", kind_, "--read-session", id, "--limit", "60", "--head"}, workingDirectory, context,
+              [done](QProcess *process, bool started) {
+        QString error;
+        const QJsonObject result = helperResult(process, started, "history", error);
+        QList<ChatEntry> entries;
+        for (const QJsonValue &value : result.value("entries").toArray()) {
+            const QJsonObject entry = value.toObject();
+            entries.append({entry.value("role").toString(), entry.value("text").toString(), entry.value("id").toString()});
+        }
+        done(entries, error);
+    });
+}
+
 void ClaudeProvider::setEnvironment(ClaudeEnvironment *environment)
 {
     environment_ = environment;

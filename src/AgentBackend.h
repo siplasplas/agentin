@@ -192,6 +192,29 @@ public:
         Q_UNUSED(done);
     }
 
+    // Renames a conversation where the agent keeps its own titles, so that its other clients show the
+    // name too. done receives an error or an empty string, unless context has been destroyed by then.
+    virtual bool supportsRenaming() const { return false; }
+    virtual void renameConversation(const QString &id, const QString &workingDirectory, const QString &title,
+                                    QObject *context, const std::function<void(const QString &error)> &done)
+    {
+        Q_UNUSED(id);
+        Q_UNUSED(workingDirectory);
+        Q_UNUSED(title);
+        Q_UNUSED(context);
+        Q_UNUSED(done);
+    }
+    // The first user messages and answers of a conversation, for naming it.
+    virtual void readConversationStart(const QString &id, const QString &workingDirectory, QObject *context,
+                                       const std::function<void(const QList<ChatEntry> &entries,
+                                                                const QString &error)> &done)
+    {
+        Q_UNUSED(id);
+        Q_UNUSED(workingDirectory);
+        Q_UNUSED(context);
+        Q_UNUSED(done);
+    }
+
 signals:
     void message(const QString &text);
     void stateChanged();

@@ -530,13 +530,29 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     conversationTree_->setObjectName("conversationTree");
     conversationTree_->setHeaderHidden(true);
     conversationTree_->setMinimumWidth(0);
-    // A right click copies what the item's tooltip shows: a chat's title, details and ID, or a directory's path.
+    // A right click renames a chat, by hand or with a name its agent suggests, and copies what the item's
+    // tooltip shows: a chat's title, details and ID, or a directory's path.
     conversationTree_->setContextMenuPolicy(Qt::CustomContextMenu);
     connect(conversationTree_, &QWidget::customContextMenuRequested, this, [this](const QPoint &position) {
         QTreeWidgetItem *item = conversationTree_->itemAt(position);
         if (!item) return;
         const QString text = item->toolTip(0).isEmpty() ? item->text(0) : item->toolTip(0);
         QMenu menu(conversationTree_);
+        const QString kind = item->data(0, Qt::UserRole).toString();
+        AgentProvider *owner = kind == "directory" || kind == "provider" ? nullptr : provider(kind);
+        const QString id = item->data(0, Qt::UserRole + 1).toString();
+        if (owner && !id.isEmpty() && owner->supportsRenaming()) {
+            const QString path = item->data(0, Qt::UserRole + 2).toString();
+            const QString title = item->data(0, Qt::UserRole + 3).toString();
+            menu.addAction("Rename…", [this, owner, id, path, title] {
+                renameConversation(owner, id, path, title, title);
+            });
+            QAction *suggest = menu.addAction("Suggest a name", [this, owner, id, path, title] {
+                suggestConversationName(owner, id, path, title);
+            });
+            suggest->setEnabled(owner->supportsSuggestions());
+            menu.addSeparator();
+        }
         menu.addAction("Copy", [text] { QGuiApplication::clipboard()->setText(text); });
         menu.exec(conversationTree_->viewport()->mapToGlobal(position));
     });
@@ -1043,6 +1059,97 @@ void MainWindow::suggestMessage()
             if (currentTab() == tab && input_->toPlainText() == before) showSuggestions(items);
         }
         updateStatus();
+    });
+}
+
+void MainWindow::renameConversation(AgentProvider *owner, const QString &id, const QString &path, const QString &title,
+                                    const QString &proposal)
+{
+    bool accepted = false;
+    const QString name = QInputDialog::getText(this, "Rename conversation", "Name:", QLineEdit::Normal, proposal,
+                                               &accepted).simplified();
+    if (!accepted || name.isEmpty() || name == title) return;
+    const QPointer<AgentProvider> guard(owner);
+    owner->renameConversation(id, path, name, this, [this, guard, id, name](const QString &error) {
+        if (!error.isEmpty()) {
+            appendLine("[Could not rename the conversation: " + error + "]");
+            return;
+        }
+        if (!guard) return;
+        if (ChatTab *tab = chatTab(tabs_->findTab(ChatTab::key(guard->name(), id)))) tab->setTitle(name);
+        appendLine("[Conversation renamed: " + name + "]");
+    });
+}
+
+namespace {
+// Asks for one name from what the user wrote, with the start of the agent's answers for context.
+QString namingPrompt(const QList<ChatEntry> &entries)
+{
+    QStringList requests;
+    QStringList answers;
+    int length = 0;
+    for (const ChatEntry &entry : entries) {
+        const QString text = entry.text.simplified();
+        if (text.isEmpty()) continue;
+        if (entry.role == "user" && requests.size() < 8 && length < 2400) {
+            requests.append("- " + text.left(300));
+            length += requests.last().size();
+        } else if (entry.role == "assistant" && answers.size() < 2) {
+            answers.append("- " + text.left(200));
+        }
+    }
+    if (requests.isEmpty()) return {};
+    QString prompt =
+        "Give this conversation between a user and a coding agent a short name for a list of chats. Name its "
+        "task or subject, not the agent's reply. Reply with the name alone: at most six words, without quotes "
+        "or a final full stop, in the language the user writes in.\n\nThe user's first messages:\n"
+        + requests.join('\n');
+    if (!answers.isEmpty()) prompt += "\n\nThe beginning of the agent's answers:\n" + answers.join('\n');
+    return prompt;
+}
+
+// The first line of the model's reply, without the decoration models add to a title.
+QString suggestedName(const QString &text)
+{
+    for (QString line : text.split('\n')) {
+        line = line.simplified();
+        line.remove(QRegularExpression(R"(^(#+|\*+|-)\s*)"));
+        line.remove(QRegularExpression(R"(^(title|name)\s*:\s*)", QRegularExpression::CaseInsensitiveOption));
+        line.remove(QRegularExpression(R"(^["'`*„“”«»]+|["'`*„“”«»]+$)"));
+        if (line.endsWith('.') && !line.endsWith("..")) line.chop(1);
+        line = line.trimmed();
+        if (!line.isEmpty()) return line.left(120);
+    }
+    return {};
+}
+}
+
+void MainWindow::suggestConversationName(AgentProvider *owner, const QString &id, const QString &path,
+                                         const QString &title)
+{
+    const QPointer<AgentProvider> guard(owner);
+    status_->setText("Asking " + owner->name() + " for a name…");
+    const auto fail = [this](const QString &error) {
+        appendLine("[Could not suggest a name: " + error + "]");
+        updateStatus();
+    };
+    owner->readConversationStart(id, path, this, [this, guard, id, path, title, fail](const QList<ChatEntry> &entries,
+                                                                                    const QString &error) {
+        if (!guard) return;
+        const QString prompt = error.isEmpty() ? namingPrompt(entries) : QString();
+        if (prompt.isEmpty()) {
+            fail(error.isEmpty() ? "the conversation has no messages of yours" : error);
+            return;
+        }
+        guard->suggest(path, prompt, this, [this, guard, id, path, title, fail](const QString &text, const QString &error) {
+            const QString name = error.isEmpty() ? suggestedName(text) : QString();
+            if (name.isEmpty()) {
+                fail(error.isEmpty() ? "the model gave none" : error);
+                return;
+            }
+            updateStatus();
+            if (guard) renameConversation(guard, id, path, title, name);
+        });
     });
 }
 

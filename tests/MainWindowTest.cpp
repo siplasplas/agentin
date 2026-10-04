@@ -23,6 +23,8 @@
 #include <QComboBox>
 #include <QDialog>
 #include <QDialogButtonBox>
+#include <QInputDialog>
+#include <QMenu>
 #include <QLabel>
 #include <QLineEdit>
 #include <QPlainTextEdit>
@@ -78,6 +80,7 @@ private slots:
     void messageInputKeepsCursorVisible();
     void diffHighlighting();
     void codexSessionApprovalsWithdrawn();
+    void conversationRenaming();
 };
 
 void MainWindowTest::foldedOutputScrolling()
@@ -2141,6 +2144,179 @@ void MainWindowTest::geminiAttachRespectsExternalLock()
     doubleClickItem(tree, chatItem);
     QTRY_VERIFY(sendButton->isEnabled());
     QVERIFY(!header->text().contains("locked"));
+}
+
+// A chat in the tree is renamed by hand or with the one name its own agent suggests; the name is saved where
+// the agent keeps it and shown in the tree and in the chat's tab.
+void MainWindowTest::conversationRenaming()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString projectPath = directory.filePath("project");
+    QVERIFY(QDir().mkpath(projectPath));
+    const QString fakeServer = directory.filePath("fake-codex-names");
+    QFile script(fakeServer);
+    QVERIFY(script.open(QIODevice::WriteOnly | QIODevice::Text));
+    script.write(R"PY(#!/usr/bin/env python3
+import json
+import os
+import sys
+
+folder = os.path.dirname(__file__)
+project = os.path.join(folder, "project")
+
+def send(message):
+    print(json.dumps(message), flush=True)
+
+def log(name, value):
+    with open(os.path.join(folder, name), "a") as output:
+        output.write(json.dumps(value) + "\n")
+
+def user(text):
+    return {"turnId": "t", "item": {"type": "userMessage", "id": text, "content": [{"type": "text", "text": text}]}}
+
+def agent(text):
+    return {"turnId": "t", "item": {"type": "agentMessage", "id": text, "text": text}}
+
+for line in sys.stdin:
+    request = json.loads(line)
+    method = request.get("method")
+    if "id" not in request:
+        continue
+    result = {}
+    if method == "thread/list":
+        data = [] if request["params"]["archived"] else [
+            {"id": "chat-1", "createdAt": 100, "cwd": project, "preview": "Old preview"}]
+        result = {"data": data, "nextCursor": None}
+    elif method == "thread/name/set":
+        log("names.jsonl", request["params"])
+        send({"id": request["id"], "result": {}})
+        send({"method": "thread/name/updated", "params": {"threadId": request["params"]["threadId"],
+            "threadName": request["params"]["name"]}})
+        continue
+    elif method == "thread/items/list":
+        if request["params"]["threadId"] == "chat-1":
+            log("reads.jsonl", request["params"])
+            result = {"data": [user("Fix the login form"), agent("I will look at the form first"),
+                               user("Also add tests")], "nextCursor": None}
+        else:
+            result = {"data": [], "nextCursor": None}
+    elif method == "thread/start":
+        result = {"thread": {"id": "name-thread"}}
+    elif method == "thread/resume":
+        result = {"thread": {"id": request["params"]["threadId"]}}
+    elif method == "turn/start":
+        log("prompts.jsonl", request["params"]["input"][0]["text"])
+        thread = request["params"]["threadId"]
+        send({"id": request["id"], "result": {"turn": {"id": "name-turn"}}})
+        send({"method": "item/agentMessage/delta", "params": {"threadId": thread, "itemId": "name-item",
+            "delta": "**Title: \"Login form fixes.\"**\nAnother line"}})
+        send({"method": "turn/completed", "params": {"threadId": thread,
+            "turn": {"id": "name-turn", "status": "completed"}}})
+        continue
+    send({"id": request["id"], "result": result})
+)PY");
+    script.close();
+    QVERIFY(script.setPermissions(QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner));
+    const auto readLog = [&](const QString &name) {
+        QList<QJsonValue> values;
+        QFile file(directory.filePath(name));
+        if (!file.open(QIODevice::ReadOnly)) return values;
+        while (!file.atEnd()) {
+            const QByteArray line = file.readLine().trimmed();
+            if (!line.isEmpty()) values.append(QJsonDocument::fromJson("[" + line + "]").array().first());
+        }
+        return values;
+    };
+
+    MainWindow window(fakeServer, directory.path(), {}, {}, "gemini", nullptr, directory.filePath("codex-index.json"));
+    window.show();
+    auto *tree = window.findChild<QTreeWidget *>("conversationTree");
+    auto *header = window.findChild<QLabel *>("chatHeader");
+    QVERIFY(tree && header);
+    tree->topLevelItem(0)->setExpanded(true);
+    const auto chatItem = [tree]() -> QTreeWidgetItem * {
+        QTreeWidgetItem *codex = tree->topLevelItem(0);
+        if (!codex->childCount() || !codex->child(0)->childCount()) return nullptr;
+        return codex->child(0)->child(0);
+    };
+    QTRY_VERIFY(chatItem());
+    QCOMPARE(chatItem()->data(0, Qt::UserRole + 3).toString(), QString("Old preview"));
+    QTest::mouseClick(tree->viewport(), Qt::LeftButton, {}, tree->visualItemRect(chatItem()).center());
+    QTRY_VERIFY(header->text().contains("Old preview"));
+
+    // The menu is answered from inside its own event loop, and so is the dialog its action opens.
+    const auto choose = [tree](QTreeWidgetItem *item, const QString &text) {
+        QTimer::singleShot(0, [text] {
+            auto *menu = qobject_cast<QMenu *>(QApplication::activePopupWidget());
+            if (!menu) return;
+            for (QAction *action : menu->actions()) {
+                if (action->text() != text) continue;
+                menu->setActiveAction(action);
+                QTest::keyClick(menu, Qt::Key_Return);
+                return;
+            }
+            menu->close();
+        });
+        emit tree->customContextMenuRequested(tree->visualItemRect(item).center());
+    };
+    QString offered;
+    const auto answerDialog = [&offered](const QString &name) {
+        auto *timer = new QTimer;
+        timer->setInterval(20);
+        QObject::connect(timer, &QTimer::timeout, [timer, name, &offered] {
+            auto *dialog = qobject_cast<QInputDialog *>(QApplication::activeModalWidget());
+            if (!dialog) return;
+            timer->stop();
+            timer->deleteLater();
+            offered = dialog->textValue();
+            dialog->setTextValue(name);
+            dialog->accept();
+        });
+        timer->start();
+    };
+
+    answerDialog("  Manual   name ");
+    choose(chatItem(), "Rename…");
+    QCOMPARE(offered, QString("Old preview"));
+    QTRY_COMPARE(readLog("names.jsonl").size(), 1);
+    QCOMPARE(readLog("names.jsonl").first().toObject(), (QJsonObject{{"threadId", "chat-1"}, {"name", "Manual name"}}));
+    QTRY_COMPARE(chatItem()->data(0, Qt::UserRole + 3).toString(), QString("Manual name"));
+    QTRY_VERIFY(header->text().contains("Manual name"));
+    QFile index(directory.filePath("codex-index.json"));
+    QVERIFY(index.open(QIODevice::ReadOnly));
+    QVERIFY(index.readAll().contains("Manual name"));
+    index.close();
+
+    // The agent reads the start of the chat and its answer is offered without a model's decoration.
+    offered.clear();
+    answerDialog("Login form fixes");
+    choose(chatItem(), "Suggest a name");
+    QTRY_COMPARE(offered, QString("Login form fixes"));
+    QCOMPARE(readLog("reads.jsonl").last().toObject().value("sortDirection").toString(), QString("asc"));
+    const QString prompt = readLog("prompts.jsonl").last().toString();
+    QVERIFY(prompt.contains("- Fix the login form\n- Also add tests"));
+    QVERIFY(prompt.contains("The beginning of the agent's answers:\n- I will look at the form first"));
+    QTRY_COMPARE(readLog("names.jsonl").size(), 2);
+    QCOMPARE(readLog("names.jsonl").last().toObject().value("name").toString(), QString("Login form fixes"));
+    QTRY_COMPARE(chatItem()->data(0, Qt::UserRole + 3).toString(), QString("Login form fixes"));
+
+    // A cancelled dialog renames nothing.
+    offered.clear();
+    auto *timer = new QTimer(&window);
+    timer->setInterval(20);
+    connect(timer, &QTimer::timeout, [timer, &offered] {
+        auto *dialog = qobject_cast<QInputDialog *>(QApplication::activeModalWidget());
+        if (!dialog) return;
+        timer->stop();
+        offered = dialog->textValue();
+        dialog->reject();
+    });
+    timer->start();
+    choose(chatItem(), "Rename…");
+    QCOMPARE(offered, QString("Login form fixes"));
+    QTest::qWait(50);
+    QCOMPARE(readLog("names.jsonl").size(), 2);
 }
 
 QTEST_MAIN(MainWindowTest)

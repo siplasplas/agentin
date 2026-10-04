@@ -77,6 +77,11 @@ private:
     void suggestMessage();
     void showSuggestions(const QStringList &items);
     void updateSuggestButton();
+    // Asks for a conversation's new name, offering proposal, and renames it in its agent.
+    void renameConversation(AgentProvider *owner, const QString &id, const QString &path, const QString &title,
+                            const QString &proposal);
+    // Asks the conversation's own agent, with its cheapest model, for one name, then offers it for renaming.
+    void suggestConversationName(AgentProvider *owner, const QString &id, const QString &path, const QString &title);
     void showHelp();
     void requestStop();
     AgentProvider *provider(const QString &name) const;

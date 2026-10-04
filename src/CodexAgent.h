@@ -39,6 +39,8 @@ public:
     void setReadOnly(bool readOnly) override;
     // Read-only, never asking for approval, with a thread Codex does not keep; for one-off questions.
     void makeEphemeral() { ephemeral_ = true; setReadOnly(true); }
+    // Chat entries of one Codex App Server thread item.
+    static QList<ChatEntry> itemEntries(const QJsonObject &item);
     bool isEphemeral() const { return ephemeral_; }
     bool newConversation(const QString &workingDirectory) override;
     bool resumeConversation(const QString &id, const QString &workingDirectory) override;

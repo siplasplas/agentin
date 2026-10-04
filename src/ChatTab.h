@@ -57,6 +57,12 @@ public:
     QString key() const;
     static QString key(const QString &provider, const QString &id);
     QString title() const { return title_; }
+    // The conversation was renamed outside the chat, from the tree.
+    void setTitle(const QString &title)
+    {
+        title_ = title;
+        emit changed();
+    }
     QString workingDirectory() const { return path_; }
     // The header without the changes summary is shown beside a button that has it.
     QString headerText(bool withChanges = true) const;

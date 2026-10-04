@@ -333,6 +333,47 @@ void CodexConnection::setConversationTitle(const QString &id, const QString &tit
     if (liveThreadDirectories_.contains(id)) emit conversationsChanged();
 }
 
+// The server keeps the name also for threads that are not loaded; a sync that is running keeps it too.
+void CodexConnection::renameConversation(const QString &id, const QString &, const QString &title, QObject *context,
+                                         const std::function<void(const QString &error)> &done)
+{
+    const QPointer<QObject> guard(context);
+    if (!isConnected()) {
+        if (guard) done("the Codex App Server is not connected");
+        return;
+    }
+    request("thread/name/set", {{"threadId", id}, {"name", title}}, this,
+            [this, id, title, guard, done](const QJsonObject &, const QString &error) {
+        if (error.isEmpty()) {
+            if (cachedConversations_.contains(id)) cachedConversations_[id].insert("name", title);
+            if (stagedConversations_.contains(id)) stagedConversations_[id].insert("name", title);
+            if (liveThreadDirectories_.contains(id)) liveThreadTitles_.insert(id, title);
+            saveConversationIndex();
+            emit conversationsChanged();
+        }
+        if (guard) done(error);
+    });
+}
+
+void CodexConnection::readConversationStart(const QString &id, const QString &, QObject *context,
+                                            const std::function<void(const QList<ChatEntry> &entries,
+                                                                     const QString &error)> &done)
+{
+    const QPointer<QObject> guard(context);
+    if (!isConnected()) {
+        if (guard) done({}, "the Codex App Server is not connected");
+        return;
+    }
+    request("thread/items/list", {{"threadId", id}, {"limit", 100}, {"sortDirection", "asc"}}, this,
+            [guard, done](const QJsonObject &result, const QString &error) {
+        if (!guard) return;
+        QList<ChatEntry> entries;
+        for (const QJsonValue &value : result.value("data").toArray())
+            entries.append(CodexAgent::itemEntries(value.toObject().value("item").toObject()));
+        done(entries, error);
+    });
+}
+
 // The next sync replaces this with the server's own time.
 void CodexConnection::recordActivity(const QString &id)
 {

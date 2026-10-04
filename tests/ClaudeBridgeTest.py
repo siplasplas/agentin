@@ -181,6 +181,35 @@ class ClaudeBridgeTest(unittest.IsolatedAsyncioTestCase):
             })
             reading.assert_called_once_with("session-1", directory="/tmp/project")
 
+    async def test_reads_session_head_for_naming(self):
+        messages = [
+            Message(type="user", message={"role": "user", "content": "First question"}),
+            Message(type="assistant", message={"role": "assistant", "content": [{"type": "text", "text": "Answer"}]}),
+            Message(type="user", message={"role": "user", "content": "Second question"}),
+        ]
+        with patch.object(sdk, "get_session_messages", return_value=messages, create=True):
+            self.assertEqual(bridge_module.read_session("session-1", "/tmp/project", 2, head=True), {
+                "type": "history", "total": 3,
+                "entries": [{"role": "user", "text": "First question"}, {"role": "assistant", "text": "Answer"}],
+            })
+
+    async def test_rename_writes_the_title_and_searches_other_projects(self):
+        calls = []
+
+        def rename(session_id, title, directory=None):
+            calls.append((session_id, title, directory))
+            if directory is not None:
+                raise FileNotFoundError(session_id)
+
+        with patch.object(sdk, "rename_session", side_effect=rename, create=True):
+            self.assertEqual(bridge_module.rename_session("session-1", "/tmp/project", "  New name "),
+                             {"type": "renamed", "id": "session-1", "title": "New name"})
+        self.assertEqual(calls, [("session-1", "  New name ", "/tmp/project"), ("session-1", "  New name ", None)])
+
+        with patch.object(sdk, "rename_session", side_effect=ValueError("title must be non-empty"), create=True):
+            with self.assertRaises(ValueError):
+                bridge_module.rename_session("session-1", "/tmp/project", " ")
+
     async def test_glm_uses_zai_credentials_and_keeps_directory(self):
         events = []
         with patch.dict(bridge_module.os.environ, {"ZAI_API_KEY": "test-zai-key", "GLM_MODEL": "glm-test"}), \

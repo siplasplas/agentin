@@ -94,6 +94,11 @@ QList<ChatEntry> historyEntries(const QJsonObject &item)
 }
 }
 
+QList<ChatEntry> CodexAgent::itemEntries(const QJsonObject &item)
+{
+    return historyEntries(item);
+}
+
 CodexAgent::CodexAgent(CodexConnection *connection, const QString &workingDirectory, QObject *parent)
     : AgentBackend(parent), connection_(connection), workingDirectory_(workingDirectory)
 {
