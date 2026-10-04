@@ -863,7 +863,10 @@ void MainWindow::restoreSession(bool keepStartChat)
         if (id.isEmpty()) {
             tab->startDraft();
         } else {
-            tab->showPreview(selected, id, directory, entry.value("title").toString());
+            // Tabs saved by earlier versions kept the tree's "Agent: " before the title.
+            QString title = entry.value("title").toString();
+            if (title.startsWith(selected->name() + ": ")) title = title.mid(selected->name().size() + 2);
+            tab->showPreview(selected, id, directory, title);
             if (entry.value("live").toBool()) {
                 // Codex resumes only once its App Server is connected.
                 if (selected == codex_ && !codex_->isConnected()) continueWhenConnected_.append(page);
@@ -2513,6 +2516,8 @@ void MainWindow::addDirectoryItems(QTreeWidgetItem *root, QList<QJsonObject> cha
             item->setData(0, Qt::UserRole, name);
             item->setData(0, Qt::UserRole + 1, chat.value("id").toString());
             item->setData(0, Qt::UserRole + 2, path);
+            // The title alone, without the agent's name the tree may show before it, for the tab.
+            item->setData(0, Qt::UserRole + 3, chat.value("title").toString());
             item->setToolTip(0, chat.value("tooltip").toString());
         }
         directory->setExpanded(isDirectoryExpanded(key));
@@ -2580,7 +2585,7 @@ void MainWindow::openConversation(QTreeWidgetItem *item, bool continueChat)
             page = addChatTab(selected, path);
             tabs_->setTabPreview(page, true);
         }
-        chatTab(page)->showPreview(selected, id, path, item->text(0));
+        chatTab(page)->showPreview(selected, id, path, item->data(0, Qt::UserRole + 3).toString());
     }
     tabs_->setCurrentWidget(page);
     if (!continueChat) return;
