@@ -17,6 +17,7 @@
 #include <qxfiledialog.h>
 #include <QAction>
 #include <QCheckBox>
+#include <QClipboard>
 #include <QTreeView>
 #include <QFile>
 #include <QFileInfo>
@@ -2186,7 +2187,8 @@ for line in sys.stdin:
     result = {}
     if method == "thread/list":
         data = [] if request["params"]["archived"] else [
-            {"id": "chat-1", "createdAt": 100, "cwd": project, "preview": "Old preview"}]
+            {"id": "chat-1", "createdAt": 100, "updatedAt": 200, "cwd": project, "preview": "Old preview",
+             "gitInfo": {"branch": "main"}, "path": os.path.join(folder, "rollout.jsonl")}]
         result = {"data": data, "nextCursor": None}
     elif method == "thread/name/set":
         log("names.jsonl", request["params"])
@@ -2218,6 +2220,10 @@ for line in sys.stdin:
 )PY");
     script.close();
     QVERIFY(script.setPermissions(QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner));
+    QFile rollout(directory.filePath("rollout.jsonl"));
+    QVERIFY(rollout.open(QIODevice::WriteOnly));
+    rollout.write("{}\n{}");
+    rollout.close();
     const auto readLog = [&](const QString &name) {
         QList<QJsonValue> values;
         QFile file(directory.filePath(name));
@@ -2242,6 +2248,12 @@ for line in sys.stdin:
     };
     QTRY_VERIFY(chatItem());
     QCOMPARE(chatItem()->data(0, Qt::UserRole + 3).toString(), QString("Old preview"));
+    // A Codex chat's tooltip has Claude's details in Claude's order.
+    const auto date = [](qint64 seconds) { return QDateTime::fromSecsSinceEpoch(seconds).toString(Qt::ISODate); };
+    const QString tooltip = QStringList{"Old preview", "ID: chat-1", "Directory: " + projectPath, "Created: " + date(100),
+                                        "Modified: " + date(200), "Transcript size: 5 bytes", "Git branch: main",
+                                        "First prompt: Old preview"}.join('\n');
+    QCOMPARE(chatItem()->toolTip(0), tooltip);
     QTest::mouseClick(tree->viewport(), Qt::LeftButton, {}, tree->visualItemRect(chatItem()).center());
     QTRY_VERIFY(header->text().contains("Old preview"));
 
@@ -2275,6 +2287,9 @@ for line in sys.stdin:
         });
         timer->start();
     };
+
+    choose(chatItem(), "Copy");
+    QCOMPARE(QGuiApplication::clipboard()->text(), tooltip);
 
     answerDialog("  Manual   name ");
     choose(chatItem(), "Rename…");

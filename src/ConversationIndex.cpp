@@ -75,27 +75,33 @@ QList<QJsonObject> ConversationIndex::treeEntries() const
     QList<QJsonObject> result;
     for (const QJsonObject &thread : entries_) {
         const QString id = thread.value("id").toString();
-        const QString path = thread.value("cwd").toString();
         const QString title = thread.value("title").toString(id);
-        QStringList details{title, "ID: " + id, "Directory: " + path};
-        const auto addText = [&thread, &details](const QString &key, const QString &label) {
-            const QString value = thread.value(key).toString();
-            if (!value.isEmpty()) details.append(label + ": " + value);
-        };
-        const auto addDate = [&thread, &details](const QString &key, const QString &label) {
-            const qint64 seconds = thread.value(key).toInteger();
-            if (seconds > 0) details.append(label + ": " + QDateTime::fromSecsSinceEpoch(seconds).toString(Qt::ISODate));
-        };
-        addDate("createdAt", "Created");
-        addDate("lastModified", "Modified");
-        if (thread.value("fileSize").isDouble())
-            details.append("Transcript size: " + QString::number(thread.value("fileSize").toInteger()) + " bytes");
-        addText("gitBranch", "Git branch");
-        addText("tag", "Tag");
-        addText("firstPrompt", "First prompt");
-        result.append({{"id", id}, {"cwd", path}, {"title", title}, {"tooltip", details.join('\n')},
+        result.append({{"id", id}, {"cwd", thread.value("cwd").toString()}, {"title", title},
+                       {"tooltip", tooltip(thread)},
                        {"createdAt", thread.value("createdAt").toInteger()},
                        {"modifiedAt", thread.value("lastModified").toInteger()}});
     }
     return result;
+}
+
+QString ConversationIndex::tooltip(const QJsonObject &entry)
+{
+    const QString id = entry.value("id").toString();
+    QStringList details{entry.value("title").toString(id), "ID: " + id, "Directory: " + entry.value("cwd").toString()};
+    const auto addText = [&entry, &details](const QString &key, const QString &label) {
+        const QString value = entry.value(key).toString();
+        if (!value.isEmpty()) details.append(label + ": " + value);
+    };
+    const auto addDate = [&entry, &details](const QString &key, const QString &label) {
+        const qint64 seconds = entry.value(key).toInteger();
+        if (seconds > 0) details.append(label + ": " + QDateTime::fromSecsSinceEpoch(seconds).toString(Qt::ISODate));
+    };
+    addDate("createdAt", "Created");
+    addDate("lastModified", "Modified");
+    if (entry.value("fileSize").isDouble())
+        details.append("Transcript size: " + QString::number(entry.value("fileSize").toInteger()) + " bytes");
+    addText("gitBranch", "Git branch");
+    addText("tag", "Tag");
+    addText("firstPrompt", "First prompt");
+    return details.join('\n');
 }

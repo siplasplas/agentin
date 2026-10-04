@@ -1,4 +1,5 @@
 #include "CodexConnection.h"
+#include "ConversationIndex.h"
 
 #include "CodexAgent.h"
 
@@ -311,8 +312,16 @@ QList<QJsonObject> CodexConnection::conversations() const
         QString title = thread.value("name").toString();
         if (title.isEmpty()) title = thread.value("preview").toString();
         if (title.isEmpty()) title = id;
+        // The same details as Claude's chats, in the same order; Codex's preview is the first prompt.
+        QJsonObject details{{"id", id}, {"cwd", thread.value("cwd").toString()}, {"title", title},
+                            {"createdAt", thread.value("createdAt")}, {"lastModified", thread.value("updatedAt")},
+                            {"gitBranch", thread.value("gitInfo").toObject().value("branch")},
+                            {"firstPrompt", thread.value("preview")}};
+        const QFileInfo transcript(thread.value("path").toString());
+        if (!thread.value("path").toString().isEmpty() && transcript.isFile())
+            details.insert("fileSize", transcript.size());
         result.append({{"id", id}, {"cwd", thread.value("cwd").toString()}, {"title", title},
-                       {"tooltip", title + "\n\n" + id}, {"createdAt", thread.value("createdAt").toInteger()},
+                       {"tooltip", ConversationIndex::tooltip(details)}, {"createdAt", thread.value("createdAt").toInteger()},
                        {"modifiedAt", thread.value("updatedAt").toInteger()},
                        {"archived", thread.value("archived").toBool()}});
     }
@@ -321,7 +330,8 @@ QList<QJsonObject> CodexConnection::conversations() const
         if (cachedConversations_.contains(it.key())) continue;
         const QString title = liveThreadTitles_.value(it.key(), "New chat");
         result.append({{"id", it.key()}, {"cwd", it.value()}, {"title", title},
-                       {"tooltip", title + "\n\n" + it.key()}, {"createdAt", 0}});
+                       {"tooltip", ConversationIndex::tooltip({{"id", it.key()}, {"cwd", it.value()}, {"title", title}})},
+                       {"createdAt", 0}});
     }
     return result;
 }

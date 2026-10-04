@@ -168,6 +168,9 @@ easy to resume. Switching tabs also reveals the matching conversation without
 moving keyboard focus. Restored chats appear even before discovery finishes.
 Directories appear under an agent only when they contain a discovered chat.
 Chat previews are shortened in the tree; hover over one to read the longer stored preview.
+The tooltip of a Codex, Claude or GLM chat lists the same details in the same order:
+its title, ID, directory, creation and modification times, transcript size, Git
+branch, Claude's tag and the first prompt, each when the agent records it.
 A right click on a chat or a directory offers **Copy**, which puts the text of its
 tooltip on the clipboard: a chat's preview, details and ID, or a directory's path.
 A Codex, Claude or GLM chat also offers **Rename…**, which asks for a new name, and

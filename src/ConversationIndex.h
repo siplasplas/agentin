@@ -24,6 +24,9 @@ public:
     bool touch(const QString &id);
     // Entries in the form AgentBackend::conversations() returns.
     QList<QJsonObject> treeEntries() const;
+    // A chat's tooltip in the tree, the same for every agent, from the fields of an index entry: title, id,
+    // cwd, createdAt, lastModified, fileSize, gitBranch, tag and firstPrompt; missing ones are left out.
+    static QString tooltip(const QJsonObject &entry);
 
 private:
     QString provider_;
