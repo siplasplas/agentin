@@ -174,6 +174,12 @@ class Bridge:
                 directories.append(root)
         return directories
 
+    def report_writable(self):
+        """Tells agentin the directories besides the chat's own where this session may write, so that its
+        directory lock holds them; the temporary directory is shared by everyone and is left out."""
+        shared = {os.path.realpath("/tmp"), os.path.realpath(tempfile.gettempdir()), os.path.realpath(self.cwd)}
+        send({"type": "writable", "directories": [path for path in self.writable_directories() if path not in shared]})
+
     def path_is_allowed(self, path):
         """Whether path is in one of the writable directories."""
         target = os.path.realpath(os.path.join(self.cwd, os.path.expanduser(path)))
@@ -213,6 +219,7 @@ class Bridge:
         self.client = ClaudeSDKClient(options=options)
         self.connected = False
         await self.client.connect()
+        self.report_writable()
         # Reassert the application mode before accepting prompts, including resumed sessions.
         await self.client.set_permission_mode("plan" if self.read_only else "default")
         self.connected = True
@@ -318,6 +325,8 @@ class Bridge:
             for update in updates or []:
                 if update.type == "addDirectories":
                     self.session_dirs.extend(update.directories or [])
+            if any(update.type == "addDirectories" for update in updates or []):
+                self.report_writable()
             return PermissionResultAllow(updated_input=input_data, updated_permissions=updates)
         return PermissionResultDeny(message="User declined this action", interrupt=decision == "cancel")
 

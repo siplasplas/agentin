@@ -6,6 +6,8 @@
 #include <QDir>
 #include <QJsonArray>
 
+#include <utility>
+
 namespace {
 constexpr int kHistoryPageSize = 40;
 
@@ -164,6 +166,7 @@ bool CodexAgent::newConversation(const QString &workingDirectory)
         emit message("[Wait for the current Codex response to finish.]");
         return false;
     }
+    cancelReopening();
     closeThread();
     trustedSessionCommands_.clear();
     trustedConversationId_.clear();
@@ -184,6 +187,7 @@ bool CodexAgent::resumeConversation(const QString &id, const QString &workingDir
         trustedSessionCommands_.clear();
         trustedConversationId_.clear();
     }
+    cancelReopening();
     closeThread();
     if (!workingDirectory.isEmpty()) workingDirectory_ = workingDirectory;
     queuedPrompts_.clear();
@@ -210,7 +214,8 @@ bool CodexAgent::prompt(const QString &text)
         return false;
     }
     queuedPrompts_.append(text);
-    if (threadId_.isEmpty()) startThread();
+    // A conversation being reopened takes the prompt when it is open again.
+    if (threadId_.isEmpty() && reopeningThreadId_.isEmpty()) startThread();
     sendNextPrompt();
     return true;
 }
@@ -409,6 +414,75 @@ void CodexAgent::answerApproval(int id, ApprovalDecision decision)
         : decision == ApprovalDecision::Cancel ? "cancel" : "decline";
     connection_->respond(requestId, {{"decision", value}});
     emit message("[Approval: " + value + "]");
+}
+
+// Codex keeps the approvals given for a session in the loaded thread, and has no request to forget them. A
+// thread that no client uses is closed after about a minute; opened again from its file, it starts without
+// them. The other Codex chats keep running meanwhile.
+void CodexAgent::resetSessionApprovals()
+{
+    if (busy_ || threadOpening_ || steeringInFlight_ || !reopeningThreadId_.isEmpty()) {
+        emit message("[Wait for Codex to finish before withdrawing its session approvals.]");
+        return;
+    }
+    if (threadId_.isEmpty() || !connection_) return;
+    reopeningThreadId_ = threadId_;
+    closeThread();
+    emit message("[Withdrawing Codex session approvals: the conversation reopens when Codex has closed it, in about a "
+                 "minute]");
+    reopenPolls_ = 0;
+    if (!reopenTimer_) {
+        reopenTimer_ = new QTimer(this);
+        reopenTimer_->setInterval(5000);
+        connect(reopenTimer_, &QTimer::timeout, this, &CodexAgent::pollReopening);
+    }
+    reopenTimer_->start();
+    QTimer::singleShot(0, this, &CodexAgent::pollReopening);
+    emit stateChanged();
+}
+
+void CodexAgent::pollReopening()
+{
+    if (reopeningThreadId_.isEmpty() || !connection_ || !connection_->isConnected()) {
+        cancelReopening();
+        return;
+    }
+    // After three minutes the conversation opens again, still loaded, and keeps its approvals.
+    if (++reopenPolls_ > 36) {
+        emit message("[Codex did not close the conversation; its session approvals stay until the App Server restarts]");
+        reopenThread();
+        return;
+    }
+    connection_->request("thread/loaded/list", {}, this, [this](const QJsonObject &result, const QString &error) {
+        if (!error.isEmpty() || reopeningThreadId_.isEmpty()) return;
+        for (const QJsonValue &id : result.value("data").toArray())
+            if (id.toString() == reopeningThreadId_) return;
+        reopenThread();
+    });
+}
+
+void CodexAgent::reopenThread()
+{
+    if (reopenTimer_) reopenTimer_->stop();
+    const QString id = std::exchange(reopeningThreadId_, {});
+    if (id.isEmpty() || !connection_) return;
+    threadOpening_ = true;
+    connection_->request("thread/resume", {{"threadId", id}}, this, [this, id](const QJsonObject &result, const QString &error) {
+        threadOpening_ = false;
+        if (!error.isEmpty()) {
+            emit message("[Could not reopen the Codex conversation " + id + ": " + error + "]");
+            emit stateChanged();
+            return;
+        }
+        openThread(result, true);
+        emit message("[Codex session approvals withdrawn]");
+    });
+}
+
+void CodexAgent::cancelReopening()
+{
+    reopeningThreadId_.clear();
+    if (reopenTimer_) reopenTimer_->stop();
 }
 
 QStringList CodexAgent::trustedSessionCommands() const

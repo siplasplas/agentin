@@ -772,6 +772,14 @@ void ClaudeAgent::handleLine(const QByteArray &line)
         if (!decision.isEmpty())
             emit message(QString(decision == "deny" ? "[Declined by agentin's rules: " : "[Allowed by agentin's rules: ")
                          + verdict.reason + "]");
+    } else if (type == "writable") {
+        QStringList directories;
+        for (const QJsonValue &directory : event.value("directories").toArray())
+            if (!directory.toString().isEmpty()) directories.append(directory.toString());
+        if (directories != writableDirectories_) {
+            writableDirectories_ = directories;
+            emit writableDirectoriesChanged();
+        }
     } else if (type == "read_check") {
         // Reading tools run without a question anywhere, except on files that may hold secrets, which agentin asks
         // about itself. Glob only lists names.

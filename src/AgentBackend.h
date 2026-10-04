@@ -303,6 +303,8 @@ signals:
                            const QList<ApprovalChoice> &choices = {});
     void questionsRequested(int id, const QList<AgentQuestion> &questions, bool blocking = true);
     void requestResolved(int id);
+    // The directories besides the working directory where the chat may write have changed.
+    void writableDirectoriesChanged();
     void conversationOpened(const QString &id, bool resumed);
     void conversationOpenFailed(const QString &id, const QString &reason);
     // Entries are the complete list to show for the conversation, oldest first.

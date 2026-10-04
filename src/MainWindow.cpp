@@ -2112,21 +2112,30 @@ void MainWindow::showApprovalsDialog()
     auto *trustPage = new QWidget(pages);
     auto *trustLayout = new QVBoxLayout(trustPage);
     auto *trustIntro = new QLabel("Commands that a chat runs without asking until its conversation changes, given with "
-                                  "Trust … for this chat. Nothing of it is saved.", trustPage);
+                                  "Trust … for this chat, and the approvals given to an agent itself with Allow for this "
+                                  "session. Nothing of it is saved. Removing an agent's session approval withdraws all of "
+                                  "that chat's: a Claude or GLM chat reconnects, and a Codex chat reopens its conversation "
+                                  "once Codex has closed it, in about a minute.", trustPage);
     trustIntro->setWordWrap(true);
     trustLayout->addWidget(trustIntro);
     auto *trust = new QTreeWidget(trustPage);
     trust->setObjectName("chatTrust");
-    trust->setHeaderLabels({"Chat", "Trusted commands"});
+    trust->setHeaderLabels({"Chat", "Trusted"});
     trust->setRootIsDecorated(false);
     trust->setColumnWidth(0, 300);
     QHash<QTreeWidgetItem *, QPointer<AgentBackend>> trustAgents;
     for (int i = 0; i < tabs_->count(); ++i) {
         ChatTab *tab = chatTab(tabs_->widget(i));
         if (!tab) continue;
+        const QString chat = tab->provider()->name() + ": " + tab->title().left(60);
         for (const QString &rule : tab->agent()->trustedSessionCommands()) {
-            auto *item = new QTreeWidgetItem(trust, {tab->provider()->name() + ": " + tab->title().left(60), rule});
+            auto *item = new QTreeWidgetItem(trust, {chat, rule});
             trustAgents.insert(item, tab->agent());
+        }
+        for (const QString &approval : tab->sessionApprovals()) {
+            auto *item = new QTreeWidgetItem(trust, {chat, "Agent's session approval: " + approval});
+            item->setToolTip(1, approval);
+            item->setData(0, Qt::UserRole, QVariant::fromValue<QObject *>(tab));
         }
     }
     trustLayout->addWidget(trust, 1);
@@ -2137,9 +2146,17 @@ void MainWindow::showApprovalsDialog()
     trustButtons->addStretch(1);
     trustLayout->addLayout(trustButtons);
     QList<std::pair<QPointer<AgentBackend>, QString>> revoked;
-    connect(revoke, &QPushButton::clicked, &dialog, [trust, &trustAgents, &revoked] {
+    QList<QPointer<QObject>> withdrawn;
+    connect(revoke, &QPushButton::clicked, &dialog, [trust, &trustAgents, &revoked, &withdrawn] {
         QTreeWidgetItem *item = trust->currentItem();
         if (!item) return;
+        if (QObject *tab = item->data(0, Qt::UserRole).value<QObject *>()) {
+            // An agent's session approvals are withdrawn together, so all rows of that chat go.
+            withdrawn.append(tab);
+            for (int i = trust->topLevelItemCount() - 1; i >= 0; --i)
+                if (trust->topLevelItem(i)->data(0, Qt::UserRole).value<QObject *>() == tab) delete trust->topLevelItem(i);
+            return;
+        }
         revoked.append({trustAgents.take(item), item->text(1)});
         delete item;
     });
@@ -2162,6 +2179,13 @@ void MainWindow::showApprovalsDialog()
     setCommandTimeLimit(timeCheck->isChecked() ? timeMinutes->value() : 0);
     for (const auto &[agent, rule] : revoked)
         if (agent) agent->removeTrustedSessionCommand(rule);
+    for (const QPointer<QObject> &object : withdrawn) {
+        auto *tab = qobject_cast<ChatTab *>(object.data());
+        if (!tab) continue;
+        if (tab->agent()->isResponding())
+            appendLine("[Wait for " + tab->provider()->name() + " to finish before withdrawing its session approvals.]");
+        else tab->resetSessionApprovals();
+    }
     QList<CommandRule> rules;
     for (const CommandRule &rule : rulesOf(tree)) {
         if (rule.decision != CommandDecision::Deny && !fixedDenial(rule.pattern).isEmpty()) {

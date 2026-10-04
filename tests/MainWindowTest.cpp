@@ -69,6 +69,7 @@ private slots:
     void geminiAttachRespectsExternalLock();
     void newChatAfterClosingAllTabs();
     void approvalsFileVersions();
+    void codexSessionApprovalsWithdrawn();
 };
 
 void MainWindowTest::foldedOutputScrolling()
@@ -896,6 +897,59 @@ for line in sys.stdin:
     QVERIFY(chat.newConversation(directory.path()));
     QVERIFY(chat.trustedSessionCommands().isEmpty());
     QTRY_COMPARE(chat.sessionId(), QString("test-thread"));
+}
+
+// Codex has no request to forget session approvals: the chat lets go of its thread, waits until Codex has
+// closed it, and opens it again from its file; a prompt meanwhile waits for it instead of starting a new thread.
+void MainWindowTest::codexSessionApprovalsWithdrawn()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString program = directory.filePath("fake-codex");
+    QFile script(program);
+    QVERIFY(script.open(QIODevice::WriteOnly));
+    script.write(R"PY(#!/usr/bin/env python3
+import json, os, sys
+log = os.path.join(os.path.dirname(__file__), "methods.txt")
+for line in sys.stdin:
+    request = json.loads(line)
+    if "method" not in request or "id" not in request:
+        continue
+    with open(log, "a") as out:
+        out.write(request["method"] + "\n")
+    result = {}
+    if request["method"] in ("thread/start", "thread/resume"):
+        result = {"thread": {"id": "kept-thread"}}
+    elif request["method"] == "thread/loaded/list":
+        result = {"data": []}
+    print(json.dumps({"id": request["id"], "result": result}), flush=True)
+)PY");
+    script.close();
+    QVERIFY(script.setPermissions(QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner));
+    const auto methods = [&directory] {
+        QFile file(directory.filePath("methods.txt"));
+        return file.open(QIODevice::ReadOnly) ? QString::fromUtf8(file.readAll()).split('\n', Qt::SkipEmptyParts) : QStringList();
+    };
+    CodexConnection connection(program, directory.path(), directory.filePath("index.json"));
+    connection.start();
+    QTRY_VERIFY(connection.isConnected());
+    CodexAgent chat(&connection, directory.path());
+    QVERIFY(chat.canResetSessionApprovals());
+    QVERIFY(chat.newConversation(directory.path()));
+    QTRY_COMPARE(chat.sessionId(), QString("kept-thread"));
+    QSignalSpy messages(&chat, &AgentBackend::message);
+    chat.resetSessionApprovals();
+    QVERIFY(chat.prompt("after the withdrawal"));
+    QTRY_VERIFY(methods().contains("thread/resume"));
+    QTRY_VERIFY(methods().contains("turn/start"));
+    const QStringList calls = methods();
+    QCOMPARE(calls.count("thread/start"), 1);
+    QVERIFY(calls.indexOf("thread/unsubscribe") < calls.indexOf("thread/loaded/list"));
+    QVERIFY(calls.indexOf("thread/loaded/list") < calls.indexOf("thread/resume"));
+    QVERIFY(calls.indexOf("thread/resume") < calls.indexOf("turn/start"));
+    QCOMPARE(chat.sessionId(), QString("kept-thread"));
+    QVERIFY(std::any_of(messages.cbegin(), messages.cend(),
+                        [](const QList<QVariant> &message) { return message.first().toString() == "[Codex session approvals withdrawn]"; }));
 }
 
 // approvals.json of version 1 loads with the default lists and is written again as version 2; the lists of a

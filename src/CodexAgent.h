@@ -7,6 +7,7 @@
 #include <QJsonValue>
 #include <QPointer>
 #include <QSet>
+#include <QTimer>
 
 class CodexConnection;
 
@@ -55,6 +56,8 @@ public:
     void cancelHistory() override;
     void answerApproval(int id, ApprovalDecision decision) override;
     QStringList trustedSessionCommands() const override;
+    bool canResetSessionApprovals() const override { return true; }
+    void resetSessionApprovals() override;
     void trustSessionCommands(const QStringList &rules) override;
     bool removeTrustedSessionCommand(const QString &rule) override;
     void answerQuestions(int id, const QHash<QString, QStringList> &answers) override;
@@ -68,6 +71,9 @@ private:
     void closeThread();
     void startThread();
     void sendNextPrompt();
+    void pollReopening();
+    void reopenThread();
+    void cancelReopening();
     void sendStopIfPossible();
     void resetTurn();
     void showOutputOf(const QString &itemId);
@@ -125,6 +131,10 @@ private:
     bool refreshingHistory_ = false;
     bool compactedHistoryPending_ = false;
     bool threadOpening_ = false;
+    // A thread closed to withdraw its session approvals, waiting to be opened again, and the poll that waits.
+    QString reopeningThreadId_;
+    QTimer *reopenTimer_ = nullptr;
+    int reopenPolls_ = 0;
     bool steeringInFlight_ = false;
     QString steeringText_;
     bool busy_ = false;

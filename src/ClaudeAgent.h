@@ -141,6 +141,7 @@ public:
     void cancelHistory() override;
     void answerApproval(int id, ApprovalDecision decision) override;
     bool canResetSessionApprovals() const override { return true; }
+    QStringList writableDirectories() const override { return readOnly_ ? QStringList() : writableDirectories_; }
     void resetSessionApprovals() override;
     QStringList trustedSessionCommands() const override;
     void trustSessionCommands(const QStringList &rules) override;
@@ -183,6 +184,8 @@ private:
     QHash<int, CommandVerdict> approvalVerdicts_;
     // Hook checks that agentin's rules turned into approvals; they are answered as hook decisions.
     QSet<int> askedCommandChecks_;
+    // The directories besides the working directory where the session may write, as the bridge reports them.
+    QStringList writableDirectories_;
     // Command prefixes trusted for this conversation; they count as Allow rules.
     QSet<QString> trustedSessionCommands_;
     // The place a shell command runs in, as the bridge reports it with the command.

@@ -647,8 +647,11 @@ use.
 
 Two agents never work on turns in the same directory, or in a directory and one
 of its subdirectories, at the same time. A turn holds its working directory and
-every other directory the agent may write to (Codex's writable roots), so no
-other agent works in them either; the shared `/tmp` is not held. A chat holds its directory only from
+every other directory the agent may write to (Codex's writable roots, and for
+Claude and GLM the directories added to the chat, allowed for the session or
+listed in `permissions.additionalDirectories` of the Claude Code settings, which
+the bridge reports as they change), so no other agent works in them either; the
+shared `/tmp` is not held. A chat holds its directory only from
 sending a message until the agent hands control back, so between turns another
 chat in the same directory can be used. A message that would conflict waits: the
 chat header and the log say which chat holds the directory, and the message is
@@ -755,8 +758,13 @@ shell command asks, empty at first; `.github/workflows` is a typical line), and
 name and `**` for any directories; a line that does not start with `/` or `~/`
 matches at any depth, and a directory covers everything in it, so `.env` covers
 every `.env` file and `~/.ssh` the whole directory. The **Chat trust** page lists
-what each open chat trusts for its session, and **Remove** withdraws it. Nothing
-changes before **OK**.
+what each open chat trusts for its session, and the approvals given to an agent
+itself with **Allow for this session**; **Remove** withdraws them. An agent's
+session approvals go together: a Claude or GLM chat reconnects and resumes its
+session, and a Codex chat lets go of its conversation, which Codex closes after
+about a minute, and opens it again without them, while the other Codex chats keep
+running. A message sent meanwhile waits for the conversation. Nothing changes
+before **OK**.
 
 The rules and the lists are kept in `approvals.json` (version 2) in agentin's
 data directory, apart from `settings.json`, together with the Codex rules agentin
@@ -918,7 +926,8 @@ declined.
 Codex can also ask for additional permissions, such as writing to or reading
 directories outside the chat's directory, or network access. The panel lists
 each path with its access and the reason. **Accept** grants them for the
-current turn and **Accept for session** until the chat's thread is closed;
+current turn and **Accept for session** until the chat's thread is closed or the
+session approvals are withdrawn in **Settings → Approvals… → Chat trust**;
 Codex keeps the grant, and nothing is saved in its configuration. Declining
 grants nothing, and **Decline and stop** also ends the turn. Directories
 granted for writing join the directory lock: from the next turn, and at once

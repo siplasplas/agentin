@@ -60,7 +60,8 @@ bool ChatTab::dispatch()
     // A read-only turn in a sandbox cannot change files, so it neither takes nor waits for the directory;
     // an agent that only promises not to change files still waits.
     if (locks_ && !holdsDirectory_ && !(agent_->isReadOnly() && agent_->readOnlyIsEnforced())) {
-        const QString holder = locks_->acquire(lockOwner(), QStringList{path_} + agent_->writableDirectories(), lockLabel());
+        const QStringList writable = agent_->writableDirectories();
+        const QString holder = locks_->acquire(lockOwner(), QStringList{path_} + writable, lockLabel());
         if (!holder.isEmpty()) {
             if (waitingFor_ != holder) {
                 waitingFor_ = holder;
@@ -72,6 +73,7 @@ bool ChatTab::dispatch()
             return true;
         }
         holdsDirectory_ = true;
+        heldWritable_ = writable;
     }
     retry_->stop();
     const bool wasWaiting = isWaiting();
@@ -98,10 +100,29 @@ bool ChatTab::dispatch()
     return true;
 }
 
+// Write access granted during a turn joins the directories the turn holds, and access withdrawn leaves them.
+// When another chat holds one of them, the turn keeps what it held; the access was granted anyway, so this is
+// reported.
+void ChatTab::updateHeldDirectories()
+{
+    const QStringList writable = agent_->writableDirectories();
+    if (!holdsDirectory_ || !locks_ || writable == heldWritable_) return;
+    const QString holder = locks_->acquire(lockOwner(), QStringList{path_} + writable, lockLabel());
+    if (holder.isEmpty()) {
+        heldWritable_ = writable;
+        return;
+    }
+    locks_->acquire(lockOwner(), QStringList{path_} + heldWritable_, lockLabel());
+    const QString warning = "[" + provider_->name() + " may now write to a directory used by " + holder + "]";
+    emit logMessage(warning);
+    appendText(warning + '\n');
+}
+
 void ChatTab::releaseDirectory()
 {
     if (!holdsDirectory_) return;
     holdsDirectory_ = false;
+    heldWritable_.clear();
     if (locks_) locks_->release(lockOwner());
 }
 
@@ -490,6 +511,8 @@ void ChatTab::setAgent(AgentBackend *agent)
         requests_.append(request);
         emit requestsChanged();
     });
+    // Claude reports the directories an approval added after the answer, so the lock follows the report.
+    connect(agent, &AgentBackend::writableDirectoriesChanged, this, &ChatTab::updateHeldDirectories);
     connect(agent, &AgentBackend::requestResolved, this, [this](int id) {
         for (int i = 0; i < requests_.size(); ++i) {
             if (requests_.at(i).id != id) continue;
@@ -767,19 +790,8 @@ void ChatTab::answerApproval(ApprovalDecision decision, const std::optional<QLis
         for (QString &line : lines) line = line.trimmed();
         sessionApprovals_.append(lines.join(" · "));
     }
-    const QStringList writableBefore = agent_->writableDirectories();
     agent_->answerApproval(request.id, decision);
-    // Write access granted during a turn joins the directories the turn holds. When another chat holds
-    // one of them, the turn keeps what it held; the access was granted anyway, so this is reported.
-    if (holdsDirectory_ && locks_ && agent_->writableDirectories() != writableBefore) {
-        const QString holder = locks_->acquire(lockOwner(), QStringList{path_} + agent_->writableDirectories(), lockLabel());
-        if (!holder.isEmpty()) {
-            locks_->acquire(lockOwner(), QStringList{path_} + writableBefore, lockLabel());
-            const QString warning = "[" + provider_->name() + " may now write to a directory used by " + holder + "]";
-            emit logMessage(warning);
-            appendText(warning + '\n');
-        }
-    }
+    updateHeldDirectories();
     emit requestsChanged();
 }
 

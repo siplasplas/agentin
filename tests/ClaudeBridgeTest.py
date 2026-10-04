@@ -350,6 +350,22 @@ class ClaudeBridgeTest(unittest.IsolatedAsyncioTestCase):
             await bridge.handle({"type": "approval_response", "id": request["id"], "decision": "decline"})
             await approval
 
+    async def test_writable_directories_are_reported(self):
+        events = []
+        with TemporaryDirectory() as directory, patch.object(bridge_module, "send", events.append):
+            project = str(Path(directory).resolve())
+            bridge = bridge_module.Bridge(project)
+            bridge.additional_dirs = ["/srv/shared"]
+            bridge.report_writable()
+            self.assertEqual(events[-1], {"type": "writable", "directories": ["/srv/shared"]})
+            # A directory allowed with an approval is reported at once.
+            suggestion = Message(type="addDirectories", directories=["/srv/other"], destination="session")
+            approval = asyncio.create_task(bridge.can_use_tool("Write", {"file_path": "/srv/other/a.h"}, Message(suggestions=[suggestion])))
+            await asyncio.sleep(0)
+            await bridge.handle({"type": "approval_response", "id": events[-1]["id"], "decision": "acceptAlways"})
+            await approval
+            self.assertEqual(events[-1], {"type": "writable", "directories": ["/srv/shared", "/srv/other"]})
+
     async def test_failed_steering_is_answered(self):
         events = []
         with patch.object(bridge_module, "send", events.append):

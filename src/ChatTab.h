@@ -160,6 +160,10 @@ private:
     // Returns false when the agent refused the message.
     bool dispatch();
     void releaseDirectory();
+    // Takes the directories the agent may write now into the lock the turn holds.
+    void updateHeldDirectories();
+    // The agent's writable directories that the lock holds with the working directory.
+    QStringList heldWritable_;
     QString lockOwner() const;
     QString lockLabel() const;
     void updateTaskClock();
