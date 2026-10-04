@@ -14,9 +14,12 @@ saved tabs are not reopened at startup.
 
 ## Build and run
 
-Requires Qt 6 Widgets, CMake, a C++17 compiler, libgit2 (`libgit2-dev`), the `qt-extra` library version 2.1 or newer
-(installed so that `find_package(qt-extra 2.1)` finds it; it provides the chat tabs
-and the directory chooser), and an installed `codex` CLI for Codex. Claude requires Python 3, `claude-agent-sdk`, and a configured API
+Requires Qt 6 Widgets, CMake 3.24 or newer, a C++17 compiler, libgit2 (`libgit2-dev`),
+and an installed `codex` CLI for Codex. The `qt-extra` library (the chat tabs and the
+directory chooser) needs no installing: an installed version 2.1 or newer is used,
+and otherwise CMake fetches it from GitHub when it configures the build and builds
+it into agentin, as it does with backward-cpp; that first configuration needs a
+network connection. Claude requires Python 3, `claude-agent-sdk`, and a configured API
 key. GLM uses the same Python SDK with a Z.AI API key. Gemini requires an
 installed and authenticated Gemini CLI. Antigravity requires an installed and
 authenticated `agy` CLI. The optional test also requires Qt 6

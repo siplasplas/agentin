@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.16)
+cmake_minimum_required(VERSION 3.24)
 project(agentin VERSION 2.0.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
@@ -10,9 +10,6 @@ if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
 endif()
 
 find_package(Qt6 REQUIRED COMPONENTS Widgets)
-# QxFileDialog and MruTabWidget come from the qt-extra library (source: /home/andrzej/wazne/gitmy/qt-extra),
-# installed to the system. Version 2.1 adds optional file metadata and the chooser directory getter.
-find_package(qt-extra 2.1 REQUIRED)
 # libgit2 reads the Git baseline of the files a turn changes.
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(LIBGIT2 REQUIRED IMPORTED_TARGET libgit2)
@@ -29,6 +26,20 @@ set(backward_exclude)
 if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.28)
     set(backward_exclude EXCLUDE_FROM_ALL)
 endif()
+# QxFileDialog and MruTabWidget come from qt-extra (github.com/siplasplas/qt-extra). An installed qt-extra 2.1
+# or later is used; otherwise CMake fetches the tag below and builds it into agentin, so nothing has to be
+# installed first. Version 2.1 adds optional file metadata and the chooser directory getter.
+FetchContent_Declare(
+    qt-extra
+    GIT_REPOSITORY https://github.com/siplasplas/qt-extra.git
+    GIT_TAG v2.3.0
+    GIT_SHALLOW TRUE
+    # Only built into agentin; its own install rules would add its library, headers and CMake package.
+    ${backward_exclude}
+    # The rest of the line goes to find_package(), so this comes last.
+    FIND_PACKAGE_ARGS 2.1
+)
+FetchContent_MakeAvailable(qt-extra)
 FetchContent_Declare(
     backward
     GIT_REPOSITORY https://github.com/bombela/backward-cpp.git

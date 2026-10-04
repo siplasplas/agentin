@@ -36,7 +36,7 @@ The conversation language does not change the English-language requirements for 
 
 ## qt-extra
 
-- `QxFileDialog` and `MruTabWidget` come from qt-extra (source: `/home/andrzej/wazne/gitmy/qt-extra`), installed in `/usr/local` and found with `find_package(qt-extra 2 REQUIRED)`.
+- `QxFileDialog` and `MruTabWidget` come from qt-extra (source: `/home/andrzej/wazne/gitmy/qt-extra`, published as github.com/siplasplas/qt-extra). `CMakeLists.txt` takes it with `FetchContent` and `FIND_PACKAGE_ARGS`: an installed qt-extra 2.1 or newer (here in `/usr/local`) is used, and otherwise the pinned commit is fetched and built. Pin a commit or tag that is on GitHub, and move the pin when agentin needs a newer qt-extra.
 - Changes to those widgets belong in qt-extra, which has its own `AGENTS.md` and semver rules; gemini-commander uses the same package. Installing needs `sudo`, so the user does it. For larger changes, write a handoff note in the qt-extra directory and let the user start a session there.
 
 ## Tests
