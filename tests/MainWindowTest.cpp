@@ -73,6 +73,7 @@ private slots:
     void geminiAttachRespectsExternalLock();
     void newChatAfterClosingAllTabs();
     void approvalsFileVersions();
+    void claudeToolsBetweenText();
     void messageInputKeepsCursorVisible();
     void diffHighlighting();
     void codexSessionApprovalsWithdrawn();
@@ -1028,6 +1029,48 @@ void MainWindowTest::messageInputKeepsCursorVisible()
         QCoreApplication::processEvents();
         QVERIFY2(input.viewport()->rect().contains(input.cursorRect()), qPrintable(QString("after line %1").arg(line)));
     }
+}
+
+// Claude's bridge streams a whole turn as one text; a tool ends the text before it, so that the tool line
+// stands between the texts as the agent used it. The header shows the beginning of a long first message.
+void MainWindowTest::claudeToolsBetweenText()
+{
+    const QString python = QStandardPaths::findExecutable("python3");
+    if (python.isEmpty()) QSKIP("Python 3 is unavailable");
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString fakeBridge = directory.filePath("fake-claude.py");
+    QFile script(fakeBridge);
+    QVERIFY(script.open(QIODevice::WriteOnly | QIODevice::Text));
+    script.write(R"PY(import json, sys
+def send(m): print(json.dumps(m), flush=True)
+send({"type": "ready"})
+for line in sys.stdin:
+    r = json.loads(line)
+    if r.get("type") == "prompt":
+        send({"type": "delta", "text": "Looking."})
+        send({"type": "tool", "name": "Bash", "input": {"command": "ls -la"}})
+        send({"type": "delta", "text": "Done."})
+        send({"type": "complete", "status": "completed"})
+)PY");
+    script.close();
+    MainWindow window("/nonexistent/codex", directory.path(), python, fakeBridge);
+    window.show();
+    auto *input = window.findChild<QPlainTextEdit *>("commandInput");
+    auto *output = window.findChild<QPlainTextEdit *>("log");
+    auto *chat = window.findChild<QPlainTextEdit *>("chatView");
+    startChat(window, "Claude", directory.path());
+    QTRY_VERIFY(output->toPlainText().contains("[Connected to Claude Agent SDK]"));
+    const QString message = "A first message that names the task in many words, longer than a header shows in one line";
+    QTest::keyClicks(input, message);
+    QTest::keyClick(input, Qt::Key_Return, Qt::ControlModifier);
+    QTRY_VERIFY(chat->toPlainText().contains("Done."));
+    const QString text = chat->toPlainText();
+    QVERIFY2(text.indexOf("Looking.") < text.indexOf("[Claude tool: Bash]") && text.indexOf("[Claude tool: Bash]") < text.indexOf("Done."),
+             qPrintable(text));
+    const QString header = window.findChild<QLabel *>("chatHeader")->text();
+    QVERIFY(!header.contains(message));
+    QVERIFY(header.contains(message.left(40)));
 }
 
 // approvals.json of version 1 loads with the default lists and is written again as version 2; the lists of a

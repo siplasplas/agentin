@@ -733,6 +733,12 @@ void ClaudeAgent::handleLine(const QByteArray &line)
     } else if (type == "reasoning") {
         emit reasoningUpdated(event.value("id").toString(), event.value("text").toString());
     } else if (type == "tool") {
+        // A tool ends the text before it: the bridge streams a whole turn as one text, and a tool line waits for
+        // the end of a message, so without this every tool of the turn would show after all of its text.
+        if (textStarted_) {
+            textStarted_ = false;
+            emit messageFinished();
+        }
         emit toolStarted(event.value("name").toString(),
                          QString::fromUtf8(QJsonDocument(event.value("input").toObject()).toJson(QJsonDocument::Compact)));
     } else if (type == "complete") {

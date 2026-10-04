@@ -3036,8 +3036,8 @@ void MainWindow::updateStatus()
         usageTip.append((tab->conversationUsageIsComplete() ? "Conversation: " : "This session in the tab: ")
                         + ChatTab::usageDetails(conversation));
     tokens_->setToolTip(usage.isEmpty() ? QString() : usageTip.join('\n'));
-    chatHeader_->setToolTip(tab->conversationId().isEmpty() ? tab->headerText()
-                                                             : tab->headerText() + "\n" + tab->conversationId());
+    chatHeader_->setToolTip(tab->title() + "\n" + tab->headerText()
+                            + (tab->conversationId().isEmpty() ? QString() : "\n" + tab->conversationId()));
     loadEarlierButton_->setVisible(tab->hasMoreHistory());
     // Reloading a longer tail while a live response streams would drop the partial answer.
     loadEarlierButton_->setEnabled(!(tab->isLive() && agent->isResponding()));

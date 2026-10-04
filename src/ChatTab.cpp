@@ -200,7 +200,10 @@ QString ChatTab::key() const
 
 QString ChatTab::headerText(bool withChanges) const
 {
-    QStringList parts{provider_->name(), title_, QDir::toNativeSeparators(path_)};
+    // A new chat is named after its first message, which may be long; the header shows its beginning.
+    QString title = title_.section('\n', 0, 0).simplified();
+    if (title.size() > 80) title = title.left(79) + QChar(0x2026);
+    QStringList parts{provider_->name(), title, QDir::toNativeSeparators(path_)};
     if (isWaiting()) parts.append("waiting: the directory is used by " + waitingFor_);
     if (!lockNotice_.isEmpty()) parts.append("locked: " + lockNotice_);
     else if (!live_) parts.append("read-only preview");
