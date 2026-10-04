@@ -18,7 +18,7 @@ Requires Qt 6 Widgets, CMake 3.24 or newer, a C++20 compiler, libgit2 (`libgit2-
 and an installed `codex` CLI for Codex. The `qt-extra` library (the chat tabs and the
 directory chooser) and the widgets of [DiffMerge](https://github.com/siplasplas/diffmerge)
 (the diffs of the changes window, with the Kate syntax reader of `qcodeedit`) need
-no installing: an installed qt-extra 2.4, DiffMerge 1.2.1 or qcodeedit 1.6 or newer
+no installing: an installed qt-extra 2.4, DiffMerge 1.3 or qcodeedit 1.6 or newer
 is used, and otherwise CMake fetches them from GitHub when it configures the build
 and builds them into agentin, as it does with backward-cpp; that first
 configuration needs a network connection. Claude requires Python 3, `claude-agent-sdk`, and a configured API

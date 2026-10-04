@@ -43,15 +43,15 @@ FetchContent_MakeAvailable(qt-extra)
 # The changes window shows a file's differences with DiffMerge's widgets (github.com/siplasplas/diffmerge,
 # LGPL-3.0-only): line, word and character differences, unified or side by side, with syntax colours from
 # Kate definitions read by qcodeedit, and the bounded line counting of the changed files list. An installed
-# DiffMerge 1.2.1 or later is used; otherwise the tag below is fetched and built into agentin, only its libraries. It
+# DiffMerge 1.3 or later is used; otherwise the tag below is fetched and built into agentin, only its libraries. It
 # finds an installed qcodeedit 1.6 itself, or fetches it.
 FetchContent_Declare(
     DiffMerge
     GIT_REPOSITORY https://github.com/siplasplas/diffmerge.git
-    GIT_TAG v1.2.1
+    GIT_TAG v1.3.0
     GIT_SHALLOW TRUE
     ${backward_exclude}
-    FIND_PACKAGE_ARGS 1.2.1 CONFIG COMPONENTS Widgets
+    FIND_PACKAGE_ARGS 1.3 CONFIG COMPONENTS Widgets
 )
 FetchContent_MakeAvailable(DiffMerge)
 FetchContent_Declare(
