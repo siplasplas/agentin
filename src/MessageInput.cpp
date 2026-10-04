@@ -6,6 +6,7 @@
 #include <QListWidget>
 #include <QWindow>
 #include <QMouseEvent>
+#include <QScreen>
 #include <QScrollBar>
 #include <QMimeData>
 #include <QTextBlock>
@@ -113,21 +114,45 @@ void MessageInput::showHistoryList()
     // Wide enough for the field's first line with the marker and the scroll bar beside it.
     const int width = this->width() + list->verticalScrollBar()->sizeHint().width()
                       + QFontMetrics(font()).horizontalAdvance(" …");
-    for (const QString &message : history_) {
-        // A row shows the message's beginning; the tooltip has all of it.
-        auto *item = new QListWidgetItem(beginning(message), list);
-        item->setToolTip(message);
+    // The newest message comes first. A row shows the message's beginning; the tooltip has all of it.
+    for (auto it = history_.crbegin(); it != history_.crend(); ++it) {
+        auto *item = new QListWidgetItem(beginning(*it), list);
+        item->setToolTip(*it);
     }
-    // The current message, or the newest, is selected; it stands nearest to the field.
-    list->setCurrentRow(int(position_ < history_.size() ? position_ : history_.size() - 1));
-    const int rows = qMin(int(history_.size()), 12);
-    const int height = rows * list->sizeHintForRow(0) + 2 * list->frameWidth();
+    const auto rowOf = [this](qsizetype position) { return int(history_.size() - 1 - position); };
+    // The message being recalled, or the newest, is selected.
+    list->setCurrentRow(position_ < history_.size() ? rowOf(position_) : 0);
+    const int rowHeight = list->sizeHintForRow(0);
+    const int frame = 2 * list->frameWidth();
+    int height = qMin(int(history_.size()), 12) * rowHeight + frame;
+
+    // Below the field when it fits, as a combo box opens; otherwise on the side with more room, shorter if
+    // even that is too small. On Wayland a window does not know where it is on the screen, and a popup that
+    // reaches out of its window is placed oddly by some compositors, so there the list stays within the window.
+    const QRect field(mapToGlobal(QPoint(0, 0)), size());
+    QPoint position = field.bottomLeft() + QPoint(0, 1);
+    QRect available;
+    if (QGuiApplication::platformName().startsWith("wayland"))
+        available = QRect(window()->mapToGlobal(QPoint(0, 0)), window()->size());
+    else if (const QScreen *screen = this->screen())
+        available = screen->availableGeometry();
+    if (available.isValid()) {
+        const int below = available.bottom() - field.bottom();
+        const int above = field.top() - available.top();
+        if (height > below && above > below) {
+            height = qMin(height, qMax(rowHeight + frame, above));
+            position = QPoint(field.left(), field.top() - height);
+        } else {
+            height = qMin(height, qMax(rowHeight + frame, below));
+        }
+        position.setX(qBound(available.left(), position.x(), qMax(available.left(), available.right() - width + 1)));
+    }
     list->resize(width, height);
-    list->move(mapToGlobal(QPoint(0, -height)));
-    const auto choose = [this, list](QListWidgetItem *item) {
+    list->move(position);
+    const auto choose = [this, list, rowOf](QListWidgetItem *item) {
         const int row = list->row(item);
         list->close();
-        recallAt(row);
+        recallAt(rowOf(row));
         setFocus();
     };
     connect(list, &QListWidget::itemActivated, this, choose);

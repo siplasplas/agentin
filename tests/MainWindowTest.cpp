@@ -1793,7 +1793,7 @@ if "--list-sessions" in sys.argv:
     QVERIFY(chat->toPlainText().contains("[Claude tool: Read]"));
     QVERIFY(!chat->toPlainText().contains("Question 0"));
     // The message field recalls every question of the session, also those not shown yet, and nothing the user
-    // did not write; its list shows their beginnings, oldest first.
+    // did not write; its list shows their beginnings, newest first and selected, below the field when it fits.
     auto *input = window.findChild<MessageInput *>("commandInput");
     QVERIFY(input);
     input->setFocus();
@@ -1801,16 +1801,20 @@ if "--list-sessions" in sys.argv:
     auto *list = qobject_cast<QListWidget *>(QApplication::activePopupWidget());
     QVERIFY(list);
     QCOMPARE(list->count(), 21);
-    QCOMPARE(list->item(0)->text(), QString("Question 0"));
-    QCOMPARE(list->item(5)->text(), QString("Question 5 …"));
-    QCOMPARE(list->item(5)->toolTip(), QString("Question 5\nwith a second line"));
+    QCOMPARE(list->item(0)->text(), QString("Question 20"));
+    QCOMPARE(list->item(20)->text(), QString("Question 0"));
+    QCOMPARE(list->item(15)->text(), QString("Question 5 …"));
+    QCOMPARE(list->item(15)->toolTip(), QString("Question 5\nwith a second line"));
+    const QRect field(input->mapToGlobal(QPoint(0, 0)), input->size());
+    QVERIFY(!list->geometry().intersects(field));
+    QVERIFY(input->screen()->availableGeometry().contains(list->geometry()));
     // A long line without a line break shows what fits on the field's first line, ending at a whole word.
-    const QString longBeginning = list->item(7)->text();
+    const QString longBeginning = list->item(13)->text();
     QVERIFY(longBeginning.startsWith("Question 7 word"));
     QVERIFY(longBeginning.endsWith("word …"));
     QVERIFY(longBeginning.size() < 200);
     QVERIFY(QFontMetrics(input->font()).horizontalAdvance(longBeginning.chopped(2)) <= input->viewport()->width());
-    QCOMPARE(list->currentRow(), 20);
+    QCOMPARE(list->currentRow(), 0);
     list->close();
     QVERIFY(loadEarlier->isVisible());
     QTest::mouseClick(loadEarlier, Qt::LeftButton);
@@ -2547,9 +2551,9 @@ for line in sys.stdin:
     auto *list = qobject_cast<QListWidget *>(QApplication::activePopupWidget());
     QVERIFY(list);
     QCOMPARE(list->count(), 3);
-    QCOMPARE(list->item(0)->text(), QString("second"));
-    QCOMPARE(list->item(2)->text(), QString("first"));
-    QCOMPARE(list->currentRow(), 2);
+    QCOMPARE(list->item(0)->text(), QString("first"));
+    QCOMPARE(list->item(2)->text(), QString("second"));
+    QCOMPARE(list->currentRow(), 0);
     // Like a combo box's list, it closes on Escape and on a click outside it, leaving the field as it was.
     QPointer<QListWidget> open(list);
     QTest::keyClick(list, Qt::Key_Escape);

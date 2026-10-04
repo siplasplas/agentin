@@ -683,8 +683,10 @@ output of local commands such as `/model`, reminders, interruption notes and
 the summary a continued session starts with, and the context Codex adds; what
 you pasted stays. A message you wrote several times is recalled once, at the
 place of its latest use. Alt+Down, or the arrow button
-beside the field, lists the messages as a combo box does, oldest first and the
-newest selected nearest the field. Each row shows a message's beginning: up to
+beside the field, lists the messages as a combo box does: newest first and
+selected, below the field, or above it when there is more room there, and
+shorter when even that is too small; on Wayland, where a window does not know
+its place on the screen, within the window. Each row shows a message's beginning: up to
 its first line break, or what fits on the field's first line at its current
 width when a long line would wrap, with `…` when more follows; the tooltip
 shows all of it. Enter or a click puts the chosen message into the field as Page Up

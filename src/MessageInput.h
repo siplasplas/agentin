@@ -40,7 +40,8 @@ public:
     // Shows a suggested message selected, so that typing replaces it and Enter sends it.
     void showSuggestion(const QString &text);
     bool hasHistory() const { return !history_.isEmpty(); }
-    // Lists the earlier messages above the field, oldest first; the chosen one is recalled as Page Up would.
+    // Lists the earlier messages below the field, newest first, as a combo box lists its items; the chosen one is
+    // recalled as Page Up would recall it.
     void showHistoryList();
 
 signals:
