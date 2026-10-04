@@ -1,0 +1,198 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>agentin – one desktop window for coding agents</title>
+<meta name="description" content="agentin is a Qt 6 desktop client for Codex, Claude Code, GLM, Gemini and Antigravity, with its own command approvals, a changes window with syntax-coloured diffs, and a terminal per directory.">
+<link rel="icon" type="image/svg+xml" href="agentin.svg">
+<meta property="og:title" content="agentin">
+<meta property="og:description" content="One Qt desktop window for Codex, Claude Code, GLM, Gemini and Antigravity, with command approvals that explain themselves.">
+<meta property="og:image" content="screenshot.png">
+<style>
+  :root {
+    --bg: #f6f7f9;
+    --surface: #ffffff;
+    --text: #1d2834;
+    --muted: #5a6573;
+    --border: #dde2e8;
+    --accent: #1f6feb;
+    --accent-text: #ffffff;
+    --code-bg: #eef1f5;
+    --shadow: 0 1px 2px rgba(29, 40, 52, .06), 0 8px 24px rgba(29, 40, 52, .08);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #11161c;
+      --surface: #1a2129;
+      --text: #e6ebf1;
+      --muted: #9aa6b4;
+      --border: #2b3540;
+      --accent: #4c94ff;
+      --accent-text: #0b1118;
+      --code-bg: #232c36;
+      --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 8px 24px rgba(0, 0, 0, .35);
+    }
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 16px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", Ubuntu, Cantarell, sans-serif;
+  }
+  a { color: var(--accent); }
+  .wrap { max-width: 1040px; margin: 0 auto; padding: 0 16px; }
+  header { padding: 56px 0 32px; text-align: center; }
+  header img.logo { width: 96px; height: 96px; border-radius: 20px; box-shadow: var(--shadow); }
+  h1 { font-size: 2.6rem; margin: 18px 0 6px; letter-spacing: -.02em; }
+  .tagline { font-size: 1.2rem; color: var(--muted); max-width: 680px; margin: 0 auto; }
+  .agents { margin: 14px 0 0; color: var(--muted); font-size: .95rem; }
+  .buttons { margin: 26px 0 0; display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+  .button {
+    display: inline-block; padding: 10px 20px; border-radius: 8px; font-weight: 600; text-decoration: none;
+    border: 1px solid var(--border); color: var(--text); background: var(--surface);
+  }
+  .button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+  figure { margin: 8px auto 0; text-align: center; }
+  figure img {
+    max-width: 100%; height: auto; border-radius: 10px; border: 1px solid var(--border); box-shadow: var(--shadow);
+  }
+  figcaption { color: var(--muted); font-size: .9rem; margin-top: 10px; }
+  section { padding: 44px 0 8px; }
+  h2 { font-size: 1.6rem; margin: 0 0 18px; letter-spacing: -.01em; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); gap: 16px; }
+  .card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 18px 20px;
+  }
+  .card h3 { margin: 0 0 8px; font-size: 1.08rem; }
+  .card p { margin: 0; color: var(--muted); }
+  .card ul { margin: 8px 0 0; padding-left: 18px; color: var(--muted); }
+  code, pre { font-family: ui-monospace, "SFMono-Regular", "JetBrains Mono", "DejaVu Sans Mono", Menlo, monospace; font-size: .9em; }
+  code { background: var(--code-bg); padding: 1px 5px; border-radius: 4px; }
+  pre {
+    background: var(--code-bg); border: 1px solid var(--border); border-radius: 8px; padding: 14px 16px;
+    overflow-x: auto; line-height: 1.5;
+  }
+  pre code { background: none; padding: 0; }
+  .note { color: var(--muted); }
+  footer { padding: 40px 0 56px; color: var(--muted); font-size: .92rem; text-align: center; }
+  @media (max-width: 560px) {
+    header { padding-top: 36px; }
+    h1 { font-size: 2.1rem; }
+    .tagline { font-size: 1.05rem; }
+  }
+</style>
+</head>
+<body>
+<header class="wrap">
+  <img class="logo" src="agentin.svg" alt="agentin icon" width="96" height="96">
+  <h1>agentin</h1>
+  <p class="tagline">One Qt desktop window for your coding agents, with command approvals that say why they ask.</p>
+  <p class="agents">Codex · Claude Code · GLM · Gemini CLI · Antigravity</p>
+  <div class="buttons">
+    <a class="button primary" href="https://github.com/siplasplas/agentin">View on GitHub</a>
+    <a class="button" href="https://github.com/siplasplas/agentin/tags">Releases</a>
+    <a class="button" href="#build">Build it</a>
+  </div>
+</header>
+
+<main class="wrap">
+  <figure>
+    <img src="screenshot.png" alt="agentin with a Codex chat, the conversation tree by directory, the reasoning panel and the log" width="908" height="868">
+    <figcaption>A Codex chat with the conversation tree grouped by directory, the reasoning panel, usage limits and the log.</figcaption>
+  </figure>
+
+  <section>
+    <h2>What it does</h2>
+    <div class="grid">
+      <div class="card">
+        <h3>Many agents, one window</h3>
+        <p>Each chat is a tab with its own working directory. Codex runs through its App Server, Claude Code and GLM
+          through the Claude Agent SDK, Gemini and Antigravity through their CLIs. A tree lists past conversations by
+          directory, ready to be resumed.</p>
+      </div>
+      <div class="card">
+        <h3>Approvals that explain themselves</h3>
+        <p>agentin reads each shell command line as Bash and judges every command in it by what it reads, writes and
+          runs, and where. Reading and work inside the project run without a question; removals, the network, writes
+          elsewhere and secret files ask, naming the command and the reason. <code>git push</code> and commands that
+          change a remote server are always declined.</p>
+      </div>
+      <div class="card">
+        <h3>Rules you can edit</h3>
+        <p>Allow, Ask and Deny lines with <code>*</code> and typed placeholders such as <code>&lt;int&gt;</code> and
+          <code>&lt;writable&gt;</code>. Choose per command what to remember: once, trusted for the chat, or a rule you
+          edit before it is saved. Lists of secret files, protected paths and risky variables.</p>
+      </div>
+      <div class="card">
+        <h3>See what a turn changed</h3>
+        <p>A changes window lists the files a turn, the chat or <code>HEAD</code> changed, with unified or side-by-side
+          diffs, folding and syntax colours from Kate definitions, read with
+          <a href="https://github.com/siplasplas/qcodeedit">qcodeedit</a>.</p>
+      </div>
+      <div class="card">
+        <h3>Agents that do not collide</h3>
+        <p>A turn holds its directory and the directories the agent may write to, so two agents never work in the
+          same place at once, across all agentin windows and busy sessions outside it.</p>
+      </div>
+      <div class="card">
+        <h3>Everything around the chat</h3>
+        <ul>
+          <li>a terminal per directory below the chat</li>
+          <li>steering a running turn, and reply suggestions</li>
+          <li>usage limits with their pace</li>
+          <li>sounds and speech when a turn ends or asks</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section id="build">
+    <h2>Build and run</h2>
+    <p>agentin runs on Linux. It needs Qt 6 Widgets, CMake 3.24 or newer, a C++17 compiler, libgit2, and qtermwidget
+      for Qt 6 with utf8proc:</p>
+<pre><code># Debian, Ubuntu
+sudo apt install qt6-base-dev libgit2-dev libqtermwidget6-2-dev libutf8proc-dev
+# Fedora
+sudo dnf install qt6-qtbase-devel libgit2-devel qtermwidget-devel utf8proc-devel
+# Arch Linux
+sudo pacman -S qt6-base libgit2 qtermwidget libutf8proc</code></pre>
+<pre><code>git clone https://github.com/siplasplas/agentin.git
+cd agentin
+cmake -S . -B build
+cmake --build build
+./build/agentin -C /path/to/project</code></pre>
+    <p class="note">The first configuration fetches its other libraries from GitHub when they are not installed:
+      qt-extra, qcodeedit and backward-cpp. Codex needs the <code>codex</code> CLI; Claude Code and GLM need Python 3
+      with <code>claude-agent-sdk</code>. The <a href="https://github.com/siplasplas/agentin#readme">README</a> has
+      the details.</p>
+  </section>
+
+  <section>
+    <h2>Good to know</h2>
+    <div class="grid">
+      <div class="card">
+        <h3>Not a sandbox</h3>
+        <p>The approval rules guard against mistakes and make commands visible. Programs of the project run without a
+          question, so a script an agent writes can still do what the rules would ask about.</p>
+      </div>
+      <div class="card">
+        <h3>Your accounts, your settings</h3>
+        <p>agentin starts the agents' own tools with their sign-in and configuration; it keeps its rules and
+          conversation indexes in <code>~/.local/share/agentin</code>.</p>
+      </div>
+      <div class="card">
+        <h3>Free software</h3>
+        <p>GPL-3.0-only. Built with Qt 6, qtermwidget, libgit2, qt-extra and qcodeedit.</p>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="wrap">
+  <a href="https://github.com/siplasplas/agentin">github.com/siplasplas/agentin</a>
+</footer>
+</body>
+</html>
