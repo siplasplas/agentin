@@ -56,6 +56,7 @@ public:
     bool compact() override;
     void loadHistory(const QString &id, const QString &workingDirectory, bool older) override;
     void cancelHistory() override;
+    void loadUserMessages(const QString &id, const QString &workingDirectory) override;
     void answerApproval(int id, ApprovalDecision decision) override;
     QStringList trustedSessionCommands() const override;
     bool canResetSessionApprovals() const override { return true; }
@@ -129,6 +130,11 @@ private:
     QString historyCursor_;
     QList<ChatEntry> historyEntries_;
     quint64 historyGeneration_ = 0;
+    // Pages of thread/turns/list read for the user's messages; a newer request drops an older one.
+    void requestUserMessages(const QString &id, const QString &cursor, quint64 generation,
+                             const std::shared_ptr<QStringList> &messages);
+    quint64 userMessagesGeneration_ = 0;
+    QString userMessagesPending_;
     bool historyPending_ = false;
     bool refreshingHistory_ = false;
     bool compactedHistoryPending_ = false;

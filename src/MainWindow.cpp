@@ -357,6 +357,16 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
                                "based on the latest exchange. They are asked once per exchange and shown again from "
                                "memory.");
     suggestButton_->setEnabled(false);
+    // The messages the arrow keys recall, listed as a combo box lists its items.
+    historyButton_ = new QToolButton(central);
+    historyButton_->setObjectName("historyButton");
+    historyButton_->setArrowType(Qt::DownArrow);
+    historyButton_->setAccessibleName("Earlier messages");
+    historyButton_->setToolTip("Your earlier messages in this chat (Alt+Down); the chosen one goes into the field");
+    historyButton_->setEnabled(false);
+    connect(historyButton_, &QToolButton::clicked, input_, &MessageInput::showHistoryList);
+    connect(input_, &MessageInput::historyChanged, historyButton_,
+            [this] { historyButton_->setEnabled(input_->hasHistory()); });
     stopButton_ = new QPushButton(stopIcon(iconSize, devicePixelRatioF()), {}, central);
     stopButton_->setObjectName("stopButton");
     stopButton_->setIconSize(QSize(iconSize, iconSize));
@@ -459,6 +469,7 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
 
     auto *inputRow = new QHBoxLayout;
     inputRow->addWidget(input_, 1);
+    inputRow->addWidget(historyButton_);
     inputRow->addWidget(suggestButton_);
     // During a turn, steering is what a message usually means, so its button comes first; it is disabled
     // between turns.

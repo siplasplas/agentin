@@ -25,6 +25,7 @@
 #include <QComboBox>
 #include <QDialog>
 #include <QDialogButtonBox>
+#include <QListWidget>
 #include <QInputDialog>
 #include <QMenu>
 #include <QLabel>
@@ -86,6 +87,7 @@ private slots:
     void conversationRenaming();
     void tabsKeepTheirScrollPosition();
     void changesWindowShowsDiff();
+    void recallAllCodexMessages();
 };
 
 void MainWindowTest::foldedOutputScrolling()
@@ -1743,7 +1745,8 @@ if "--read-session" in sys.argv:
     limit = int(sys.argv[sys.argv.index("--limit") + 1])
     entries = []
     for i in range(21):
-        entries += [{"role": "user", "text": f"Question {i}"}, {"role": "assistant", "text": f"Answer {i}"}]
+        text = f"Question {i}" + ("\nwith a second line" if i == 5 else "")
+        entries += [{"role": "user", "text": text}, {"role": "assistant", "text": f"Answer {i}"}]
     entries.append({"role": "tool", "text": "Read"})
     print(json.dumps({"type": "history", "entries": entries[-limit:], "total": len(entries)}), flush=True)
     sys.exit(0)
@@ -1785,6 +1788,20 @@ if "--list-sessions" in sys.argv:
     QTRY_VERIFY(chat->toPlainText().contains("Claude: Answer 20"));
     QVERIFY(chat->toPlainText().contains("[Claude tool: Read]"));
     QVERIFY(!chat->toPlainText().contains("Question 0"));
+    // The message field recalls every question of the session, also those not shown yet; its list shows their
+    // beginnings, oldest first.
+    auto *input = window.findChild<MessageInput *>("commandInput");
+    QVERIFY(input);
+    input->setFocus();
+    QTest::keyClick(input, Qt::Key_Down, Qt::AltModifier);
+    auto *list = qobject_cast<QListWidget *>(QApplication::activePopupWidget());
+    QVERIFY(list);
+    QCOMPARE(list->count(), 21);
+    QCOMPARE(list->item(0)->text(), QString("Question 0"));
+    QCOMPARE(list->item(5)->text(), QString("Question 5 …"));
+    QCOMPARE(list->item(5)->toolTip(), QString("Question 5\nwith a second line"));
+    QCOMPARE(list->currentRow(), 20);
+    list->close();
     QVERIFY(loadEarlier->isVisible());
     QTest::mouseClick(loadEarlier, Qt::LeftButton);
     QTRY_VERIFY(chat->toPlainText().contains("You: Question 2"));
@@ -2427,6 +2444,115 @@ void MainWindowTest::changesWindowShowsDiff()
                 && diff->comparison()->snapshot(diffmerge::gui::Side::Right).lines == QStringList({"first", "second"}));
     QCOMPARE(diff->changeCount(), 1);
     QCOMPARE(diff->changes().first().type, diffcore::ChangeType::Insert);
+}
+
+// Codex reads a chat's turn summaries for the messages the field recalls, so they reach back beyond the loaded
+// history. A repeated message is recalled once, where it was last written. The list Alt+Down shows recalls the
+// chosen message as the arrow keys would.
+void MainWindowTest::recallAllCodexMessages()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    QVERIFY(QDir(directory.path()).mkpath("project"));
+    const QString fakeServer = directory.filePath("fake-codex-recall");
+    QFile script(fakeServer);
+    QVERIFY(script.open(QIODevice::WriteOnly | QIODevice::Text));
+    script.write(R"PY(#!/usr/bin/env python3
+import json
+import os
+import sys
+
+folder = os.path.dirname(__file__)
+project = os.path.join(folder, "project")
+
+def send(message):
+    print(json.dumps(message), flush=True)
+
+def user(text):
+    return {"type": "userMessage", "id": text, "content": [{"type": "text", "text": text}]}
+
+def agent(text):
+    return {"type": "agentMessage", "id": text, "text": text}
+
+def turn(id, question):
+    return {"id": id, "status": "completed", "items": [user(question), agent("answer to " + question)]}
+
+for line in sys.stdin:
+    request = json.loads(line)
+    if "id" not in request:
+        continue
+    method = request.get("method")
+    result = {}
+    if method == "thread/list":
+        data = [] if request["params"]["archived"] else [
+            {"id": "chat-1", "createdAt": 100, "cwd": project, "preview": "first"}]
+        result = {"data": data, "nextCursor": None}
+    elif method == "thread/items/list":
+        # Only the latest turn is loaded into the chat.
+        result = {"data": [{"turnId": "t4", "item": agent("answer to first")}, {"turnId": "t4", "item": user("first")}],
+                  "nextCursor": None}
+    elif method == "thread/turns/list":
+        params = request["params"]
+        with open(os.path.join(folder, "turns.jsonl"), "a") as log:
+            log.write(json.dumps(params) + "\n")
+        if params.get("cursor") is None:
+            result = {"data": [turn("t1", "first"), turn("t2", "second")], "nextCursor": "page-2"}
+        else:
+            result = {"data": [turn("t3", "third"), turn("t4", "first")], "nextCursor": None}
+    send({"id": request["id"], "result": result})
+)PY");
+    script.close();
+    QVERIFY(script.setPermissions(QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner));
+
+    MainWindow window(fakeServer, directory.path(), {}, {}, "gemini", nullptr, directory.filePath("codex-index.json"));
+    window.show();
+    auto *tree = window.findChild<QTreeWidget *>("conversationTree");
+    auto *input = window.findChild<MessageInput *>("commandInput");
+    auto *historyButton = window.findChild<QToolButton *>("historyButton");
+    QVERIFY(tree && input && historyButton);
+    QVERIFY(!historyButton->isEnabled());
+    tree->topLevelItem(0)->setExpanded(true);
+    QTRY_VERIFY(tree->topLevelItem(0)->childCount() && tree->topLevelItem(0)->child(0)->childCount());
+    QTreeWidgetItem *chat = tree->topLevelItem(0)->child(0)->child(0);
+    QTest::mouseClick(tree->viewport(), Qt::LeftButton, {}, tree->visualItemRect(chat).center());
+    QTRY_VERIFY(historyButton->isEnabled() && input->hasHistory());
+    QTRY_VERIFY([&] {
+        for (ChatTab *tab : window.findChildren<ChatTab *>())
+            if (tab->conversationId() == "chat-1" && tab->userMessages().contains("second")) return true;
+        return false;
+    }());
+    input->setFocus();
+    QStringList recalled;
+    for (int i = 0; i < 3; ++i) {
+        QTest::keyClick(input, Qt::Key_PageUp);
+        recalled.append(input->toPlainText());
+    }
+    QCOMPARE(recalled, (QStringList{"first", "third", "second"}));
+    QTest::keyClick(input, Qt::Key_PageDown);
+    QTest::keyClick(input, Qt::Key_PageDown);
+    QTest::keyClick(input, Qt::Key_PageDown);
+    QVERIFY(input->toPlainText().isEmpty());
+
+    QTest::mouseClick(historyButton, Qt::LeftButton);
+    auto *list = qobject_cast<QListWidget *>(QApplication::activePopupWidget());
+    QVERIFY(list);
+    QCOMPARE(list->count(), 3);
+    QCOMPARE(list->item(0)->text(), QString("second"));
+    QCOMPARE(list->item(2)->text(), QString("first"));
+    QCOMPARE(list->currentRow(), 2);
+    list->setCurrentRow(1);
+    QTest::keyClick(list, Qt::Key_Return);
+    QCOMPARE(input->toPlainText(), QString("third"));
+    // Recalled from the list, the message continues with the arrow keys from its place.
+    QTest::keyClick(input, Qt::Key_PageUp);
+    QCOMPARE(input->toPlainText(), QString("second"));
+
+    QFile log(directory.filePath("turns.jsonl"));
+    QVERIFY(log.open(QIODevice::ReadOnly));
+    const QJsonObject first = QJsonDocument::fromJson(log.readLine()).object();
+    QCOMPARE(first.value("itemsView").toString(), QString("summary"));
+    QCOMPARE(first.value("sortDirection").toString(), QString("asc"));
+    QCOMPARE(QJsonDocument::fromJson(log.readLine()).object().value("cursor").toString(), QString("page-2"));
 }
 
 QTEST_MAIN(MainWindowTest)

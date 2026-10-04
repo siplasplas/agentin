@@ -269,6 +269,7 @@ bool ChatTab::startNew(const QString &workingDirectory)
     turnUsage_ = {};
     conversationUsage_ = {};
     conversationUsageFromAgent_ = false;
+    allUserMessages_.clear();
     historyMessages_.clear();
     sentMessages_.clear();
     exchanges_.clear();
@@ -304,6 +305,7 @@ void ChatTab::showPreview(AgentProvider *provider, const QString &id, const QStr
     turnUsage_ = {};
     conversationUsage_ = {};
     conversationUsageFromAgent_ = false;
+    allUserMessages_.clear();
     historyMessages_.clear();
     sentMessages_.clear();
     exchanges_.clear();
@@ -311,6 +313,7 @@ void ChatTab::showPreview(AgentProvider *provider, const QString &id, const QStr
     document_->setPlainText("Loading the latest messages…");
     emit changed();
     agent_->loadHistory(id_, path_, false);
+    agent_->loadUserMessages(id_, path_);
 }
 
 void ChatTab::continueChat()
@@ -590,6 +593,11 @@ void ChatTab::setAgent(AgentBackend *agent)
     connect(agent, &AgentBackend::historyLoaded, this,
             [this](const QString &id, const QList<ChatEntry> &entries, bool hasMore, const QString &notice) {
         if (id == id_) showHistory(entries, hasMore, notice);
+    });
+    connect(agent, &AgentBackend::userMessagesLoaded, this, [this](const QString &id, const QStringList &messages) {
+        if (id != id_) return;
+        allUserMessages_ = messages;
+        emit userMessagesChanged();
     });
 }
 

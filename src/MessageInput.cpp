@@ -2,6 +2,8 @@
 
 #include <QSet>
 #include <QKeyEvent>
+#include <QListWidget>
+#include <QScrollBar>
 #include <QMimeData>
 #include <QTextBlock>
 #include <QTextLayout>
@@ -49,6 +51,44 @@ void MessageInput::setHistory(const QStringList &messages)
     history_ = unique;
     position_ = history_.size();
     if (browsing) replaceText(draft_);
+    emit historyChanged();
+}
+
+void MessageInput::showHistoryList()
+{
+    if (history_.isEmpty()) return;
+    auto *list = new QListWidget;
+    list->setWindowFlags(Qt::Popup);
+    list->setAttribute(Qt::WA_DeleteOnClose);
+    list->setObjectName("messageHistory");
+    list->setFont(font());
+    list->setUniformItemSizes(true);
+    const QFontMetrics metrics(font());
+    const int width = this->width();
+    for (const QString &message : history_) {
+        // A message of several lines shows its first line; the tooltip has all of it.
+        const QString first = message.section('\n', 0, 0);
+        QString text = first == message ? first : first + " …";
+        auto *item = new QListWidgetItem(metrics.elidedText(text, Qt::ElideRight, width - 40), list);
+        item->setToolTip(message);
+    }
+    // The current message, or the newest, is selected; it stands nearest to the field.
+    list->setCurrentRow(int(position_ < history_.size() ? position_ : history_.size() - 1));
+    const int rows = qMin(int(history_.size()), 12);
+    const int height = rows * list->sizeHintForRow(0) + 2 * list->frameWidth();
+    list->resize(width, height);
+    list->move(mapToGlobal(QPoint(0, -height)));
+    const auto choose = [this, list](QListWidgetItem *item) {
+        const int row = list->row(item);
+        list->close();
+        recallAt(row);
+        setFocus();
+    };
+    connect(list, &QListWidget::itemActivated, this, choose);
+    connect(list, &QListWidget::itemClicked, this, choose);
+    list->show();
+    list->scrollToItem(list->currentItem());
+    list->setFocus();
 }
 
 void MessageInput::replaceText(const QString &text)
@@ -87,6 +127,10 @@ void MessageInput::keyPressEvent(QKeyEvent *event)
             else insertLineBreak();
             return;
         }
+    }
+    if ((event->modifiers() & ~Qt::KeypadModifier) == Qt::AltModifier && event->key() == Qt::Key_Down) {
+        showHistoryList();
+        return;
     }
     if (event->modifiers() == Qt::NoModifier || event->modifiers() == Qt::KeypadModifier) {
         // A recalled message nobody has touched is skipped as a whole, not walked line by line.
@@ -177,6 +221,14 @@ void MessageInput::recall(int step)
 {
     const qsizetype target = position_ + step;
     if (target < 0 || target > history_.size()) return;
+    recallAt(target);
+    moveCursor(step < 0 ? QTextCursor::End : QTextCursor::Start);
+}
+
+// Shows the message at this place of the history, or the draft past its end, as recalled and untouched.
+void MessageInput::recallAt(qsizetype target)
+{
+    if (target < 0 || target > history_.size()) return;
     if (position_ == history_.size()) draft_ = toPlainText();
     position_ = target;
     recalling_ = true;
@@ -185,7 +237,7 @@ void MessageInput::recall(int step)
     recalledUntouched_ = position_ < history_.size();
     typed_ = false;
     updateEnterAction();
-    moveCursor(step < 0 ? QTextCursor::End : QTextCursor::Start);
+    moveCursor(QTextCursor::End);
 }
 
 // Line breaks, spaces and tabs around pasted text are dropped: a trailing line break would make Enter

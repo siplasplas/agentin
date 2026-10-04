@@ -6,7 +6,8 @@
 // Message field that grows with its text. Shift+Enter always starts a new line, Ctrl+Enter always
 // sends, and Enter follows the EnterPolicy. Up and Down move between lines and, on the first or last
 // line, recall the previous or next message of the conversation; Page Up and Page Down always recall
-// messages. Past the newest message the text typed before browsing comes back.
+// messages. Past the newest message the text typed before browsing comes back. Alt+Down shows the messages in
+// a list, as a combo box does.
 class MessageInput : public QPlainTextEdit
 {
     Q_OBJECT
@@ -38,10 +39,14 @@ public:
     void replaceText(const QString &text);
     // Shows a suggested message selected, so that typing replaces it and Enter sends it.
     void showSuggestion(const QString &text);
+    bool hasHistory() const { return !history_.isEmpty(); }
+    // Lists the earlier messages above the field, oldest first; the chosen one is recalled as Page Up would.
+    void showHistoryList();
 
 signals:
     void submitted();
     void enterActionChanged(bool sends);
+    void historyChanged();
 
 protected:
     void keyPressEvent(QKeyEvent *event) override;
@@ -53,6 +58,7 @@ private:
     bool onFirstLine() const;
     bool onLastLine() const;
     void recall(int step);
+    void recallAt(qsizetype position);
     void updateEnterAction();
     void insertLineBreak();
     void submit();

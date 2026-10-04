@@ -191,6 +191,7 @@ private:
     void updateSendToolTip();
     QPushButton *steerButton_;
     QPushButton *suggestButton_;
+    QToolButton *historyButton_;
     QPushButton *stopButton_;
     QPushButton *newChatButton_;
     QLabel *status_;

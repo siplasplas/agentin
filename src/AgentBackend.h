@@ -35,6 +35,14 @@ struct HistoryPages
     void showMore(qsizetype page) { shown = qMin(shown + page, entries.size()); }
     QList<ChatEntry> visible() const { return entries.mid(entries.size() - shown); }
     bool hasMore() const { return shown < entries.size(); }
+    // Everything the user wrote, oldest first, also beyond the shown pages.
+    QStringList userMessages() const
+    {
+        QStringList messages;
+        for (const ChatEntry &entry : entries)
+            if (entry.role == "user") messages.append(entry.text);
+        return messages;
+    }
 };
 
 // Token counts of a turn or a conversation; -1 means the agent did not report the value.
@@ -287,6 +295,14 @@ public:
     // Loads the latest history of a conversation, or older entries when older is true.
     virtual void loadHistory(const QString &id, const QString &workingDirectory, bool older) = 0;
     virtual void cancelHistory() = 0;
+    // Reads every message the user wrote in a conversation, oldest first, so that the message field can recall
+    // them beyond the history shown, and reports them with userMessagesLoaded(). Agents that read a whole
+    // conversation for its history report them from loadHistory() instead.
+    virtual void loadUserMessages(const QString &id, const QString &workingDirectory)
+    {
+        Q_UNUSED(id);
+        Q_UNUSED(workingDirectory);
+    }
 
     virtual void answerApproval(int id, ApprovalDecision decision) = 0;
     // Withdraws everything allowed "for this session", where the agent can do that.
@@ -332,6 +348,7 @@ signals:
     void conversationOpenFailed(const QString &id, const QString &reason);
     // Entries are the complete list to show for the conversation, oldest first.
     void historyLoaded(const QString &id, const QList<ChatEntry> &entries, bool hasMore, const QString &notice);
+    void userMessagesLoaded(const QString &id, const QStringList &messages);
     void compactionStarted();
     void compactionFinished();
     void contextCompacted();

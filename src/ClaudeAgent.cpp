@@ -614,6 +614,7 @@ void ClaudeAgent::loadHistory(const QString &id, const QString &workingDirectory
         }
         history_.reset(id, entries, kHistoryPageSize);
         emit historyLoaded(id, history_.visible(), history_.hasMore(), {});
+        emit userMessagesLoaded(id, history_.userMessages());
     });
 }
 

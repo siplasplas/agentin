@@ -669,11 +669,21 @@ previous or next message you wrote in the current tab's conversation; Page Up
 and Page Down always recall messages. A recalled message of several lines that
 you have not edited, clicked or moved through with Left, Right, Home or End is
 skipped as a whole, so Up and Down go straight to the previous or next message. After the newest message, the text you
-typed before browsing comes back. The messages come from the conversation's
-loaded history and from what you sent in the tab, so no separate history is
-stored; older messages become available after **Show earlier messages**. A
-message you wrote several times is recalled once, at the place of its latest
-use.
+typed before browsing comes back. The messages come from the agent's own record
+of the conversation and from what you sent in the tab, so no separate history is
+stored, and they survive a restart: opening or restoring a chat reads all the
+messages you wrote in it, oldest first, also those beyond the loaded part of the
+chat. Claude, GLM and Gemini take them from the session they read anyway; Codex
+reads its turns' summaries, which hold each turn's first message without the
+commands and their output, so a message sent to a running turn is recalled only
+from the loaded part of the chat. Antigravity offers no history, so only the
+messages sent in the tab are recalled. A message you wrote several times is
+recalled once, at the place of its latest use. Alt+Down, or the arrow button
+beside the field, lists the messages as a combo box does, oldest first and the
+newest selected nearest the field. Each row shows a message's beginning: its
+first line, with `…` when it has more lines or does not fit; the tooltip shows
+all of it. Enter or a click puts the chosen message into the field as Page Up
+would, so Enter sends it unchanged and the arrow keys continue from it.
 
 Two agents never work on turns in the same directory, or in a directory and one
 of its subdirectories, at the same time. A turn holds its working directory and

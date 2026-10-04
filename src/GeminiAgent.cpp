@@ -357,6 +357,7 @@ void GeminiAgent::loadHistory(const QString &id, const QString &, bool older)
     }
     history_.reset(id, readHistory(filePath), kHistoryPageSize);
     emit historyLoaded(id, history_.visible(), history_.hasMore(), {});
+    emit userMessagesLoaded(id, history_.userMessages());
 }
 
 void GeminiAgent::sendNextPrompt()

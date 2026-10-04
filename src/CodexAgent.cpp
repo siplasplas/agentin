@@ -106,6 +106,7 @@ CodexAgent::CodexAgent(CodexConnection *connection, const QString &workingDirect
     connect(this, &AgentBackend::turnCompleted, this, [this] { turnWriteRoots_.clear(); });
     connect(connection, &CodexConnection::connected, this, [this] {
         if (historyPending_) loadHistory(historyThreadId_, {}, false);
+        if (!userMessagesPending_.isEmpty()) loadUserMessages(userMessagesPending_, {});
         // After a restart the chat continues its thread; a queued message waits until it is open.
         if (!reopenThreadId_.isEmpty()) {
             const QString id = reopenThreadId_;
@@ -327,6 +328,34 @@ void CodexAgent::loadHistory(const QString &id, const QString &, bool older)
     });
 }
 
+// Turn summaries carry each turn's first user message without the turn's commands and their output, so even a
+// long thread is read quickly. Messages sent to a running turn are not in them.
+void CodexAgent::loadUserMessages(const QString &id, const QString &)
+{
+    // Before the App Server is connected, the messages are read once it is.
+    userMessagesPending_ = connection_ && !connection_->isConnected() ? id : QString();
+    if (id.isEmpty() || !connection_ || !connection_->isConnected()) return;
+    requestUserMessages(id, {}, ++userMessagesGeneration_, std::make_shared<QStringList>());
+}
+
+void CodexAgent::requestUserMessages(const QString &id, const QString &cursor, quint64 generation,
+                                     const std::shared_ptr<QStringList> &messages)
+{
+    QJsonObject params{{"threadId", id}, {"limit", 100}, {"sortDirection", "asc"}, {"itemsView", "summary"}};
+    if (!cursor.isEmpty()) params.insert("cursor", cursor);
+    connection_->request("thread/turns/list", params, this,
+                         [this, id, generation, messages](const QJsonObject &result, const QString &error) {
+        if (generation != userMessagesGeneration_ || !error.isEmpty()) return;
+        for (const QJsonValue &turn : result.value("data").toArray())
+            for (const QJsonValue &item : turn.toObject().value("items").toArray())
+                for (const ChatEntry &entry : historyEntries(item.toObject()))
+                    if (entry.role == "user") messages->append(entry.text);
+        const QString next = result.value("nextCursor").toString();
+        if (!next.isEmpty() && connection_ && connection_->isConnected()) requestUserMessages(id, next, generation, messages);
+        else emit userMessagesLoaded(id, *messages);
+    });
+}
+
 void CodexAgent::refreshAfterCompaction()
 {
     if (refreshingHistory_ || steeringInFlight_ || threadId_.isEmpty() || !connection_ || !connection_->isConnected()) return;
@@ -372,6 +401,8 @@ void CodexAgent::cancelHistory()
 {
     ++historyGeneration_;
     historyPending_ = false;
+    ++userMessagesGeneration_;
+    userMessagesPending_.clear();
 }
 
 void CodexAgent::answerApproval(int id, ApprovalDecision decision)

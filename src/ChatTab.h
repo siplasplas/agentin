@@ -76,7 +76,9 @@ public:
     bool isLive() const { return live_; }
     bool hasMoreHistory() const { return hasMore_; }
     // The user's messages in this conversation as far as loaded, oldest first, for recalling them.
-    QStringList userMessages() const { return historyMessages_ + sentMessages_; }
+    // The messages the up and down keys recall: all the conversation's, when the agent reports them, then those
+    // of the loaded history and those sent here. The message field keeps the latest of repeated ones.
+    QStringList userMessages() const { return allUserMessages_ + historyMessages_ + sentMessages_; }
     // The user's messages with the agent's text answers, without tools and reasoning, oldest first.
     struct Exchange
     {
@@ -199,6 +201,7 @@ private:
     qsizetype historyRefreshCutoff_ = 0;
     QString historyRefreshQueuedText_;
     qsizetype historyRefreshSentCount_ = 0;
+    QStringList allUserMessages_;
     QStringList historyMessages_;
     QStringList sentMessages_;
     QList<Exchange> exchanges_;
