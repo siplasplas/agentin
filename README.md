@@ -817,7 +817,8 @@ where they really write. The decision is taken in this order:
    `dpkg -l`, `-L` and `-S`, `dpkg-query`, `apt-cache`, `apt list` and `show`,
    `rpm -q`, `pacman -Q`), and commands that write, build or run
    programs only inside the writable directories (`touch`, `cp`, `sed -i`,
-   `git add`, `cmake`, `cmake --install` with `--prefix`, `make`, `ctest`, the C
+   `git add`, `cmake`, `cmake --install` with `--prefix`, `make`, `ctest` (also with
+   a job count such as `-j$(nproc)`), `ldd` on a program of the project, the C
    and C++ compilers `gcc`, `g++`, `cc`, `c++`, `clang` and `clang++`, also
    versioned as `g++-14`, with flags from `$(pkg-config …)`, a program of the
    project given by its path, a redirection to a file there); `pkg-config`, `nm`,

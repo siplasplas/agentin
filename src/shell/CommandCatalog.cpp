@@ -683,11 +683,23 @@ struct OptionReader
     }
     void skipValue() { ++index; }
     // Skips a number that may follow options such as -j.
+    // Skips the number that may follow an option such as -j; one not known in advance, such as $(nproc), only
+    // sets how many jobs run, so it is taken as well.
     void skipNumber()
     {
-        if (index + 1 < arguments.size() && arguments.at(index + 1).known && isNumber(arguments.at(index + 1).text)) ++index;
+        if (index + 1 >= arguments.size()) return;
+        const Argument &next = arguments.at(index + 1);
+        if ((next.known && isNumber(next.text)) || (!next.known && !next.text.startsWith('-'))) ++index;
     }
 };
+
+// An option that sets the number of parallel jobs with a value not known in advance, as in -j$(nproc).
+bool unknownJobCount(const Argument &argument)
+{
+    if (argument.known) return false;
+    static const QRegularExpression jobs(R"(^(-j|-l|--parallel=|--jobs=)\S+$)");
+    return jobs.match(argument.text).hasMatch();
+}
 
 // Installing writes outside the project.
 bool installs(const QString &target)
@@ -714,6 +726,7 @@ Classification classifyCMake(const QList<Argument> &arguments)
         const QString directory = reader.path();
         for (++reader.index; !reader.atEnd(); ++reader.index) {
             const Argument &argument = reader.current();
+            if (unknownJobCount(argument)) continue;
             if (!argument.known) {
                 notKnown(result, argument);
                 continue;
@@ -840,7 +853,8 @@ Classification classifyCTest(const QList<Argument> &arguments)
     for (; !reader.atEnd(); ++reader.index) {
         const Argument &argument = reader.current();
         const QString &text = argument.text;
-        if (!argument.known) {
+        if (unknownJobCount(argument)) {
+        } else if (!argument.known) {
             notKnown(result, argument);
         } else if (text == "--test-dir") {
             directory = reader.path();
@@ -874,7 +888,8 @@ Classification classifyMake(const QString &program, const QList<Argument> &argum
     for (; !reader.atEnd(); ++reader.index) {
         const Argument &argument = reader.current();
         const QString &text = argument.text;
-        if (!argument.known) {
+        if (unknownJobCount(argument)) {
+        } else if (!argument.known) {
             notKnown(result, argument);
         } else if (text == "-C" || (!ninja && text == "--directory")) {
             directory = joined(directory, reader.path());
@@ -1161,6 +1176,20 @@ Classification classifyPackageQuery(const QString &program, const QList<Argument
     return result;
 }
 
+// ldd loads the programs it lists through the dynamic loader, which can run their code, so it counts as running
+// them: a program of the project runs without a question, any other asks.
+Classification classifyLdd(const QList<Argument> &arguments)
+{
+    Classification result;
+    result.effect = Effect::Execute;
+    for (const Argument &argument : arguments) {
+        if (!argument.known) notKnown(result, argument);
+        else if (!argument.text.startsWith('-')) result.executes.append(argument.text);
+    }
+    if (result.executes.isEmpty() && result.problems.isEmpty()) result.effect = Effect::None;
+    return result;
+}
+
 // set with the options that only change how the shell reports and stops.
 Classification classifySet(const QList<Argument> &arguments)
 {
@@ -1217,6 +1246,7 @@ const QHash<QString, Classifier> &classifiers()
         add("curl wget", classifyFetch);
         add("gcc g++ cc c++ clang clang++", plain(classifyCompiler));
         add("dpkg dpkg-query apt-cache apt rpm pacman", classifyPackageQuery);
+        add("ldd", plain(classifyLdd));
         return entries;
     }();
     return table;

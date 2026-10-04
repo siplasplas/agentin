@@ -156,7 +156,10 @@ void ShellApprovalTest::decisions_data()
           "pkg-config --modversion Qt6Core", "gcc -O2 -o /tmp/t main.c && /tmp/t",
           "dpkg -l | grep -i qt6-base-dev | awk '{print $2,$3}'", "dpkg -L libtomlplusplus3t64 | grep so", "dpkg -S /usr/bin/ls",
           "dpkg-query -W -f '${Version}' git", "apt-cache policy git", "apt list --installed", "apt show git",
-          "rpm -qa | grep qt", "rpm -qf /usr/bin/ls", "pacman -Qi git"})
+          "rpm -qa | grep qt", "rpm -qf /usr/bin/ls", "pacman -Qi git",
+          "cmake --build build -j$(nproc) 2>&1 | grep -E error", "cmake --build build -j $(nproc)", "make -j$(nproc)",
+          "make -j \"$(nproc)\" all", "ninja -C build -j$(nproc)", "ctest --test-dir build -j$(nproc)",
+          "ldd build/agentin | grep -i qt6"})
         row("allow", command);
     for (const char *command :
          {"/opt/x/bash -lc 'git add .'", "/opt/x/git add .", "git commit -m hello > /etc/log", "git add $FILES",
@@ -170,7 +173,8 @@ void ShellApprovalTest::decisions_data()
           "g++ main.cpp -o /usr/local/bin/x", "g++ -fplugin=./x.so main.cpp", "gcc @opts main.c", "g++ -B/tmp/x main.cpp",
           "g++ -Xclang -load -Xclang x.so main.cpp", "cd /srv/other && git add a.cpp && git commit -m x",
           "git -C /srv/other commit -m x", "cmake --build /usr/local/x -j4", "cmake --install build", "cmake --install build --prefix /usr/local",
-          "PKG_CONFIG_PATH=./pc g++ -c x.cpp", "dpkg -i x.deb", "dpkg --configure -a", "apt update", "rpm -e foo",
+          "PKG_CONFIG_PATH=./pc g++ -c x.cpp", "ldd /usr/bin/ls", "ldd $(which git)", "make -C $(cat dir)",
+          "cmake --build $(cat dir) -j4", "dpkg -i x.deb", "dpkg --configure -a", "apt update", "rpm -e foo",
           "apt-cache gencaches", "g++ -c x.cpp $(pkg-config --cflags $(cat f))", "cd /etc && g++ -c x.cpp"})
         row("ask", command);
     for (const char *command :
