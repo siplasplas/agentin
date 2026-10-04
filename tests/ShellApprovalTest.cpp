@@ -153,7 +153,10 @@ void ShellApprovalTest::decisions_data()
           "HOME=/x build/tests/t; git status",
           "g++ -std=c++17 -fsyntax-only -Iinclude $(pkg-config --cflags Qt6Core Qt6Gui) /tmp/x.cpp 2>&1 | grep error",
           "cmake --install build --prefix /tmp/prefix", "clang++-18 -c src/a.cpp -o build/a.o", "nm -C build/x | head",
-          "pkg-config --modversion Qt6Core", "gcc -O2 -o /tmp/t main.c && /tmp/t"})
+          "pkg-config --modversion Qt6Core", "gcc -O2 -o /tmp/t main.c && /tmp/t",
+          "dpkg -l | grep -i qt6-base-dev | awk '{print $2,$3}'", "dpkg -L libtomlplusplus3t64 | grep so", "dpkg -S /usr/bin/ls",
+          "dpkg-query -W -f '${Version}' git", "apt-cache policy git", "apt list --installed", "apt show git",
+          "rpm -qa | grep qt", "rpm -qf /usr/bin/ls", "pacman -Qi git"})
         row("allow", command);
     for (const char *command :
          {"/opt/x/bash -lc 'git add .'", "/opt/x/git add .", "git commit -m hello > /etc/log", "git add $FILES",
@@ -167,14 +170,16 @@ void ShellApprovalTest::decisions_data()
           "g++ main.cpp -o /usr/local/bin/x", "g++ -fplugin=./x.so main.cpp", "gcc @opts main.c", "g++ -B/tmp/x main.cpp",
           "g++ -Xclang -load -Xclang x.so main.cpp", "cd /srv/other && git add a.cpp && git commit -m x",
           "git -C /srv/other commit -m x", "cmake --build /usr/local/x -j4", "cmake --install build", "cmake --install build --prefix /usr/local",
-          "PKG_CONFIG_PATH=./pc g++ -c x.cpp", "g++ -c x.cpp $(pkg-config --cflags $(cat f))", "cd /etc && g++ -c x.cpp"})
+          "PKG_CONFIG_PATH=./pc g++ -c x.cpp", "dpkg -i x.deb", "dpkg --configure -a", "apt update", "rpm -e foo",
+          "apt-cache gencaches", "g++ -c x.cpp $(pkg-config --cflags $(cat f))", "cd /etc && g++ -c x.cpp"})
         row("ask", command);
     for (const char *command :
          {"git -C /tmp push origin main", "git add . && git push", "bash -lc 'git add .; git push'", "sudo apt install something",
           "env LANG=C sudo true", "exec env LANG=C sudo true", "git commit -m \"$(sudo true)\"", "echo `sudo true`",
           "timeout 5 sudo ls", "git -c x=y push", "case $x in a) sudo ls;; esac", "gh -R owner/repo pr create --title x",
           "gh api -X POST /repos/x", "gh api /repos/x -f name=y", "glab mr merge 5", "git lfs push origin main",
-          "apt-get -y install something", "dnf install something", "pacman -Syu", "apt-get purge something", "touch .gi*/x",
+          "apt-get -y install something", "dnf install something", "pacman -Syu", "pacman -Syu --noconfirm",
+          "apt-get purge something", "touch .gi*/x",
           "cp x .git/hooks/", ".git/hooks/pre-commit", "git log > .git/x", "for d in a b; do sudo rm $d; done",
           "if true; then git push; fi"})
         row("deny", command);

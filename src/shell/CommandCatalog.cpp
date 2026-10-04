@@ -1111,6 +1111,56 @@ Classification classifyFetch(const QString &program, const QList<Argument> &argu
     return result;
 }
 
+// Queries of the system's package managers only read their databases: dpkg -l, -L, -s and -S, dpkg-query,
+// apt-cache, apt list and show, rpm -q, pacman -Q, -Si and -Ss. Anything else, such as installing or removing,
+// is left unknown, so it asks or meets the rules that decline it.
+Classification classifyPackageQuery(const QString &program, const QList<Argument> &arguments)
+{
+    Classification result;
+    for (const Argument &argument : arguments)
+        if (!argument.known) {
+            notKnown(result, argument);
+            return result;
+        }
+    QStringList words;
+    for (const Argument &argument : arguments) words.append(argument.text);
+    const QString first = words.value(0);
+    const QStringList rest = words.mid(1);
+    const auto reads = [&result](const QStringList &files) {
+        result.effect = Effect::Read;
+        for (const QString &file : files)
+            if (!file.startsWith('-')) result.reads.append(file);
+    };
+    if (program == "dpkg-query") {
+        result.effect = Effect::Read;
+    } else if (program == "dpkg") {
+        static const QStringList queries = split("-l --list -L --listfiles -s --status -S --search -p --print-avail "
+                                                 "--get-selections --compare-versions --print-architecture "
+                                                 "--print-foreign-architectures --version --help -W --show");
+        // These read a package file.
+        static const QStringList files = split("-c --contents -I --info -f --field");
+        if (queries.contains(first)) result.effect = Effect::Read;
+        else if (files.contains(first)) reads(rest.mid(0, 1));
+    } else if (program == "apt-cache") {
+        static const QStringList queries = split("search show showpkg showsrc policy depends rdepends madison pkgnames stats "
+                                                 "dump dumpavail unmet --help --version");
+        if (queries.contains(first)) result.effect = Effect::Read;
+    } else if (program == "apt") {
+        static const QStringList queries = split("list show search policy depends rdepends madison showsrc --help --version");
+        if (queries.contains(first)) result.effect = Effect::Read;
+    } else if (program == "rpm") {
+        // -q and its combinations, such as -qa, -qi, -ql and -qf, and the verification -V.
+        if (first == "--query" || first == "--verify" || first == "-V" || first == "--version"
+            || (first.startsWith("-q") && !first.startsWith("--")))
+            result.effect = Effect::Read;
+    } else if (program == "pacman") {
+        if (first.startsWith("-Q") || first == "--query" || first == "-Si" || first == "-Ss" || first == "-Sl"
+            || first == "-V" || first == "--version")
+            result.effect = Effect::Read;
+    }
+    return result;
+}
+
 // set with the options that only change how the shell reports and stops.
 Classification classifySet(const QList<Argument> &arguments)
 {
@@ -1166,6 +1216,7 @@ const QHash<QString, Classifier> &classifiers()
         add("set", plain(classifySet));
         add("curl wget", classifyFetch);
         add("gcc g++ cc c++ clang clang++", plain(classifyCompiler));
+        add("dpkg dpkg-query apt-cache apt rpm pacman", classifyPackageQuery);
         return entries;
     }();
     return table;

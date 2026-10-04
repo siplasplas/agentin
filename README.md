@@ -809,7 +809,9 @@ where they really write. The decision is taken in this order:
    the repository git works in, gets no such line and can only be allowed once.
 4. **What the command does**, when no line matches. Passing without a
    question: commands that only read (`cat`, `grep`, `ls`, `sed -n`, `git log`,
-   `git diff` and the like, anywhere), and commands that write, build or run
+   `git diff` and the like, anywhere, and the queries of the package managers:
+   `dpkg -l`, `-L` and `-S`, `dpkg-query`, `apt-cache`, `apt list` and `show`,
+   `rpm -q`, `pacman -Q`), and commands that write, build or run
    programs only inside the writable directories (`touch`, `cp`, `sed -i`,
    `git add`, `cmake`, `cmake --install` with `--prefix`, `make`, `ctest`, the C
    and C++ compilers `gcc`, `g++`, `cc`, `c++`, `clang` and `clang++`, also
