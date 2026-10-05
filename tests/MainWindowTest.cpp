@@ -15,6 +15,7 @@
 #include <QProcess>
 #include <QToolButton>
 
+#include <mrutabwidget.h>
 #include <qxfiledialog.h>
 #include <QAction>
 #include <QCheckBox>
@@ -43,6 +44,7 @@
 #include <QTextBlock>
 #include <QRadioButton>
 #include <QScrollBar>
+#include <QSpinBox>
 #include <QtTest>
 
 #include <diffmerge/FileDiffWidget.h>
@@ -86,6 +88,7 @@ private slots:
     void codexSessionApprovalsWithdrawn();
     void conversationRenaming();
     void tabsKeepTheirScrollPosition();
+    void tabNamesFollowOptions();
     void changesWindowShowsDiff();
     void recallAllCodexMessages();
 };
@@ -2594,6 +2597,89 @@ for line in sys.stdin:
     QCOMPARE(first.value("itemsView").toString(), QString("summary"));
     QCOMPARE(first.value("sortDirection").toString(), QString("asc"));
     QCOMPARE(QJsonDocument::fromJson(log.readLine()).object().value("cursor").toString(), QString("page-2"));
+}
+
+// A tab is named by its directory's last part and its title, cut to 32 characters, without the agent; the options
+// add the agent, change the title's length or leave the title out, which keeps the directory. Announcements without
+// the agent speak about the chat.
+void MainWindowTest::tabNamesFollowOptions()
+{
+    const QString python = QStandardPaths::findExecutable("python3");
+    if (python.isEmpty()) QSKIP("Python 3 is unavailable");
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString fakeBridge = directory.filePath("fake-claude.py");
+    QFile script(fakeBridge);
+    QVERIFY(script.open(QIODevice::WriteOnly | QIODevice::Text));
+    script.write(R"PY(import json, sys
+print(json.dumps({"type": "ready"}), flush=True)
+for line in sys.stdin:
+    pass
+)PY");
+    script.close();
+    // The options are saved beside the index, in the temporary directory, and start from the defaults.
+    MainWindow window("/nonexistent/codex", directory.path(), python, fakeBridge, "gemini", nullptr,
+                      directory.filePath("codex-conversations.json"));
+    window.show();
+    QVERIFY(QDir(directory.path()).mkpath("first"));
+    startChat(window, "Claude", directory.filePath("first"));
+    auto *tabs = window.findChild<QTabWidget *>("chatTabs");
+    QVERIFY(tabs);
+    ChatTab *tab = nullptr;
+    for (ChatTab *candidate : window.findChildren<ChatTab *>())
+        if (candidate->workingDirectory().endsWith("first")) tab = candidate;
+    QVERIFY(tab);
+    const QString title = "Rename a conversation from the tree by hand";
+    tab->setTitle(title);
+    const int index = tabs->indexOf(qobject_cast<QWidget *>(tab->parent()));
+    QCOMPARE(tabs->tabText(index), "first · " + title.left(31) + QChar(0x2026));
+
+    QAction *options = nullptr;
+    for (QAction *action : window.findChildren<QAction *>())
+        if (action->text() == "Options…") options = action;
+    QVERIFY(options);
+    // Changes the options in the dialog that the action opens, then accepts it.
+    const auto setOptions = [&](const std::function<void(QDialog *)> &change) {
+        bool changed = false;
+        QTimer::singleShot(0, &window, [&] {
+            auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+            QVERIFY(dialog);
+            change(dialog);
+            dialog->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Ok)->click();
+            changed = true;
+        });
+        options->trigger();
+        QVERIFY(changed);
+    };
+    setOptions([](QDialog *dialog) {
+        auto *agent = dialog->findChild<QCheckBox *>("tabNameAgent");
+        auto *folder = dialog->findChild<QCheckBox *>("tabNameDirectory");
+        auto *length = dialog->findChild<QSpinBox *>("tabNameTitleLength");
+        QVERIFY(agent && folder && length);
+        QVERIFY(!agent->isChecked());
+        QVERIFY(folder->isChecked());
+        QCOMPARE(length->value(), 32);
+        agent->setChecked(true);
+        folder->setChecked(false);
+        length->setValue(0);
+        // Without a title the directory names the chat, and it cannot be left out.
+        QVERIFY(folder->isChecked());
+        QVERIFY(!folder->isEnabled());
+    });
+    QCOMPARE(tabs->tabText(index), QString("Claude: first"));
+    QCOMPARE(qobject_cast<MruTabWidget *>(tabs)->tabPopupText(index), QString("Claude: first"));
+    setOptions([](QDialog *dialog) {
+        auto *folder = dialog->findChild<QCheckBox *>("tabNameDirectory");
+        dialog->findChild<QSpinBox *>("tabNameTitleLength")->setValue(10);
+        QVERIFY(folder->isEnabled());
+        folder->setChecked(false);
+    });
+    QCOMPARE(tabs->tabText(index), "Claude: " + title.left(9) + QChar(0x2026));
+
+    QCOMPARE(Notifier::spokenText(Notifier::Event::Finished, "en", {}, "first, Rename a"),
+             QString("first, Rename a finished"));
+    QCOMPARE(Notifier::spokenText(Notifier::Event::Waiting, "pl", "Claude", "first, Rename a"),
+             QString("Claude czeka na ciebie: first, Rename a"));
 }
 
 QTEST_MAIN(MainWindowTest)

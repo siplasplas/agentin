@@ -77,14 +77,10 @@ QList<qint16> leadInSamples(qsizetype count)
 }
 constexpr int kSampleRate = 44100;
 
-// Long chat titles are cut at a word so that a spoken announcement stays short.
+// The chat's name on one line; the window has cut its title to the length chosen in the options.
 QString spokenTitle(const QString &title)
 {
-    constexpr int limit = 32;
-    const QString text = title.simplified();
-    if (text.size() <= limit) return text;
-    const int space = text.lastIndexOf(' ', limit);
-    return text.left(space > limit / 2 ? space : limit);
+    return title.simplified();
 }
 }
 
@@ -172,7 +168,8 @@ void Notifier::turnFinished(const QString &agent, const QString &chat, bool succ
     const qint64 minutes = durationMs / 60000;
     const QString length = minutes > 0 ? QString("%1 min").arg(minutes) : QString("%1 s").arg(durationMs / 1000);
     if (settings_.popups) {
-        popup(agent + (succeeded ? " finished" : " stopped with an error"), "\"" + chat + "\" after " + length);
+        popup((agent.isEmpty() ? chat : agent) + (succeeded ? " finished" : " stopped with an error"),
+              "\"" + chat + "\" after " + length);
     }
     if (!settings_.muted)
         announce(settings_, succeeded ? Event::Finished : Event::Failed, agent, chat,
@@ -207,7 +204,9 @@ void Notifier::announceWaiting(const QString &key)
 {
     const auto found = waiting_.constFind(key);
     if (found == waiting_.constEnd()) return;
-    if (settings_.popups) popup(found->agent + " is waiting for you", "\"" + found->chat + "\": " + found->request);
+    if (settings_.popups)
+        popup((found->agent.isEmpty() ? found->chat : found->agent) + " is waiting for you",
+              "\"" + found->chat + "\": " + found->request);
     if (!settings_.muted) {
         announce(settings_, Event::Waiting, found->agent, found->chat, settings_.waitingSound);
         if (isPlaying()) announcedWaitingKey_ = key;
@@ -244,6 +243,8 @@ QString Notifier::spokenText(Event event, const QString &language, const QString
     case Event::CompactionStarted: sentence = polish ? "%1 kompaktuje" : "%1 is compacting"; break;
     case Event::CompactionFinished: sentence = polish ? "%1 skończył kompaktowanie" : "%1 finished compacting"; break;
     }
+    // Without the agent's name, the chat's name is what the sentence is about.
+    if (agent.isEmpty()) return sentence.arg(spokenTitle(chat));
     sentence = sentence.arg(agent);
     return chat.trimmed().isEmpty() ? sentence : sentence + ": " + spokenTitle(chat);
 }

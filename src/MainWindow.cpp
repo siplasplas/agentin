@@ -19,6 +19,7 @@
 #include <QCloseEvent>
 #include <QComboBox>
 #include <QGridLayout>
+#include <QGroupBox>
 #include <QGuiApplication>
 #include <QClipboard>
 #include <QFrame>
@@ -1382,6 +1383,11 @@ void MainWindow::loadSettings()
     const QString enterKey = settings.value("enterKey").toString();
     input_->setShortMessageLength(settings.value("enterSendsUpTo").toInt(60));
     undoAfterSend_ = settings.value("undoAfterSend").toBool(true);
+    const QJsonObject tabNames = settings.value("tabNames").toObject();
+    tabShowsAgent_ = tabNames.value("agent").toBool(false);
+    tabShowsDirectory_ = tabNames.value("directory").toBool(true);
+    tabTitleLength_ = qBound(0, tabNames.value("titleLength").toInt(32), 200);
+    if (tabTitleLength_ == 0) tabShowsDirectory_ = true;
     experimentalAgents_ = settings.value("experimentalAgents").toBool(false);
     openRules_ = FileOpener::rulesFromJson(settings.value("openWith").toArray());
     loadApprovals();
@@ -1461,6 +1467,9 @@ void MainWindow::saveSettings()
         || file.write(QJsonDocument(QJsonObject{{"version", 1}, {"enterKey", enterKey},
                                                          {"enterSendsUpTo", input_->shortMessageLength()},
                                                          {"undoAfterSend", undoAfterSend_},
+                                                         {"tabNames", QJsonObject{{"agent", tabShowsAgent_},
+                                                                                  {"directory", tabShowsDirectory_},
+                                                                                  {"titleLength", tabTitleLength_}}},
                                                          {"experimentalAgents", experimentalAgents_},
                                                          {"openWith", FileOpener::rulesToJson(openRules_)},
                                                          {"fastChats", QJsonArray::fromStringList(fastChats_)},
@@ -1524,6 +1533,33 @@ void MainWindow::showOptionsDialog()
     updateShortLength();
     layout->addLayout(enterForm);
     layout->addWidget(new QLabel("Shift+Enter always starts a new line and Ctrl+Enter always sends.", &dialog));
+    // The tree keeps showing the agent and the title; these choose what tabs and announcements say.
+    auto *namesBox = new QGroupBox("Tab names and spoken announcements", &dialog);
+    auto *namesForm = new QFormLayout(namesBox);
+    auto *nameAgent = new QCheckBox("Agent name", namesBox);
+    nameAgent->setObjectName("tabNameAgent");
+    nameAgent->setChecked(tabShowsAgent_);
+    auto *nameDirectory = new QCheckBox("Last part of the working directory", namesBox);
+    nameDirectory->setObjectName("tabNameDirectory");
+    nameDirectory->setChecked(tabShowsDirectory_);
+    auto *nameTitle = new QSpinBox(namesBox);
+    nameTitle->setObjectName("tabNameTitleLength");
+    nameTitle->setRange(0, 200);
+    nameTitle->setSuffix(" characters");
+    nameTitle->setSpecialValueText("No title");
+    nameTitle->setValue(tabTitleLength_);
+    nameTitle->setToolTip("The chat's title cut to this length; without it the directory is always shown");
+    namesForm->addRow(nameAgent);
+    namesForm->addRow(nameDirectory);
+    namesForm->addRow("Title:", nameTitle);
+    // The directory or the title always names the chat.
+    const auto keepOneName = [nameDirectory, nameTitle] {
+        if (nameTitle->value() == 0) nameDirectory->setChecked(true);
+        nameDirectory->setEnabled(nameTitle->value() > 0);
+    };
+    connect(nameTitle, QOverload<int>::of(&QSpinBox::valueChanged), &dialog, keepOneName);
+    keepOneName();
+    layout->addWidget(namesBox);
     layout->addWidget(new QLabel("Model and reasoning effort that new chats start with:", &dialog));
     auto *form = new QFormLayout;
     layout->addLayout(form);
@@ -1585,6 +1621,10 @@ void MainWindow::showOptionsDialog()
     input_->setEnterPolicy(MessageInput::EnterPolicy(enterInput->currentData().toInt()));
     input_->setShortMessageLength(shortLength->value());
     undoAfterSend_ = undoAfterSend->isChecked();
+    tabShowsAgent_ = nameAgent->isChecked();
+    tabShowsDirectory_ = nameDirectory->isChecked();
+    tabTitleLength_ = nameTitle->value();
+    for (int i = 0; i < tabs_->count(); ++i) updateTab(tabs_->widget(i));
     setExperimentalAgentsEnabled(experimental->isChecked());
     for (const Row &row : rows) {
         QString model = row.model->currentData().toString();
@@ -1654,10 +1694,11 @@ void MainWindow::showNotificationsDialog()
         chosen.speechSlowness = slowness->value();
         return chosen;
     };
-    // Spoken examples name the current chat, or only begin the sentence when no chat is open.
+    // Spoken examples name the current chat as its announcements will, with the tab name options; without an
+    // open chat, an example agent or directory.
     const ChatTab *current = currentTab();
-    const QString exampleAgent = current ? current->provider()->name() : QString("Codex");
-    const QString exampleChat = current ? current->title() : QString();
+    const QString exampleAgent = current ? announcedAgent(current) : (tabShowsAgent_ ? QString("Codex") : QString());
+    const QString exampleChat = current ? chatName(current, ", ", true) : (tabShowsAgent_ ? QString() : QString("agentin"));
     // Each sound is a built-in one, speech by a voice of the language, a file chosen or typed, or none.
     const auto soundValue = [](const QComboBox *box) {
         const int index = box->findText(box->currentText());
@@ -2802,13 +2843,13 @@ QWidget *MainWindow::addChatTab(AgentProvider *selected, const QString &workingD
         }
         const QString what = request->approval ? request->description.section('\n', 0, 0).trimmed()
                                                : request->questions.value(request->current).text;
-        notifier_->waitingStarted(key, request->id, tab->provider()->name(), tab->title().left(60), what);
+        notifier_->waitingStarted(key, request->id, announcedAgent(tab), chatName(tab, ", ", true), what);
     });
     connect(tab, &ChatTab::turnEnded, this, [this, tab](bool succeeded, qint64 durationMs) {
-        notifier_->turnFinished(tab->provider()->name(), tab->title().left(60), succeeded, durationMs);
+        notifier_->turnFinished(announcedAgent(tab), chatName(tab, ", ", true), succeeded, durationMs);
     });
     connect(tab, &ChatTab::compactionChanged, this, [this, tab](bool started) {
-        notifier_->compactionChanged(tab->provider()->name(), tab->title().left(60), started);
+        notifier_->compactionChanged(announcedAgent(tab), chatName(tab, ", ", true), started);
     });
     connect(tab, &ChatTab::userMessagesChanged, this, [this, page, tab] {
         if (tabs_->currentWidget() == page) input_->setHistory(tab->userMessages());
@@ -3001,14 +3042,43 @@ void MainWindow::showCurrentTab()
     updateStatus();
 }
 
+QString MainWindow::chatName(const ChatTab *tab, const QString &separator, bool spoken) const
+{
+    QStringList parts;
+    if (tabShowsDirectory_ || tabTitleLength_ <= 0) {
+        const QString directory = QFileInfo(tab->workingDirectory()).fileName();
+        parts.append(directory.isEmpty() ? QDir::toNativeSeparators(tab->workingDirectory()) : directory);
+    }
+    if (tabTitleLength_ > 0) {
+        // A spoken title is cut at a word and without an ellipsis, which a voice would read out.
+        const QString title = tab->title().simplified();
+        if (!spoken) {
+            parts.append(shortPreview(title, tabTitleLength_));
+        } else if (title.size() <= tabTitleLength_) {
+            parts.append(title);
+        } else {
+            const int space = int(title.lastIndexOf(' ', tabTitleLength_));
+            parts.append(title.left(space > tabTitleLength_ / 2 ? space : tabTitleLength_));
+        }
+    }
+    return parts.join(separator);
+}
+
+QString MainWindow::announcedAgent(const ChatTab *tab) const
+{
+    return tabShowsAgent_ ? tab->provider()->name() : QString();
+}
+
 void MainWindow::updateTab(QWidget *page)
 {
     ChatTab *tab = chatTab(page);
     const int index = tabs_->indexOf(page);
     if (!tab || index < 0) return;
-    tabs_->setTabText(index, tab->provider()->name() + ": " + shortPreview(tab->title(), 32));
+    const QString name = chatName(tab, " · ", false);
+    tabs_->setTabText(index, tabShowsAgent_ ? tab->provider()->name() + ": " + name : name);
     tabs_->setTabToolTip(index, tab->headerText());
-    tabs_->setTabPopupText(index, tab->headerText());
+    // The Ctrl+Tab list names a tab as the tab does.
+    tabs_->setTabPopupText(index, tabs_->tabText(index));
     tabs_->setTabKey(page, tab->key());
     tabs_->setTabBusy(page, tab->agent()->isResponding() || tab->isWaiting());
     if (page == tabs_->currentWidget()) {

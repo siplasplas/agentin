@@ -119,6 +119,9 @@ private:
     ChatTab *currentTab() const;
     void showCurrentTab();
     void updateTab(QWidget *page);
+    // The chat's name without its agent, as its tab and the announcements show it.
+    QString chatName(const ChatTab *tab, const QString &separator, bool spoken) const;
+    QString announcedAgent(const ChatTab *tab) const;
     void appendText(const QString &text);
     void appendLine(const QString &text);
     void updateStatus();
@@ -224,6 +227,12 @@ private:
     QStringList recentDirectories_;
     // Ctrl+Z in the message field can bring back the message just sent.
     bool undoAfterSend_ = true;
+    // What names a chat on its tab and in spoken announcements: the agent's name, the last part of the
+    // directory, and the title cut to this many characters (0 leaves it out). The directory or the title is
+    // always there.
+    bool tabShowsAgent_ = false;
+    bool tabShowsDirectory_ = true;
+    int tabTitleLength_ = 32;
     bool experimentalAgents_ = false;
     // Which program opens changed files, by file name pattern.
     QList<OpenRule> openRules_;

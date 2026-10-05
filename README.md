@@ -231,7 +231,14 @@ continue once the App Server is connected. The preview tab is not saved. When a
 directory is given with `-C`, its new chat opens next to the reopened tabs.
 
 Chats in different tabs run independently, also several chats with the same
-agent. All Codex chats share one App Server process. A tab whose agent is
+agent. A tab is named by the last part of its working directory and the chat's
+title cut to 32 characters, for example `agentin · Rename a conversation fr…`;
+**Settings → Options…** chooses whether the agent's name comes first, whether
+the directory is shown and how long the title is (or no title, which keeps the
+directory). Spoken announcements name the chat the same way, and without the
+agent's name the chat is what they speak about ("agentin, Rename a conversation
+finished"). The conversation tree keeps showing the agent and the title. All
+Codex chats share one App Server process. A tab whose agent is
 responding shows a busy marker, and a background tab that receives output is
 marked until you switch to it. Closing a tab while its turn runs names the chat
 and asks whether to stop the turn and close the tab. Quitting the application
