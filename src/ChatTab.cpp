@@ -741,6 +741,10 @@ void ChatTab::showHistory(const QList<ChatEntry> &entries, bool hasMore, const Q
             historyMessages_.append(entry.text);
             exchanges_.append({entry.text, {}});
             blocks.append("You: " + entry.text);
+        } else if (entry.role == "summary") {
+            // The summary a compacted conversation continues from: long, and not the user's, so it starts folded.
+            historyTools.append(blocks.size());
+            blocks.append("[Context compacted: summary of the earlier conversation]\n" + entry.text);
         } else if (entry.role == "tool") {
             historyTools.append(blocks.size());
             const QString heading = entry.text.section('\n', 0, 0).left(120);

@@ -55,6 +55,9 @@ EDIT_GUIDANCE = ("Change files with the Edit, MultiEdit and Write tools, not wit
                  "sed or output redirection. Edits of files in the working directory and the allowed directories "
                  "are approved automatically; shell commands that change files usually need the user's approval.")
 
+# How the summary a compacted session continues from begins.
+COMPACT_SUMMARY_START = "This session is being continued from a previous conversation"
+
 
 def describe_permission_updates(updates):
     """Describes the CLI's suggested permission updates for the user, or returns an empty string."""
@@ -698,15 +701,22 @@ def message_entries(message):
     """Converts one SDK session message into simple chat entries for the Qt client."""
     payload = message.message if isinstance(message.message, dict) else {}
     content = payload.get("content")
+
+    def role_for(text):
+        # Claude Code records the summary a compacted session continues from in the user's role.
+        if message.type == "user" and text.lstrip().startswith(COMPACT_SUMMARY_START):
+            return "summary"
+        return message.type
+
     if isinstance(content, str):
-        return [{"role": message.type, "text": content}] if content.strip() else []
+        return [{"role": role_for(content), "text": content}] if content.strip() else []
     entries = []
     for index, block in enumerate(content if isinstance(content, list) else []):
         if not isinstance(block, dict):
             continue
         kind = block.get("type")
         if kind == "text" and block.get("text", "").strip():
-            entries.append({"role": message.type, "text": block["text"]})
+            entries.append({"role": role_for(block["text"]), "text": block["text"]})
         elif kind == "thinking" and block.get("thinking", "").strip():
             item_id = payload.get("id") or getattr(message, "uuid", "history")
             entries.append({"role": "reasoning", "id": f"{item_id}:{index}", "text": block["thinking"]})

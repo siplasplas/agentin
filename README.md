@@ -417,6 +417,10 @@ starting another turn. Messages queued before or during the refresh stay visible
 without being appended a second time. Older messages remain available through
 **Show earlier messages**. A refresh error leaves the existing transcript intact.
 
+A Claude or GLM conversation read back after Claude Code compacted it starts from
+the summary of the earlier conversation. The chat shows that summary folded, under
+the heading "Context compacted", like a tool's output, not as the user's message.
+
 In a Codex chat, **Fast** after the **Compact** token counter requests faster model responses
 with higher limit usage, where supported. It applies from the next turn and is
 kept separately for each chat. Each conversation remembers its latest choice,
