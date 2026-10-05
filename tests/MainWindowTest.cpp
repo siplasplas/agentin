@@ -1747,7 +1747,9 @@ if "--read-session" in sys.argv:
     assert sys.argv[sys.argv.index("--read-session") + 1] == "claude-1"
     limit = int(sys.argv[sys.argv.index("--limit") + 1])
     # Texts Claude Code records as the user's though the user did not write them.
-    entries = [{"role": "user", "text": "<task-notification>\n<task-id>b1</task-id>\n<status>completed</status>"},
+    entries = [{"role": "summary", "text": "This session is being continued from a previous conversation.\n"
+                                           "Summary: earlier work"},
+               {"role": "user", "text": "<task-notification>\n<task-id>b1</task-id>\n<status>completed</status>"},
                {"role": "user", "text": "[Request interrupted by user for tool use]"}]
     for i in range(21):
         text = f"Question {i}" + ("\nwith a second line" if i == 5 else "")
@@ -1827,6 +1829,11 @@ if "--list-sessions" in sys.argv:
     QTest::mouseClick(loadEarlier, Qt::LeftButton);
     QTRY_VERIFY(chat->toPlainText().contains("You: Question 0"));
     QVERIFY(!loadEarlier->isVisible());
+    // The summary a compacted session continues from is folded under its heading, not shown as the user's.
+    QVERIFY(!chat->toPlainText().contains("You: This session"));
+    const QString text = chat->toPlainText();
+    QVERIFY(chat->document()->findBlock(text.indexOf("[Context compacted")).isVisible());
+    QTRY_VERIFY(!chat->document()->findBlock(text.indexOf("Summary: earlier work")).isVisible());
     QVERIFY(index.open(QIODevice::ReadOnly));
     const QJsonArray saved = QJsonDocument::fromJson(index.readAll()).object().value("threads").toArray();
     QCOMPARE(saved.size(), 1);

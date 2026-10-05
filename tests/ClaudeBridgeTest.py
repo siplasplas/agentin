@@ -181,6 +181,18 @@ class ClaudeBridgeTest(unittest.IsolatedAsyncioTestCase):
             })
             reading.assert_called_once_with("session-1", directory="/tmp/project")
 
+    async def test_compaction_summary_is_not_the_users_message(self):
+        summary = "This session is being continued from a previous conversation that ran out of context."
+        self.assertEqual(bridge_module.message_entries(Message(type="user", message={"content": summary})),
+                         [{"role": "summary", "text": summary}])
+        self.assertEqual(bridge_module.message_entries(Message(type="user", message={
+            "content": [{"type": "text", "text": summary}]})), [{"role": "summary", "text": summary}])
+        # Only Claude Code's own summary: the same words from the assistant or later in a message stay as they are.
+        self.assertEqual(bridge_module.message_entries(Message(type="assistant", message={
+            "content": [{"type": "text", "text": summary}]})), [{"role": "assistant", "text": summary}])
+        self.assertEqual(bridge_module.message_entries(Message(type="user", message={"content": "Quote: " + summary})),
+                         [{"role": "user", "text": "Quote: " + summary}])
+
     async def test_reads_session_head_for_naming(self):
         messages = [
             Message(type="user", message={"role": "user", "content": "First question"}),
