@@ -186,6 +186,42 @@ QIcon stopIcon(int size, qreal ratio)
 }
 }
 
+namespace {
+// MruTabWidget switches tabs with Ctrl+Tab only when the keys reach it, but the message field, the chat and the
+// terminal take Ctrl+Tab for themselves. The keys pressed anywhere in the main window go to the tabs instead:
+// Ctrl+Tab and Ctrl+Shift+Tab, and the release of Ctrl, which chooses the tab. The tabs' own popup, a window of
+// its own, handles its keys itself.
+class CtrlTabForwarder : public QObject
+{
+public:
+    CtrlTabForwarder(MruTabWidget *tabs, QWidget *window) : QObject(window), tabs_(tabs), window_(window)
+    {
+        tabs->installEventFilter(tabs);  // MruTabWidget handles the keys sent to it through its own filter
+        qApp->installEventFilter(this);
+    }
+
+protected:
+    bool eventFilter(QObject *watched, QEvent *event) override
+    {
+        if (event->type() != QEvent::KeyPress && event->type() != QEvent::KeyRelease) return false;
+        auto *widget = qobject_cast<QWidget *>(watched);
+        if (!widget || widget == tabs_ || widget->window() != window_) return false;
+        auto *key = static_cast<QKeyEvent *>(event);
+        const bool tab = event->type() == QEvent::KeyPress && (key->modifiers() & Qt::ControlModifier)
+                         && (key->key() == Qt::Key_Tab || key->key() == Qt::Key_Backtab);
+        const bool control = event->type() == QEvent::KeyRelease && key->key() == Qt::Key_Control;
+        if (!tab && !control) return false;
+        const bool handled = QCoreApplication::sendEvent(tabs_, event);
+        // The release of Ctrl still reaches the focused widget.
+        return tab && handled;
+    }
+
+private:
+    MruTabWidget *tabs_;
+    QWidget *window_;
+};
+}
+
 MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirectory,
                        const QString &claudePython, const QString &claudeScript,
                        const QString &geminiProgram, QWidget *parent, const QString &codexIndexPath,
@@ -317,6 +353,7 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     tabs_->setTabsClosable(true);
     tabs_->setMovable(true);
     tabs_->setUsesScrollButtons(true);
+    new CtrlTabForwarder(tabs_, this);
     modelInput_ = new QComboBox(this);
     modelInput_->setObjectName("modelSelect");
     modelInput_->setToolTip("Model for the next messages in this chat");

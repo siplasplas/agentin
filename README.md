@@ -240,7 +240,10 @@ many run, lists them and asks whether to stop them and quit; otherwise it closes
 at once. In both questions Cancel is the default, so Enter keeps everything
 running. While a changes window is open, the
 close button and Alt+F4 close the changes windows instead, and `quit` still quits. Ctrl+Tab switches tabs in most recently used
-order. Returning to a tab shows its chat where you left it: at the end, where new text
+order, wherever the focus is in the window, also in the message field, the chat
+or the terminal: pressed and released quickly it goes back to the previous tab;
+held, or pressed again, it lists the tabs, most recent first, and Ctrl+Tab and
+Ctrl+Shift+Tab move through the list until Ctrl is released. Returning to a tab shows its chat where you left it: at the end, where new text
 keeps it, or at the line you scrolled to.
 
 In a Codex tab, choose the model and reasoning effort in the chat header.
