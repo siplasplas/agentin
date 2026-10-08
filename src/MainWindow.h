@@ -33,6 +33,7 @@ class QComboBox;
 class QFileSystemWatcher;
 class QTermWidget;
 class QStackedWidget;
+class QTimer;
 class QTabWidget;
 class QLabel;
 class QLineEdit;
@@ -58,6 +59,9 @@ public:
     // Reopens the tabs saved when the window was last closed, and saves them on close from now on.
     // The chat that opens at start stays when keepStartChat is true, otherwise it is replaced.
     void restoreSession(bool keepStartChat);
+    // How long a chat stays connected while idle, in a tab not shown and in the shown one, and how often that is
+    // checked; tests make them short.
+    void setIdleDisconnectDelays(int hiddenMs, int shownMs, int checkMs);
     // Claude and GLM run their bridge in a virtual environment in the application data directory,
     // created with claude-agent-sdk when one of them is first used.
     void useManagedClaudeEnvironment();
@@ -263,4 +267,10 @@ private:
     bool sessionEnabled_ = false;
     // Restored Codex chats that continue once the App Server is connected.
     QList<QPointer<QWidget>> continueWhenConnected_;
+    // Idle chats end their own processes; see disconnectIdleChats().
+    QTimer *idleTimer_ = nullptr;
+    int idleHiddenMs_ = 10 * 60 * 1000;
+    int idleShownMs_ = 30 * 60 * 1000;
+    QPointer<ChatTab> shownTab_;
+    void disconnectIdleChats();
 };

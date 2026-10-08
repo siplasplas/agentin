@@ -230,7 +230,13 @@ the next start reopens them and continues the chats that were live; Codex chats
 continue once the App Server is connected. A Claude or GLM chat continued this way, or
 from the tree, starts its bridge and Claude Code process only with its first message,
 which then resumes the conversation, so open tabs you do not use cost nothing; the
-status bar says that it connects with the first message. The preview tab is not saved. When a
+status bar says that it connects with the first message. Likewise a Claude or GLM chat
+left idle ends its bridge, 10 minutes after its last answer and after you left its tab,
+or 30 minutes in the tab you see, and reconnects with the next message. It stays
+connected while a turn runs or a question or approval waits, and for the rest of its
+session once it holds something the Claude Code process would lose: permissions you
+allowed for the session in Claude Code, or a command or agent it runs in the
+background. The preview tab is not saved. When a
 directory is given with `-C`, its new chat opens next to the reopened tabs.
 
 Chats in different tabs run independently, also several chats with the same

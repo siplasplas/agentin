@@ -291,6 +291,9 @@ public:
     virtual bool canCompact() const { return false; }
     virtual bool isCompacting() const { return false; }
     virtual bool compact() { return false; }
+    // Ends the chat's own process while it is idle, when nothing would be lost by it, so that it reconnects and
+    // resumes with the next message; returns whether it did. Agents without a process of their own do nothing.
+    virtual bool disconnectWhenIdle() { return false; }
 
     // Loads the latest history of a conversation, or older entries when older is true.
     virtual void loadHistory(const QString &id, const QString &workingDirectory, bool older) = 0;

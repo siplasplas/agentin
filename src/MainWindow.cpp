@@ -703,6 +703,10 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
         if (ChatTab *tab = currentTab()) tab->loadEarlier();
     });
     connect(tabs_, &QTabWidget::currentChanged, this, &MainWindow::showCurrentTab);
+    idleTimer_ = new QTimer(this);
+    idleTimer_->setInterval(60 * 1000);
+    connect(idleTimer_, &QTimer::timeout, this, &MainWindow::disconnectIdleChats);
+    idleTimer_->start();
     connect(tabs_, &MruTabWidget::tabAboutToClose, this, [this](QWidget *page, bool, bool &allow) {
         ChatTab *tab = chatTab(page);
         if (!allow || !tab || !tab->agent()->isResponding()) return;
@@ -3152,7 +3156,35 @@ void MainWindow::showCurrentTab()
     }
     revealCurrentConversation(true);
     updateStatus();
-    if (tab) prepareSuggestions(tab);
+    // A tab counts as used when it is shown and when it is left, so that leaving it starts its idle time.
+    if (shownTab_ && shownTab_ != tab) shownTab_->markUsed();
+    shownTab_ = tab;
+    if (tab) {
+        tab->markUsed();
+        prepareSuggestions(tab);
+    }
+}
+
+void MainWindow::setIdleDisconnectDelays(int hiddenMs, int shownMs, int checkMs)
+{
+    idleHiddenMs_ = hiddenMs;
+    idleShownMs_ = shownMs;
+    idleTimer_->setInterval(checkMs);
+}
+
+// A chat whose agent runs a process of its own, such as Claude's bridge with Claude Code, ends it after a while
+// without use: 10 minutes in a tab not shown, 30 in the shown one. It reconnects and resumes the conversation
+// with the next message; a chat with a turn running, or a question or approval waiting, stays connected, and the
+// agent keeps its process when ending it would lose something.
+void MainWindow::disconnectIdleChats()
+{
+    const qint64 now = QDateTime::currentMSecsSinceEpoch();
+    for (int i = 0; i < tabs_->count(); ++i) {
+        ChatTab *tab = chatTab(tabs_->widget(i));
+        if (!tab || !tab->isLive() || tab->pendingRequest() || tab->agent()->isResponding()) continue;
+        const int limit = tab == currentTab() ? idleShownMs_ : idleHiddenMs_;
+        if (now - tab->lastUsed() >= limit) tab->agent()->disconnectWhenIdle();
+    }
 }
 
 // Ideas for the shown chat are prepared in the background when it can take a message after an answer: after

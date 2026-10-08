@@ -383,6 +383,7 @@ bool ChatTab::send(const QString &text)
         if (!id_.isEmpty()) provider_->setConversationTitle(id_, title_);
         emit changed();
     }
+    markUsed();
     outgoing_.append(text);
     if (!dispatch()) return false;
     appendText("\nYou: " + text + '\n');
@@ -482,6 +483,7 @@ void ChatTab::setAgent(AgentBackend *agent)
         runOutsideMessage([this, tool, status] { finishTool(tool, status); });
     });
     connect(agent, &AgentBackend::turnCompleted, this, [this, name](const QString &status, const QString &details) {
+        markUsed();
         // A message the agent left unfinished releases the tool lines that waited for it.
         if (messageOpen_) finishMessage();
         updateTaskClock();

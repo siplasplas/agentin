@@ -2974,7 +2974,8 @@ for line in sys.stdin:
 }
 
 // A Claude chat reopened at start-up starts its bridge, and with it a Claude Code process, only with the first
-// message, and then resumes its conversation before the message is sent.
+// message, and then resumes its conversation before the message is sent. Left idle, it ends the bridge and
+// connects again with the next message, unless something runs in the background.
 void MainWindowTest::claudeChatConnectsWithFirstMessage()
 {
     const QString python = QStandardPaths::findExecutable("python3");
@@ -3013,6 +3014,8 @@ for line in sys.stdin:
         log("resumed", request["session_id"])
         send({"type": "ready"})
     elif request["type"] == "prompt":
+        if request["text"] == "in the background":
+            send({"type": "tool", "name": "Bash", "input": {"command": "sleep 100", "run_in_background": True}})
         send({"type": "delta", "text": "Continued"})
         send({"type": "complete", "status": "completed"})
     elif request["type"] == "shutdown":
@@ -3070,6 +3073,24 @@ for line in sys.stdin:
     QCOMPARE(lines("resumed"), QStringList{"claude-1"});
     QCOMPARE(lines("requests"), (QStringList{"resume", "prompt"}));
     QVERIFY(output->toPlainText().contains("[Resuming Claude conversation: claude-1]"));
+
+    // Left idle, the chat ends its bridge, and the next message starts it again and resumes the conversation.
+    window.setIdleDisconnectDelays(200, 200, 50);
+    const QString disconnected = "[Claude disconnected while idle; it reconnects with the next message]";
+    QTRY_VERIFY(output->toPlainText().contains(disconnected));
+    QCOMPARE(lines("requests"), (QStringList{"resume", "prompt", "shutdown"}));
+    QVERIFY(sendButton->isEnabled());
+    input->setPlainText("in the background");
+    QTest::keyClick(input, Qt::Key_Return, Qt::ControlModifier);
+    QTRY_COMPARE(chat->toPlainText().count("Claude: Continued"), 2);
+    QCOMPARE(lines("started"), (QStringList{"bridge", "bridge"}));
+    QCOMPARE(lines("resumed"), (QStringList{"claude-1", "claude-1"}));
+    QCOMPARE(lines("requests"), (QStringList{"resume", "prompt", "shutdown", "resume", "prompt"}));
+
+    // A command left running in the background would end with the bridge, so the chat stays connected.
+    QTest::qWait(500);
+    QCOMPARE(output->toPlainText().count(disconnected), 1);
+    QCOMPARE(lines("requests").size(), 5);
 }
 
 #include "MainWindowTest.moc"

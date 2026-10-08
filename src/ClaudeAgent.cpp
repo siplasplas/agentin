@@ -10,6 +10,7 @@
 #include <QProcess>
 #include <QStandardPaths>
 
+#include <QTimer>
 #include <utility>
 
 namespace {
@@ -425,6 +426,16 @@ ClaudeAgent::ClaudeAgent(ClaudeProvider *provider, const QString &workingDirecto
     });
     connect(process_, QOverload<int, QProcess::ExitStatus>::of(&QProcess::finished), this,
             [this](int code, QProcess::ExitStatus) {
+        cliSessionRules_ = false;
+        backgroundStarted_ = false;
+        if (std::exchange(idleDisconnect_, false)) {
+            ready_ = false;
+            emit message("[" + name_ + " disconnected while idle; it reconnects with the next message]");
+            // A message sent while the bridge was ending starts it again.
+            if (!queuedPrompts_.isEmpty()) start({});
+            emit stateChanged();
+            return;
+        }
         emit message(QString("[%1] %2 bridge exited with code %3").arg(name_, kind_.toUpper()).arg(code));
         if (!steeringText_.isEmpty()) emit steerFailed(std::exchange(steeringText_, {}), "the bridge exited");
         // A compaction is not a turn: it ends without one.
@@ -464,6 +475,7 @@ QString ClaudeAgent::statusText() const
     if (busy_) return retry_.isEmpty() ? name_ + " is responding…" : name_ + ": " + retry_;
     if (ready_) return name_ + " ready";
     if (preparing_) return "Preparing the Claude Agent SDK environment…";
+    if (idleDisconnect_) return name_ + " disconnects while idle and reconnects with the next message";
     if (isRunning()) return kind_ == "glm" ? "Connecting to GLM via Claude Agent SDK…" : "Connecting to Claude Agent SDK…";
     if (!pendingResumeId_.isEmpty()) return name_ + " connects with the first message";
     return name_ + " bridge is not running";
@@ -643,6 +655,7 @@ void ClaudeAgent::answerApproval(int id, ApprovalDecision decision)
               {"reason", allow ? "approved in agentin" : "declined in agentin"}});
         if (decision == ApprovalDecision::Cancel) interrupt();
     } else {
+        if (decision == ApprovalDecision::AcceptForSession) cliSessionRules_ = true;
         send({{"type", "approval_response"}, {"id", id}, {"allow", allow}, {"decision", value}});
     }
 }
@@ -650,6 +663,24 @@ void ClaudeAgent::answerApproval(int id, ApprovalDecision decision)
 bool ClaudeAgent::canCompact() const
 {
     return isRunning() && ready_ && !busy_ && !compacting_ && !sessionId_.isEmpty() && queuedPrompts_.isEmpty();
+}
+
+bool ClaudeAgent::disconnectWhenIdle()
+{
+    if (!isRunning() || !ready_ || busy_ || compacting_ || idleDisconnect_ || sessionId_.isEmpty()
+        || !queuedPrompts_.isEmpty() || !steeringText_.isEmpty() || cliSessionRules_ || backgroundStarted_)
+        return false;
+    idleDisconnect_ = true;
+    ready_ = false;
+    // The next message resumes the conversation in a new bridge.
+    pendingResumeId_ = sessionId_;
+    send({{"type", "shutdown"}});
+    process_->closeWriteChannel();
+    QTimer::singleShot(5000, this, [this] {
+        if (idleDisconnect_ && isRunning()) process_->terminate();
+    });
+    emit stateChanged();
+    return true;
 }
 
 bool ClaudeAgent::compact()
@@ -820,6 +851,7 @@ void ClaudeAgent::handleLine(const QByteArray &line)
             textStarted_ = false;
             emit messageFinished();
         }
+        if (event.value("input").toObject().value("run_in_background").toBool()) backgroundStarted_ = true;
         emit toolStarted(event.value("name").toString(),
                          QString::fromUtf8(QJsonDocument(event.value("input").toObject()).toJson(QJsonDocument::Compact)));
     } else if (type == "complete") {

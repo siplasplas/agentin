@@ -135,6 +135,7 @@ public:
     bool canCompact() const override;
     bool isCompacting() const override { return compacting_; }
     bool compact() override;
+    bool disconnectWhenIdle() override;
     bool isSteering() const override { return !steeringText_.isEmpty(); }
     bool steer(const QString &text) override;
     QString model() const override { return model_; }
@@ -206,6 +207,12 @@ private:
     quint64 historyGeneration_ = 0;
     bool ready_ = false;
     bool preparing_ = false;
+    // What the Claude Code process holds and would lose when it ends: permissions granted for its session, and
+    // commands or agents it runs in the background.
+    bool cliSessionRules_ = false;
+    bool backgroundStarted_ = false;
+    // The bridge is being ended because the chat was idle; the next message starts it again.
+    bool idleDisconnect_ = false;
     bool busy_ = false;
     bool stopRequested_ = false;
     bool textStarted_ = false;

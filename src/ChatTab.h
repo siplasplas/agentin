@@ -2,6 +2,7 @@
 
 #include "AgentBackend.h"
 
+#include <QDateTime>
 #include <QHash>
 #include <QElapsedTimer>
 #include <QObject>
@@ -74,6 +75,9 @@ public:
     ChangeTracker *changeTracker() const { return changeTracker_; }
     QString operationTimeText() const;
     bool isLive() const { return live_; }
+    // When the chat was last used: a message sent, a turn ended, or its tab shown or left.
+    qint64 lastUsed() const { return lastUsed_; }
+    void markUsed() { lastUsed_ = QDateTime::currentMSecsSinceEpoch(); }
     bool hasMoreHistory() const { return hasMore_; }
     // The user's messages in this conversation as far as loaded, oldest first, for recalling them.
     // The messages the up and down keys recall: all the conversation's, when the agent reports them, then those
@@ -233,5 +237,6 @@ private:
     bool hasMore_ = false;
     // Earlier pages read on their own because the latest ones held no message of the user's.
     int earlierPagesRead_ = 0;
+    qint64 lastUsed_ = QDateTime::currentMSecsSinceEpoch();
     bool pendingAttach_ = false;
 };
