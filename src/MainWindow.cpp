@@ -392,8 +392,8 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     suggestButton_->setAccessibleName("Suggest");
     suggestButton_->setShortcut(QKeySequence("Ctrl+Space"));
     suggestButton_->setToolTip("Suggest (Ctrl+Space): ideas for your next message from the agent's cheapest model, "
-                               "based on the latest exchange. The first idea goes into the message field; pressing "
-                               "again lists all of them.");
+                               "prepared when a turn ends. The first idea goes into the empty message field; Suggest "
+                               "lists all of them.");
     suggestButton_->setEnabled(false);
     // The messages the arrow keys recall, listed as a combo box lists its items.
     historyButton_ = new QToolButton(central);
@@ -1076,27 +1076,49 @@ void MainWindow::updateSuggestButton()
                            && (text.trimmed().isEmpty() || shownSuggestion(tab, text));
     suggestButton_->setVisible(supported);
     suggestButton_->setEnabled(supported && tab->isLive() && !tab->agent()->isResponding()
-                               && !tab->suggestions().pending && !latestExchange(tab).isEmpty());
+                               && !latestExchange(tab).isEmpty());
 }
 
-// Suggestions are asked once per exchange, outside the conversation; the first idea goes into the message field.
-// Asking again lists all of them from memory.
+// The first idea goes into the message field; pressed again while the field holds an idea, Suggest lists all of
+// them from memory.
 void MainWindow::suggestMessage()
 {
     ChatTab *tab = currentTab();
     if (!tab || !suggestButton_->isEnabled()) return;
-    const QString exchange = latestExchange(tab);
-    ChatTab::Suggestions &cache = tab->suggestions();
-    if (cache.exchange == exchange && !cache.items.isEmpty()) {
-        showSuggestions(cache.items);
+    if (shownSuggestion(tab, input_->toPlainText())) {
+        showSuggestions(tab->suggestions().items);
         return;
     }
-    cache.pending = true;
-    updateSuggestButton();
-    status_->setText("Asking for suggestions…");
+    requestSuggestions(tab, true);
+}
+
+// Ideas are asked once per exchange, outside the conversation: in the background when a turn ends, or when Suggest
+// is pressed. When they arrive, the first one goes into an empty message field selected; with show, pressing
+// Suggest also puts a known first idea there.
+void MainWindow::requestSuggestions(ChatTab *tab, bool show)
+{
+    const QString exchange = latestExchange(tab);
+    if (exchange.isEmpty()) return;
+    ChatTab::Suggestions &cache = tab->suggestions();
+    if (cache.exchange == exchange && (cache.pending || !cache.items.isEmpty())) {
+        if (!show) return;
+        if (cache.pending) {
+            cache.wanted = true;
+            status_->setText("Asking for suggestions…");
+        } else {
+            input_->showSuggestion(cache.items.first());
+        }
+        return;
+    }
+    cache = {exchange, {}, true, show};
+    if (show) status_->setText("Asking for suggestions…");
     const QString prompt =
         "Below is a conversation between a user and a coding agent, ending with its latest exchange. Suggest up to "
-        "three short messages the user might send next, most useful first, each one or two sentences.\n"
+        "three short messages the user might send to the agent next, most useful first, each one or two sentences.\n"
+        "Each message is written to the agent, as the user would type it: a request or a question that the agent can "
+        "carry out itself in the project with its tools, such as changing code, building, running tests, reviewing, "
+        "explaining or committing. Never suggest what only the user can do, such as pushing, opening or clicking "
+        "in an application, installing with sudo or checking something by hand, and never advise the user.\n"
         "Make them concrete next steps that move the work forward: continuing or extending the task, checking or "
         "testing the result, fixing what the answer left open or got wrong, or deciding a question it raised. "
         "Make the three ideas clearly different from each other. Suggest committing only when the work looks "
@@ -1104,19 +1126,25 @@ void MainWindow::suggestMessage()
         "\"continue\" or \"looks good\".\n"
         "Write them in the language the user writes in. Reply with only the messages, one per line, without "
         "numbering, quotes or comments.\n\n" + exchange;
-    const QString before = input_->toPlainText();
     tab->provider()->suggest(tab->workingDirectory(), prompt, tab,
-                             [this, tab, exchange, before](const QString &text, const QString &error) {
+                             [this, tab, exchange](const QString &text, const QString &error) {
         ChatTab::Suggestions &cache = tab->suggestions();
+        // Ideas for an exchange that a newer one has replaced are not wanted any more.
+        if (cache.exchange != exchange) return;
+        const bool wanted = cache.wanted;
         cache.pending = false;
+        cache.wanted = false;
         const QStringList items = error.isEmpty() ? parseSuggestions(text) : QStringList();
         if (items.isEmpty()) {
-            appendLine("[Suggestions failed: " + (error.isEmpty() ? QString("the model gave none") : error) + "]");
+            // Asked again when Suggest is pressed; a failure in the background is reported only to a user who waits.
+            cache.exchange.clear();
+            if (wanted)
+                appendLine("[Suggestions failed: " + (error.isEmpty() ? QString("the model gave none") : error) + "]");
         } else {
-            cache.exchange = exchange;
             cache.items = items;
-            // Shown only where the user still waits for them, not over a message typed meanwhile.
-            if (currentTab() == tab && input_->toPlainText() == before) input_->showSuggestion(items.first());
+            // The first idea is put in an empty message field, also when it was prepared in the background, but
+            // never over a message typed meanwhile.
+            if (currentTab() == tab && input_->toPlainText().trimmed().isEmpty()) input_->showSuggestion(items.first());
         }
         updateStatus();
     });
@@ -2858,6 +2886,12 @@ QWidget *MainWindow::addChatTab(AgentProvider *selected, const QString &workingD
     });
     connect(tab, &ChatTab::turnEnded, this, [this, tab](bool succeeded, qint64 durationMs) {
         notifier_->turnFinished(announcedAgent(tab), chatName(tab, ", ", true), succeeded, durationMs);
+        // Ideas for the next message are prepared while the user reads the answer, unless a queued message
+        // starts the next turn at once.
+        QTimer::singleShot(0, tab, [this, tab] {
+            if (tab->provider()->supportsSuggestions() && tab->isLive() && !tab->agent()->isResponding())
+                requestSuggestions(tab, false);
+        });
     });
     connect(tab, &ChatTab::compactionChanged, this, [this, tab](bool started) {
         notifier_->compactionChanged(announcedAgent(tab), chatName(tab, ", ", true), started);

@@ -93,6 +93,8 @@ public:
         QString exchange;
         QStringList items;
         bool pending = false;
+        // The user pressed Suggest while the ideas were on their way, so a failure is reported.
+        bool wanted = false;
     };
     Suggestions &suggestions() { return suggestions_; }
     const Suggestions &suggestions() const { return suggestions_; }

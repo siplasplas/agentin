@@ -75,6 +75,7 @@ private:
     bool canSteerNow() const;
     void updateSteerButton();
     void suggestMessage();
+    void requestSuggestions(ChatTab *tab, bool show);
     void showSuggestions(const QStringList &items);
     void updateSuggestButton();
     // Asks for a conversation's new name, offering proposal, and renames it in its agent.

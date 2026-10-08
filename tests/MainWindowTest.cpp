@@ -1213,15 +1213,25 @@ if "--help" in sys.argv:
 def send(message):
     print(json.dumps(message), flush=True)
 
+# The chat's thread, and others such as the one asked for suggestions, have their own IDs.
+threads = 0
 for line in sys.stdin:
     request = json.loads(line)
     method = request.get("method")
     if method == "initialize":
         send({"id": request["id"], "result": {"userAgent": "fake"}})
     elif method == "thread/start":
-        send({"id": request["id"], "result": {"thread": {"id": "test-thread"}}})
+        threads += 1
+        send({"id": request["id"], "result": {"thread": {"id": "test-thread" if threads == 1 else "other-%d" % threads}}})
     elif method == "turn/start":
+        thread = request["params"]["threadId"]
         send({"id": request["id"], "result": {"turn": {"id": "test-turn"}}})
+        if thread != "test-thread":
+            send({"method": "item/agentMessage/delta", "params": {"threadId": thread, "itemId": "idea",
+                "delta": "An idea"}})
+            send({"method": "turn/completed", "params": {"threadId": thread,
+                "turn": {"id": "test-turn", "status": "completed"}}})
+            continue
         if request["params"]["input"][0]["text"].startswith("long"):
             send({"method": "turn/started", "params": {"threadId": "test-thread","turn": {"id": "test-turn"}}})
             continue
@@ -2755,8 +2765,8 @@ for line in sys.stdin:
     }
 }
 
-// The first suggested idea goes into the message field; Suggest again lists all of them without asking the model
-// again, and stays offered while the field holds an idea unchanged.
+// Ideas are prepared when a turn ends and the first one goes into the empty message field; Suggest lists all of
+// them without asking the model again, and stays offered while the field holds an idea unchanged.
 void MainWindowTest::suggestionsFillTheMessageField()
 {
     QTemporaryDir directory;
@@ -2815,17 +2825,16 @@ for line in sys.stdin:
     QTest::keyClicks(input, "Do the task");
     QTest::keyClick(input, Qt::Key_Return);
     QTRY_VERIFY_WITH_TIMEOUT(chat->toPlainText().contains("The task is done"), 10000);
-    QTRY_VERIFY(suggest->isVisible() && suggest->isEnabled());
 
-    // The first idea is put in the field selected, so that typing replaces it, and Suggest stays offered.
-    suggest->click();
+    // Ideas are asked when the turn ends, and the first one is put in the field selected, so that typing replaces
+    // it; Suggest stays offered.
     QTRY_COMPARE(input->toPlainText(), QString("First idea"));
     QCOMPARE(input->textCursor().selectedText(), QString("First idea"));
     QVERIFY(!QApplication::activePopupWidget());
     QCOMPARE(askedTimes(), 1);
     QTRY_VERIFY(suggest->isVisible() && suggest->isEnabled());
 
-    // Asking again lists all the ideas from memory; the chosen one replaces the field's text.
+    // Suggest lists all the ideas from memory; the chosen one replaces the field's text.
     suggest->click();
     QTRY_VERIFY(qobject_cast<QMenu *>(QApplication::activePopupWidget()));
     auto *menu = qobject_cast<QMenu *>(QApplication::activePopupWidget());
@@ -2844,6 +2853,13 @@ for line in sys.stdin:
     QTest::keyClicks(input, " now");
     QCOMPARE(input->toPlainText(), QString("Second idea now"));
     QVERIFY(!suggest->isVisible());
+
+    // With the field emptied, Suggest puts the first idea back without asking again.
+    input->clear();
+    QTRY_VERIFY(suggest->isVisible() && suggest->isEnabled());
+    suggest->click();
+    QCOMPARE(input->toPlainText(), QString("First idea"));
+    QCOMPARE(askedTimes(), 1);
 }
 
 #include "MainWindowTest.moc"
