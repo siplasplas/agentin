@@ -227,7 +227,10 @@ message is sent; then both show the beginning of that message.
 When the window closes, the open tabs are saved in `open-tabs.json` in the
 application data directory, with their model, effort and read-only mode, and
 the next start reopens them and continues the chats that were live; Codex chats
-continue once the App Server is connected. The preview tab is not saved. When a
+continue once the App Server is connected. A Claude or GLM chat continued this way, or
+from the tree, starts its bridge and Claude Code process only with its first message,
+which then resumes the conversation, so open tabs you do not use cost nothing; the
+status bar says that it connects with the first message. The preview tab is not saved. When a
 directory is given with `-C`, its new chat opens next to the reopened tabs.
 
 Chats in different tabs run independently, also several chats with the same

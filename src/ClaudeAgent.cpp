@@ -465,6 +465,7 @@ QString ClaudeAgent::statusText() const
     if (ready_) return name_ + " ready";
     if (preparing_) return "Preparing the Claude Agent SDK environment…";
     if (isRunning()) return kind_ == "glm" ? "Connecting to GLM via Claude Agent SDK…" : "Connecting to Claude Agent SDK…";
+    if (!pendingResumeId_.isEmpty()) return name_ + " connects with the first message";
     return name_ + " bridge is not running";
 }
 
@@ -541,12 +542,13 @@ bool ClaudeAgent::resumeConversation(const QString &id, const QString &workingDi
     ready_ = false;
     if (isRunning()) {
         send({{"type", "resume"}, {"session_id", id}, {"cwd", workingDirectory}});
+        emit message("[Resuming " + name_ + " conversation: " + id + "]");
     } else {
-        // The bridge must report ready before it accepts the resume command.
+        // The bridge, with its Claude Code process, starts with the first message, so that chats reopened at
+        // start-up or from the tree cost nothing until they are used. It must report ready before it accepts
+        // the resume command.
         pendingResumeId_ = id;
-        start(workingDirectory);
     }
-    emit message("[Resuming " + name_ + " conversation: " + id + "]");
     emit stateChanged();
     return true;
 }
@@ -795,6 +797,7 @@ void ClaudeAgent::handleLine(const QByteArray &line)
         if (!pendingResumeId_.isEmpty()) {
             const QString id = pendingResumeId_;
             pendingResumeId_.clear();
+            emit message("[Resuming " + name_ + " conversation: " + id + "]");
             send({{"type", "resume"}, {"session_id", id}, {"cwd", workingDirectory_}});
             return;
         }

@@ -92,6 +92,7 @@ private slots:
     void changesWindowShowsDiff();
     void recallAllCodexMessages();
     void suggestionsFillTheMessageField();
+    void claudeChatConnectsWithFirstMessage();
 };
 
 void MainWindowTest::foldedOutputScrolling()
@@ -2970,6 +2971,105 @@ for line in sys.stdin:
     QVERIFY(!QApplication::activePopupWidget());
     QCOMPARE(input->toPlainText(), QString("First idea"));
     QCOMPARE(askedTimes(), 2);
+}
+
+// A Claude chat reopened at start-up starts its bridge, and with it a Claude Code process, only with the first
+// message, and then resumes its conversation before the message is sent.
+void MainWindowTest::claudeChatConnectsWithFirstMessage()
+{
+    const QString python = QStandardPaths::findExecutable("python3");
+    if (python.isEmpty()) QSKIP("Python 3 is unavailable");
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString fakeBridge = directory.filePath("fake-claude.py");
+    QFile script(fakeBridge);
+    QVERIFY(script.open(QIODevice::WriteOnly | QIODevice::Text));
+    script.write(R"PY(import json
+import sys
+
+def send(message):
+    print(json.dumps(message), flush=True)
+
+def log(name, text):
+    with open(sys.argv[0] + "." + name, "a") as output:
+        output.write(text + "\n")
+
+if "--read-session" in sys.argv:
+    send({"type": "history", "total": 2, "entries": [
+        {"role": "user", "text": "Saved question"}, {"role": "assistant", "text": "Saved answer"}]})
+    sys.exit(0)
+if "--list-sessions" in sys.argv:
+    send({"type": "sessions", "sessions": []})
+    sys.exit(0)
+if "--suggest" in sys.argv:
+    send({"type": "suggestions", "text": "An idea"})
+    sys.exit(0)
+log("started", "bridge")
+send({"type": "ready"})
+for line in sys.stdin:
+    request = json.loads(line)
+    log("requests", request["type"])
+    if request["type"] == "resume":
+        log("resumed", request["session_id"])
+        send({"type": "ready"})
+    elif request["type"] == "prompt":
+        send({"type": "delta", "text": "Continued"})
+        send({"type": "complete", "status": "completed"})
+    elif request["type"] == "shutdown":
+        break
+)PY");
+    script.close();
+    QFile index(directory.filePath("claude-conversations.json"));
+    QVERIFY(index.open(QIODevice::WriteOnly));
+    const QJsonArray threads{QJsonObject{{"provider", "Claude"}, {"id", "claude-1"}, {"cwd", directory.path()},
+                                         {"title", "Saved chat"}, {"createdAt", 1}}};
+    QVERIFY(index.write(QJsonDocument(QJsonObject{{"version", 1}, {"threads", threads}}).toJson()) > 0);
+    index.close();
+    QFile session(directory.filePath("open-tabs.json"));
+    QVERIFY(session.open(QIODevice::WriteOnly));
+    const QJsonArray tabs{QJsonObject{{"provider", "Claude"}, {"directory", directory.path()}, {"id", "claude-1"},
+                                      {"title", "Saved chat"}, {"live", true}}};
+    QVERIFY(session.write(QJsonDocument(QJsonObject{{"tabs", tabs}, {"current", 0}}).toJson()) > 0);
+    session.close();
+    // No other tool holds the conversation.
+    const QString configDirectory = directory.filePath("claude-config");
+    QVERIFY(QDir().mkpath(configDirectory + "/sessions"));
+    const QByteArray previousConfig = qgetenv("CLAUDE_CONFIG_DIR");
+    const auto restoreConfig = qScopeGuard([&previousConfig] {
+        if (previousConfig.isNull()) qunsetenv("CLAUDE_CONFIG_DIR");
+        else qputenv("CLAUDE_CONFIG_DIR", previousConfig);
+    });
+    qputenv("CLAUDE_CONFIG_DIR", configDirectory.toLocal8Bit());
+    const auto lines = [&fakeBridge](const QString &name) {
+        QFile file(fakeBridge + "." + name);
+        return file.open(QIODevice::ReadOnly) ? QString::fromUtf8(file.readAll()).split('\n', Qt::SkipEmptyParts)
+                                              : QStringList();
+    };
+
+    MainWindow window("/bin/true", directory.path(), python, fakeBridge, "gemini", nullptr,
+                      directory.filePath("codex-conversations.json"));
+    window.show();
+    window.restoreSession(false);
+    auto *chat = window.findChild<QPlainTextEdit *>("chatView");
+    auto *output = window.findChild<QPlainTextEdit *>("log");
+    auto *input = window.findChild<QPlainTextEdit *>("commandInput");
+    auto *sendButton = window.findChild<QPushButton *>("sendButton");
+    QVERIFY(chat && output && input && sendButton);
+    QTRY_VERIFY(chat->toPlainText().contains("Claude: Saved answer"));
+    // The chat takes messages, but nothing runs for it yet.
+    QTRY_VERIFY(sendButton->isEnabled());
+    QTest::qWait(300);
+    QVERIFY(lines("started").isEmpty());
+    QVERIFY(!output->toPlainText().contains("[Resuming Claude conversation"));
+
+    input->clear();
+    input->setPlainText("more");
+    QTest::keyClick(input, Qt::Key_Return, Qt::ControlModifier);
+    QTRY_VERIFY(chat->toPlainText().contains("Claude: Continued"));
+    QCOMPARE(lines("started"), QStringList{"bridge"});
+    QCOMPARE(lines("resumed"), QStringList{"claude-1"});
+    QCOMPARE(lines("requests"), (QStringList{"resume", "prompt"}));
+    QVERIFY(output->toPlainText().contains("[Resuming Claude conversation: claude-1]"));
 }
 
 #include "MainWindowTest.moc"
