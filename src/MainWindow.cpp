@@ -394,9 +394,10 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     suggestButton_->setIconSize(QSize(iconSize, iconSize));
     suggestButton_->setAccessibleName("Suggest");
     suggestButton_->setShortcut(QKeySequence("Ctrl+Space"));
-    suggestButton_->setToolTip("Suggest (Ctrl+Space): ideas for your next message from the agent's cheapest model, "
-                               "prepared when a turn ends; the bulb is red while the model thinks. The first idea "
-                               "goes into the empty message field; Suggest lists all of them.");
+    suggestButton_->setToolTip("Suggest (Ctrl+Space): an idea for your next message from the agent's cheapest "
+                               "model, prepared when a turn ends; the bulb is red while the model thinks. The idea "
+                               "goes into the empty message field; with two or three ideas (Options), Suggest lists "
+                               "them.");
     suggestButton_->setEnabled(false);
     // The messages the arrow keys recall, listed as a combo box lists its items.
     historyButton_ = new QToolButton(central);
@@ -1049,14 +1050,15 @@ QString latestExchange(const ChatTab *tab)
         + exchanges.last().answer.right(4000);
 }
 
-QStringList parseSuggestions(const QString &text)
+// The model's lines without list markers or quotes, at most count of them.
+QStringList parseSuggestions(const QString &text, int count)
 {
     static const QRegularExpression marker(R"(^(?:[-*•]|\d+[.)])\s*)");
     QStringList items;
     for (QString line : text.split('\n')) {
         line = line.trimmed().remove(marker).trimmed();
         if (line.size() > 1 && line.startsWith('"') && line.endsWith('"')) line = line.mid(1, line.size() - 2);
-        if (!line.isEmpty() && items.size() < 3) items.append(line);
+        if (!line.isEmpty() && items.size() < count) items.append(line);
     }
     return items;
 }
@@ -1122,29 +1124,38 @@ void MainWindow::requestSuggestions(ChatTab *tab, bool show)
     cache = {exchange, {}, true, show, {}};
     updateSuggestButton();
     if (show) status_->setText("Asking for suggestions…");
+    // One short idea by default, which the model gives soonest; the options allow two or three.
+    const int count = suggestionCount_;
+    const QString number = count == 2 ? "two" : "three";
     const QString prompt =
-        "Below is a conversation between a user and a coding agent, ending with its latest exchange. Suggest up to "
-        "three short messages the user might send to the agent next, most useful first, each one or two sentences.\n"
-        "Each message is written to the agent, as the user would type it: a request or a question that the agent can "
-        "carry out itself in the project with its tools, such as changing code, building, running tests, reviewing, "
-        "explaining or committing. Never suggest what only the user can do, such as pushing, opening or clicking "
-        "in an application, installing with sudo or checking something by hand, and never advise the user.\n"
-        "Make them concrete next steps that move the work forward: continuing or extending the task, checking or "
+        "Below is a conversation between a user and a coding agent, ending with its latest exchange. "
+        + (count == 1 ? QString("Suggest one short message the user might send to the agent next, in one or two "
+                                "sentences.\n")
+                      : "Suggest up to " + number + " short messages the user might send to the agent next, most "
+                        "useful first, each one or two sentences.\n")
+        + "Each message is written to the agent, as the user would type it: a request or a question that the agent "
+        "can carry out itself in the project with its tools, such as changing code, building, running tests, "
+        "reviewing, explaining or committing. Never suggest what only the user can do, such as pushing, opening or "
+        "clicking in an application, installing with sudo or checking something by hand, and never advise the "
+        "user.\n"
+        "Make it a concrete next step that moves the work forward: continuing or extending the task, checking or "
         "testing the result, fixing what the answer left open or got wrong, or deciding a question it raised. "
-        "Make the three ideas clearly different from each other. Suggest committing only when the work looks "
-        "finished, and then always together with what to do next. Avoid generic messages such as thanks, "
-        "\"continue\" or \"looks good\".\n"
-        "Write them in the language the user writes in. Reply with only the messages, one per line, without "
-        "numbering, quotes or comments.\n\n" + exchange;
+        + (count == 1 ? QString() : "Make the " + number + " ideas clearly different from each other. ")
+        + "Suggest committing only when the work looks finished, and then always together with what to do next. "
+        "Avoid generic messages such as thanks, \"continue\" or \"looks good\".\n"
+        "Write in the language the user writes in. "
+        + (count == 1 ? QString("Reply with only the message, on one line, without quotes or comments.")
+                      : QString("Reply with only the messages, one per line, without numbering, quotes or comments."))
+        + "\n\n" + exchange;
     tab->provider()->suggest(tab->workingDirectory(), prompt, tab,
-                             [this, tab, exchange](const QString &text, const QString &error) {
+                             [this, tab, exchange, count](const QString &text, const QString &error) {
         ChatTab::Suggestions &cache = tab->suggestions();
         // Ideas for an exchange that a newer one has replaced are not wanted any more.
         if (cache.exchange != exchange) return;
         const bool wanted = cache.wanted;
         cache.pending = false;
         cache.wanted = false;
-        const QStringList items = error.isEmpty() ? parseSuggestions(text) : QStringList();
+        const QStringList items = error.isEmpty() ? parseSuggestions(text, count) : QStringList();
         if (items.isEmpty()) {
             // Asked again when Suggest is pressed; a failure in the background is reported only to a user who waits.
             cache.exchange.clear();
@@ -1433,6 +1444,7 @@ void MainWindow::loadSettings()
     const QString enterKey = settings.value("enterKey").toString();
     input_->setShortMessageLength(settings.value("enterSendsUpTo").toInt(60));
     undoAfterSend_ = settings.value("undoAfterSend").toBool(true);
+    suggestionCount_ = qBound(1, settings.value("suggestions").toInt(1), 3);
     const QJsonObject tabNames = settings.value("tabNames").toObject();
     tabShowsAgent_ = tabNames.value("agent").toBool(false);
     tabShowsDirectory_ = tabNames.value("directory").toBool(true);
@@ -1517,6 +1529,7 @@ void MainWindow::saveSettings()
         || file.write(QJsonDocument(QJsonObject{{"version", 1}, {"enterKey", enterKey},
                                                          {"enterSendsUpTo", input_->shortMessageLength()},
                                                          {"undoAfterSend", undoAfterSend_},
+                                                         {"suggestions", suggestionCount_},
                                                          {"tabNames", QJsonObject{{"agent", tabShowsAgent_},
                                                                                   {"directory", tabShowsDirectory_},
                                                                                   {"titleLength", tabTitleLength_}}},
@@ -1570,6 +1583,13 @@ void MainWindow::showOptionsDialog()
     undoAfterSend->setObjectName("undoAfterSend");
     undoAfterSend->setChecked(undoAfterSend_);
     enterForm->addRow(QString(), undoAfterSend);
+    auto *suggestions = new QSpinBox(&dialog);
+    suggestions->setObjectName("suggestionCount");
+    suggestions->setRange(1, 3);
+    suggestions->setValue(suggestionCount_);
+    suggestions->setToolTip("How many ideas for the next message the light bulb asks for; one comes soonest. "
+                            "A new number applies the next time ideas are asked.");
+    enterForm->addRow("Suggestions:", suggestions);
     auto *experimental = new QCheckBox("Show experimental agents: GLM, Gemini and Antigravity", &dialog);
     experimental->setObjectName("experimentalAgents");
     experimental->setChecked(experimentalAgents_);
@@ -1671,6 +1691,7 @@ void MainWindow::showOptionsDialog()
     input_->setEnterPolicy(MessageInput::EnterPolicy(enterInput->currentData().toInt()));
     input_->setShortMessageLength(shortLength->value());
     undoAfterSend_ = undoAfterSend->isChecked();
+    suggestionCount_ = suggestions->value();
     tabShowsAgent_ = nameAgent->isChecked();
     tabShowsDirectory_ = nameDirectory->isChecked();
     tabTitleLength_ = nameTitle->value();

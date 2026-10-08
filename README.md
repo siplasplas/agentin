@@ -340,8 +340,10 @@ the last step is answered right after the turn, as part of the same turn in the
 chat. Claude Code does not report whether a message was used, so `You (steer)`
 means that it was passed to the session.
 
-In a Codex, Claude or GLM chat, agentin prepares up to three short ideas for your next
-message when the agent finishes a turn, unless a queued message starts the next one, and
+In a Codex, Claude or GLM chat, agentin prepares a short idea for your next message,
+or two or three when **Settings → Options…** says so (`suggestions` in `settings.json`;
+one comes soonest, and a new number applies the next time ideas are asked), when the
+agent finishes a turn, unless a queued message starts the next one, and
 for the chat you see when it can take a message after an answer: after agentin starts and
 reads its history, or when you switch to its tab (other open chats wait until shown). They
 are messages to the agent, things it can do itself (change code, build, test, review,
@@ -354,11 +356,12 @@ Codex lists in an ephemeral, read-only thread. When they arrive and the message 
 still empty, the first, most useful idea is put in it selected, so typing replaces it
 and Enter sends it; a message you started meanwhile is never replaced.
 
-**Suggest** (the light bulb, red while the model thinks of ideas; Ctrl+Space; shown while the message field is empty, holds
-only spaces and line breaks, or holds a suggested idea unchanged) lists all the ideas
-over the message field, without asking the model again; the chosen one replaces the
-field's text in the same way. In an empty field it puts the first idea back, or, if the
-ideas are not known yet, asks for them and waits.
+**Suggest** (the light bulb, red while the model thinks of ideas; Ctrl+Space; shown
+while the message field is empty, holds only spaces and line breaks, or holds a
+suggested idea unchanged) lists the ideas over the message field when there are two or
+three, without asking the model again; the chosen one replaces the field's text in the
+same way. In an empty field it puts the first idea back, or, if the ideas are not known
+yet, asks for them and waits.
 
 When the chat's directory is in a Git work tree, the chat header also sums up the
 files the latest turn changed, for example `Changes: 7 files, +120 −34`, counting

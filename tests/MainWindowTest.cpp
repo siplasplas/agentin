@@ -2814,7 +2814,7 @@ for line in sys.stdin:
         send({"method": "turn/started", "params": {"threadId": thread, "turn": {"id": "turn-1"}}})
         if thread in ephemeral:
             with open(os.path.join(folder, "suggestions.log"), "a") as log:
-                log.write("asked\n")
+                log.write(json.dumps(request["params"]["input"][0]["text"]) + "\n")
             # The model thinks for a while, so that the window can be seen waiting.
             time.sleep(0.3)
             send({"method": "item/agentMessage/delta", "params": {"threadId": thread, "itemId": "s",
@@ -2827,10 +2827,18 @@ for line in sys.stdin:
 )PY");
     script.close();
     QVERIFY(script.setPermissions(QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner));
-    const auto askedTimes = [&directory] {
+    // The prompts the model was asked, one per line.
+    const auto prompts = [&directory] {
+        QStringList asked;
         QFile log(directory.filePath("suggestions.log"));
-        return log.open(QIODevice::ReadOnly) ? log.readAll().count('\n') : 0;
+        if (!log.open(QIODevice::ReadOnly)) return asked;
+        while (!log.atEnd()) {
+            const QByteArray line = log.readLine().trimmed();
+            if (!line.isEmpty()) asked.append(QJsonDocument::fromJson("[" + line + "]").array().first().toString());
+        }
+        return asked;
     };
+    const auto askedTimes = [&prompts] { return prompts().size(); };
     MainWindow window(fakeServer, directory.path(), {}, {}, "gemini", nullptr, directory.filePath("index.json"));
     window.show();
     auto *input = window.findChild<MessageInput *>("commandInput");
@@ -2838,6 +2846,34 @@ for line in sys.stdin:
     auto *suggest = window.findChild<QPushButton *>("suggestButton");
     QVERIFY(input && chat && suggest);
     QTRY_VERIFY(window.findChild<QWidget *>("newChatButton")->isEnabled());
+
+    // One idea by default; the options ask for up to three, and the number is saved.
+    QAction *options = nullptr;
+    for (QAction *action : window.findChildren<QAction *>())
+        if (action->text() == "Options…") options = action;
+    QVERIFY(options);
+    const auto setSuggestionCount = [&](int count, int expectedBefore) {
+        bool changed = false;
+        QTimer::singleShot(0, &window, [&] {
+            auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+            QVERIFY(dialog);
+            auto *number = dialog->findChild<QSpinBox *>("suggestionCount");
+            QVERIFY(number);
+            QCOMPARE(number->value(), expectedBefore);
+            QCOMPARE(number->minimum(), 1);
+            QCOMPARE(number->maximum(), 3);
+            number->setValue(count);
+            dialog->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Ok)->click();
+            changed = true;
+        });
+        options->trigger();
+        QVERIFY(changed);
+    };
+    setSuggestionCount(3, 1);
+    QFile settings(directory.filePath("settings.json"));
+    QVERIFY(settings.open(QIODevice::ReadOnly));
+    QCOMPARE(QJsonDocument::fromJson(settings.readAll()).object().value("suggestions").toInt(), 3);
+    settings.close();
     input->setFocus();
     QTest::keyClicks(input, "Do the task");
     QTest::keyClick(input, Qt::Key_Return);
@@ -2853,6 +2889,7 @@ for line in sys.stdin:
     QCOMPARE(input->textCursor().selectedText(), QString("First idea"));
     QVERIFY(!QApplication::activePopupWidget());
     QCOMPARE(askedTimes(), 1);
+    QVERIFY(prompts().first().contains("Suggest up to three short messages"));
     QTRY_VERIFY(suggest->isVisible() && suggest->isEnabled());
 
     // Suggest lists all the ideas from memory; the chosen one replaces the field's text.
@@ -2882,7 +2919,9 @@ for line in sys.stdin:
     QCOMPARE(input->toPlainText(), QString("First idea"));
     QCOMPARE(askedTimes(), 1);
 
-    // A chat opened with its history, as after agentin starts, gets its ideas without a turn of its own.
+    // A chat opened with its history, as after agentin starts, gets its ideas without a turn of its own; with the
+    // number back at one, the model is asked for one idea and only the first line of its answer is kept.
+    setSuggestionCount(1, 3);
     input->clear();
     auto *tree = window.findChild<QTreeWidget *>("conversationTree");
     QVERIFY(tree);
@@ -2898,6 +2937,15 @@ for line in sys.stdin:
     QTRY_VERIFY(thinking());
     QTRY_COMPARE(input->toPlainText(), QString("First idea"));
     QVERIFY(!thinking());
+    QCOMPARE(askedTimes(), 2);
+    QVERIFY(prompts().last().contains("Suggest one short message"));
+    QVERIFY(!prompts().last().contains("three"));
+    // With one idea there is no list: Suggest leaves it in the field.
+    QTRY_VERIFY(suggest->isVisible() && suggest->isEnabled());
+    suggest->click();
+    QTest::qWait(50);
+    QVERIFY(!QApplication::activePopupWidget());
+    QCOMPARE(input->toPlainText(), QString("First idea"));
     QCOMPARE(askedTimes(), 2);
 }
 
