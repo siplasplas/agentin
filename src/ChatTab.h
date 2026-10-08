@@ -95,6 +95,8 @@ public:
         bool pending = false;
         // The user pressed Suggest while the ideas were on their way, so a failure is reported.
         bool wanted = false;
+        // The exchange for which asking failed; it is not asked in the background again, only by Suggest.
+        QString failedExchange;
     };
     Suggestions &suggestions() { return suggestions_; }
     const Suggestions &suggestions() const { return suggestions_; }

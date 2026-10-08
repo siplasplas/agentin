@@ -341,7 +341,9 @@ chat. Claude Code does not report whether a message was used, so `You (steer)`
 means that it was passed to the session.
 
 In a Codex, Claude or GLM chat, agentin prepares up to three short ideas for your next
-message when the agent finishes a turn, unless a queued message starts the next one. They
+message when the agent finishes a turn, unless a queued message starts the next one, and
+for the chat you see when it can take a message after an answer: after agentin starts and
+reads its history, or when you switch to its tab (other open chats wait until shown). They
 are messages to the agent, things it can do itself (change code, build, test, review,
 explain, commit), not steps only you can take such as pushing or opening an application.
 They are based on the latest exchange (your last message and the agent's text answer,

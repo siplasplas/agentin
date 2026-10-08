@@ -1110,7 +1110,8 @@ void MainWindow::requestSuggestions(ChatTab *tab, bool show)
         }
         return;
     }
-    cache = {exchange, {}, true, show};
+    if (!show && cache.failedExchange == exchange) return;
+    cache = {exchange, {}, true, show, {}};
     if (show) status_->setText("Asking for suggestions…");
     const QString prompt =
         "Below is a conversation between a user and a coding agent, ending with its latest exchange. Suggest up to "
@@ -1138,6 +1139,7 @@ void MainWindow::requestSuggestions(ChatTab *tab, bool show)
         if (items.isEmpty()) {
             // Asked again when Suggest is pressed; a failure in the background is reported only to a user who waits.
             cache.exchange.clear();
+            cache.failedExchange = exchange;
             if (wanted)
                 appendLine("[Suggestions failed: " + (error.isEmpty() ? QString("the model gave none") : error) + "]");
         } else {
@@ -2851,7 +2853,10 @@ QWidget *MainWindow::addChatTab(AgentProvider *selected, const QString &workingD
     connect(tab, &ChatTab::steeringFailed, this, [this, tab](const QString &text) {
         if (currentTab() == tab && input_->toPlainText().isEmpty()) input_->replaceText(text);
     });
-    connect(tab, &ChatTab::changed, this, [this, page] { updateTab(page); });
+    connect(tab, &ChatTab::changed, this, [this, page, tab] {
+        updateTab(page);
+        prepareSuggestions(tab);
+    });
     connect(tab, &ChatTab::textAppended, this, [this, page] {
         if (tabs_->currentWidget() != page) {
             tabs_->setTabAttention(page, true);
@@ -3085,6 +3090,17 @@ void MainWindow::showCurrentTab()
     }
     revealCurrentConversation(true);
     updateStatus();
+    if (tab) prepareSuggestions(tab);
+}
+
+// Ideas for the shown chat are prepared in the background when it can take a message after an answer: after
+// agentin starts and a chat's history is read, or when another tab is chosen. Other tabs wait until they are shown,
+// so that the model is not asked for every open chat at once.
+void MainWindow::prepareSuggestions(ChatTab *tab)
+{
+    if (tab == currentTab() && tab->provider()->supportsSuggestions() && tab->isLive()
+        && !tab->agent()->isResponding())
+        requestSuggestions(tab, false);
 }
 
 QString MainWindow::chatName(const ChatTab *tab, const QString &separator, bool spoken) const

@@ -2765,8 +2765,9 @@ for line in sys.stdin:
     }
 }
 
-// Ideas are prepared when a turn ends and the first one goes into the empty message field; Suggest lists all of
-// them without asking the model again, and stays offered while the field holds an idea unchanged.
+// Ideas are prepared when a turn ends, or when a chat with history is opened, and the first one goes into the
+// empty message field; Suggest lists all of them without asking the model again, and stays offered while the
+// field holds an idea unchanged.
 void MainWindowTest::suggestionsFillTheMessageField()
 {
     QTemporaryDir directory;
@@ -2791,6 +2792,20 @@ for line in sys.stdin:
         if request["params"].get("ephemeral"):
             ephemeral.add(thread)
         result = {"thread": {"id": thread}}
+    elif method == "thread/list":
+        result = {"data": [] if request["params"].get("archived") else [{"id": "old-chat", "createdAt": 100,
+                  "updatedAt": 200, "cwd": folder, "preview": "Old chat"}], "nextCursor": None}
+    elif method == "thread/resume":
+        result = {"thread": {"id": request["params"]["threadId"]}}
+    elif method == "thread/items/list":
+        items = []
+        if request["params"]["threadId"] == "old-chat":
+            items = [{"turnId": "t", "item": {"type": "userMessage", "id": "u",
+                      "content": [{"type": "text", "text": "Fix the bug"}]}},
+                     {"turnId": "t", "item": {"type": "agentMessage", "id": "a", "text": "The bug is fixed"}}]
+        if request["params"].get("sortDirection") == "desc":
+            items.reverse()
+        result = {"data": items, "nextCursor": None}
     elif method == "turn/start":
         result = {"turn": {"id": "turn-1"}}
     send({"id": request["id"], "result": result})
@@ -2860,6 +2875,22 @@ for line in sys.stdin:
     suggest->click();
     QCOMPARE(input->toPlainText(), QString("First idea"));
     QCOMPARE(askedTimes(), 1);
+
+    // A chat opened with its history, as after agentin starts, gets its ideas without a turn of its own.
+    input->clear();
+    auto *tree = window.findChild<QTreeWidget *>("conversationTree");
+    QVERIFY(tree);
+    tree->topLevelItem(0)->setExpanded(true);
+    const auto oldChat = [tree]() -> QTreeWidgetItem * {
+        for (QTreeWidgetItemIterator it(tree); *it; ++it)
+            if ((*it)->data(0, Qt::UserRole + 3).toString() == "Old chat") return *it;
+        return nullptr;
+    };
+    QTRY_VERIFY(oldChat());
+    doubleClickItem(tree, oldChat());
+    QTRY_VERIFY(chat->toPlainText().contains("The bug is fixed"));
+    QTRY_COMPARE(input->toPlainText(), QString("First idea"));
+    QCOMPARE(askedTimes(), 2);
 }
 
 #include "MainWindowTest.moc"
