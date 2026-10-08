@@ -597,7 +597,8 @@ between the tree and the panel to adjust their heights. The panel follows the
 selected conversation and keeps background conversations separate. It displays
 reasoning summaries or raw text supplied by Codex, preferring raw text when
 available, and thinking blocks supplied by Claude/GLM. Text updates during a turn
-and is also read from loaded history. It is separate from the main transcript;
+and is also read from loaded history; a thought recorded twice, as Claude Code's
+transcripts do at times, is shown once. It is separate from the main transcript;
 Codex turns explicitly request detailed reasoning summaries; models that do not
 expose text can still report reasoning-token usage while leaving the panel empty. Only text shared by
 the provider is shown, not hidden reasoning or encrypted/redacted blocks.

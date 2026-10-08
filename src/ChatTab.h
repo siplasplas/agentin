@@ -163,6 +163,8 @@ private:
     void updateReasoning(const QString &id, const QString &text);
     void rebuildReasoning();
     void clearReasoning();
+    // Whether another reasoning item holds exactly this text.
+    bool reasoningHeldElsewhere(const QString &id, const QString &text) const;
     void appendToolText(const QString &text);
     int toolGroup_ = 0;
     int nextToolGroup_ = 0;

@@ -432,6 +432,19 @@ void MainWindowTest::reasoningPanelAndStreaming()
         QCOMPARE(panel->toPlainText(), QString("Saved summary\n\nRaw text continued"));
         QVERIFY(tab->document()->toPlainText().contains("Saved answer"));
         QVERIFY(!tab->document()->toPlainText().contains("Saved summary"));
+        // A thought recorded twice in the history, under one ID or two, is shown once; so is one that arrives
+        // again live under another ID, also when it grew there before it was complete.
+        agent->historyLoaded("", {{"reasoning", "Twice", "dup-1"}, {"reasoning", "Twice", "dup-1"},
+                                  {"reasoning", "Twice", "dup-2"}, {"assistant", "Answer"}}, false, {});
+        QCOMPARE(panel->toPlainText(), QString("Twice\n\nSaved summary\n\nRaw text continued"));
+        agent->reasoningUpdated("dup-3", "Twice");
+        QCOMPARE(panel->toPlainText(), QString("Twice\n\nSaved summary\n\nRaw text continued"));
+        agent->reasoningUpdated("dup-4", "Tw");
+        QCOMPARE(panel->toPlainText(), QString("Twice\n\nSaved summary\n\nRaw text continued\n\nTw"));
+        agent->reasoningUpdated("dup-4", "Twice");
+        QCOMPARE(panel->toPlainText(), QString("Twice\n\nSaved summary\n\nRaw text continued"));
+        agent->reasoningUpdated("dup-4", "Twice more");
+        QCOMPARE(panel->toPlainText(), QString("Twice\n\nSaved summary\n\nRaw text continued\n\nTwice more"));
         ChatTab preview(tab->provider(), directory.path());
         preview.agent()->reasoningUpdated("old", "Old preview text");
         preview.showPreview(tab->provider(), "different", directory.path(), "Different conversation");

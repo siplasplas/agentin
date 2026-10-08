@@ -410,6 +410,13 @@ void ChatTab::clearReasoning()
     reasoningDocument_->clear();
 }
 
+bool ChatTab::reasoningHeldElsewhere(const QString &id, const QString &text) const
+{
+    for (auto it = reasoningItems_.cbegin(); it != reasoningItems_.cend(); ++it)
+        if (it.key() != id && it.value() == text) return true;
+    return false;
+}
+
 void ChatTab::rebuildReasoning()
 {
     QStringList parts;
@@ -424,6 +431,16 @@ void ChatTab::updateReasoning(const QString &id, const QString &text)
     const QString before = reasoningItems_.value(id);
     if (before == text) return;
     const bool exists = reasoningItems_.contains(id);
+    // The same thought under another ID is shown once: Claude Code records a thinking block twice at times, and
+    // a copy that grew under its own ID goes when it turns out to be one.
+    if (reasoningHeldElsewhere(id, text)) {
+        if (exists) {
+            reasoningOrder_.removeAll(id);
+            reasoningItems_.remove(id);
+            rebuildReasoning();
+        }
+        return;
+    }
     if (!exists) reasoningOrder_.append(id);
     reasoningItems_.insert(id, text);
     if (reasoningOrder_.last() == id && text.startsWith(before)) {
@@ -730,13 +747,16 @@ void ChatTab::showHistory(const QList<ChatEntry> &entries, bool hasMore, const Q
     historyMessages_.clear();
     exchanges_.clear();
     QStringList reasoningHistory;
+    // A thought recorded twice, under one ID or two, is shown once.
+    QSet<QString> reasoningTexts;
     int reasoningIndex = 0;
     for (const ChatEntry &entry : entries) {
         if (entry.role == "reasoning") {
             const QString key = entry.id.isEmpty() ? "history-" + QString::number(reasoningIndex++) : entry.id;
-            if (!entry.text.isEmpty()) {
+            if (!entry.text.isEmpty() && !reasoningHistory.contains(key) && !reasoningTexts.contains(entry.text)) {
                 reasoningItems_.insert(key, entry.text);
                 reasoningHistory.append(key);
+                reasoningTexts.insert(entry.text);
             }
             continue;
         }
@@ -762,8 +782,11 @@ void ChatTab::showHistory(const QList<ChatEntry> &entries, bool hasMore, const Q
             }
         }
     }
-    for (const QString &key : reasoningOrder_)
-        if (!reasoningHistory.contains(key)) reasoningHistory.append(key);
+    for (const QString &key : reasoningOrder_) {
+        if (reasoningHistory.contains(key) || reasoningTexts.contains(reasoningItems_.value(key))) continue;
+        reasoningHistory.append(key);
+        reasoningTexts.insert(reasoningItems_.value(key));
+    }
     reasoningOrder_ = reasoningHistory;
     rebuildReasoning();
     if (!notice.isEmpty()) blocks.append("[" + notice + "]");
