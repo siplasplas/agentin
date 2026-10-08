@@ -77,7 +77,8 @@ private:
     void suggestMessage();
     void requestSuggestions(ChatTab *tab, bool show);
     void prepareSuggestions(ChatTab *tab);
-    void showSuggestions(const QStringList &items);
+    // Several ideas, or with list also a single one, are listed over the message field; one is put in it.
+    void showSuggestions(const QStringList &items, bool list);
     void updateSuggestButton();
     // Asks for a conversation's new name, offering proposal, and renames it in its agent.
     void renameConversation(AgentProvider *owner, const QString &id, const QString &path, const QString &title,

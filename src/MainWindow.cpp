@@ -1069,20 +1069,27 @@ bool shownSuggestion(const ChatTab *tab, const QString &text)
     const ChatTab::Suggestions &cache = tab->suggestions();
     return !text.isEmpty() && cache.items.contains(text) && cache.exchange == latestExchange(tab);
 }
+
+// Whether ideas for the tab's latest exchange are on their way or known.
+bool knownSuggestions(const ChatTab *tab)
+{
+    const ChatTab::Suggestions &cache = tab->suggestions();
+    return (cache.pending || !cache.items.isEmpty()) && cache.exchange == latestExchange(tab);
+}
 }
 
 void MainWindow::updateSuggestButton()
 {
     const ChatTab *tab = currentTab();
-    // Ideas are offered for an empty message field, where spaces and line breaks alone count as empty, and for a
-    // field still holding one of the ideas, so that the others can be chosen instead.
+    // Ideas are offered for an empty message field, where spaces and line breaks alone count as empty, and, over
+    // any text, while they are on their way or known for the latest exchange, so that they can be looked at.
     const QString text = input_->toPlainText();
     const bool supported = tab && tab->provider()->supportsSuggestions()
-                           && (text.trimmed().isEmpty() || shownSuggestion(tab, text));
+                           && (text.trimmed().isEmpty() || knownSuggestions(tab));
     suggestButton_->setVisible(supported);
     suggestButton_->setEnabled(supported && tab->isLive() && !tab->agent()->isResponding()
                                && !latestExchange(tab).isEmpty());
-    const bool thinking = tab && tab->suggestions().pending;
+    const bool thinking = supported && tab->suggestions().pending;
     if (suggestButton_->property("thinking").toBool() != thinking) {
         suggestButton_->setProperty("thinking", thinking);
         suggestButton_->setIcon(thinking ? suggestThinkingIcon_ : suggestIcon_);
@@ -1095,8 +1102,17 @@ void MainWindow::suggestMessage()
 {
     ChatTab *tab = currentTab();
     if (!tab || !suggestButton_->isEnabled()) return;
-    if (shownSuggestion(tab, input_->toPlainText())) {
-        showSuggestions(tab->suggestions().items);
+    const QString text = input_->toPlainText();
+    const ChatTab::Suggestions &cache = tab->suggestions();
+    if (shownSuggestion(tab, text)) {
+        showSuggestions(cache.items, false);
+        return;
+    }
+    // Over the user's own text the ideas are only listed, also a single one; the chosen one replaces the text,
+    // which Ctrl+Z brings back.
+    if (!text.trimmed().isEmpty() && !cache.pending && cache.exchange == latestExchange(tab)
+        && !cache.items.isEmpty()) {
+        showSuggestions(cache.items, true);
         return;
     }
     requestSuggestions(tab, true);
@@ -1181,7 +1197,9 @@ void MainWindow::requestSuggestions(ChatTab *tab, bool show)
             cache.items = items;
             // The first idea is put in an empty message field, also when it was prepared in the background, but
             // never over a message typed meanwhile.
-            if (currentTab() == tab && input_->toPlainText().trimmed().isEmpty()) input_->showSuggestion(items.first());
+            // Nor while the next turn runs: ideas for an exchange the chat has moved past are kept, not shown.
+            if (currentTab() == tab && input_->toPlainText().trimmed().isEmpty() && exchange == latestExchange(tab))
+                input_->showSuggestion(items.first());
         }
         updateStatus();
     });
@@ -1278,10 +1296,9 @@ void MainWindow::suggestConversationName(AgentProvider *owner, const QString &id
     });
 }
 
-// One suggestion goes straight into the message field; several are offered in a list over it.
-void MainWindow::showSuggestions(const QStringList &items)
+void MainWindow::showSuggestions(const QStringList &items, bool list)
 {
-    if (items.size() == 1) {
+    if (items.size() == 1 && !list) {
         input_->showSuggestion(items.first());
         return;
     }

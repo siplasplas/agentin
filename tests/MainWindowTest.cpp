@@ -2906,11 +2906,22 @@ for line in sys.stdin:
     QCOMPARE(askedTimes(), 1);
     QVERIFY(suggest->isVisible());
 
-    // An edited idea is the user's message: Suggest is no longer offered.
+    // An edited idea is the user's message, yet the ideas can still be listed; the chosen one replaces the text,
+    // which Ctrl+Z brings back.
     QTest::keyClick(input, Qt::Key_End);
     QTest::keyClicks(input, " now");
     QCOMPARE(input->toPlainText(), QString("Second idea now"));
-    QVERIFY(!suggest->isVisible());
+    QVERIFY(suggest->isVisible() && suggest->isEnabled());
+    suggest->click();
+    QTRY_VERIFY(qobject_cast<QMenu *>(QApplication::activePopupWidget()));
+    menu = qobject_cast<QMenu *>(QApplication::activePopupWidget());
+    QCOMPARE(menu->actions().size(), 3);
+    menu->actions().at(2)->trigger();
+    menu->close();
+    QCOMPARE(input->toPlainText(), QString("Third idea"));
+    input->undo();
+    QCOMPARE(input->toPlainText(), QString("Second idea now"));
+    QCOMPARE(askedTimes(), 1);
 
     // With the field emptied, Suggest puts the first idea back without asking again.
     input->clear();
@@ -2935,13 +2946,25 @@ for line in sys.stdin:
     doubleClickItem(tree, oldChat());
     QTRY_VERIFY(chat->toPlainText().contains("The bug is fixed"));
     QTRY_VERIFY(thinking());
-    QTRY_COMPARE(input->toPlainText(), QString("First idea"));
-    QVERIFY(!thinking());
+    // Typing while the model thinks keeps the bulb, red; the idea does not replace the typed text, and once it
+    // has come, Suggest lists it, also alone.
+    input->setFocus();
+    QTest::keyClicks(input, "My own words");
+    QVERIFY(suggest->isVisible() && thinking());
+    QTRY_VERIFY(!thinking());
+    QCOMPARE(input->toPlainText(), QString("My own words"));
+    QVERIFY(suggest->isVisible() && suggest->isEnabled());
     QCOMPARE(askedTimes(), 2);
     QVERIFY(prompts().last().contains("Suggest one short message"));
     QVERIFY(!prompts().last().contains("three"));
-    // With one idea there is no list: Suggest leaves it in the field.
-    QTRY_VERIFY(suggest->isVisible() && suggest->isEnabled());
+    suggest->click();
+    QTRY_VERIFY(qobject_cast<QMenu *>(QApplication::activePopupWidget()));
+    menu = qobject_cast<QMenu *>(QApplication::activePopupWidget());
+    QCOMPARE(menu->actions().size(), 1);
+    menu->actions().first()->trigger();
+    menu->close();
+    QCOMPARE(input->toPlainText(), QString("First idea"));
+    // With one idea in the field there is no list: Suggest leaves it there.
     suggest->click();
     QTest::qWait(50);
     QVERIFY(!QApplication::activePopupWidget());

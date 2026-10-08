@@ -359,11 +359,12 @@ to answer from the conversation alone, without tools; when no answer comes withi
 seconds, the asking is given up, and Suggest asks again.
 
 **Suggest** (the light bulb, red while the model thinks of ideas; Ctrl+Space; shown
-while the message field is empty, holds only spaces and line breaks, or holds a
-suggested idea unchanged) lists the ideas over the message field when there are two or
-three, without asking the model again; the chosen one replaces the field's text in the
-same way. In an empty field it puts the first idea back, or, if the ideas are not known
-yet, asks for them and waits.
+while the message field is empty or holds only spaces and line breaks, and, whatever
+you type, while the ideas for the latest exchange are on their way or known) lists the
+ideas over the message field, without asking the model again: when there are two or
+three, and over text of your own also a single one. The chosen one replaces the
+field's text in the same way, and Ctrl+Z brings your text back. In an empty field it
+puts the first idea back, or, if the ideas are not known yet, asks for them and waits.
 
 When the chat's directory is in a Git work tree, the chat header also sums up the
 files the latest turn changed, for example `Changes: 7 files, +120 −34`, counting
