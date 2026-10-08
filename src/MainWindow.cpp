@@ -1121,8 +1121,21 @@ void MainWindow::requestSuggestions(ChatTab *tab, bool show)
         return;
     }
     if (!show && cache.failedExchange == exchange) return;
-    cache = {exchange, {}, true, show, {}};
+    cache = {exchange, {}, true, show, {}, cache.request + 1};
     updateSuggestButton();
+    // A model that does not answer, or a helper that hangs, must not keep the bulb red for good.
+    constexpr int kSuggestionTimeoutSeconds = 60;
+    QTimer::singleShot(kSuggestionTimeoutSeconds * 1000, tab, [this, tab, request = cache.request] {
+        ChatTab::Suggestions &cache = tab->suggestions();
+        if (!cache.pending || cache.request != request) return;
+        if (cache.wanted)
+            appendLine(QString("[Suggestions failed: no answer within %1 seconds]").arg(kSuggestionTimeoutSeconds));
+        cache.failedExchange = cache.exchange;
+        cache.exchange.clear();
+        cache.pending = false;
+        cache.wanted = false;
+        updateStatus();
+    });
     if (show) status_->setText("Asking for suggestions…");
     // One short idea by default, which the model gives soonest; the options allow two or three.
     const int count = suggestionCount_;
@@ -1143,15 +1156,17 @@ void MainWindow::requestSuggestions(ChatTab *tab, bool show)
         + (count == 1 ? QString() : "Make the " + number + " ideas clearly different from each other. ")
         + "Suggest committing only when the work looks finished, and then always together with what to do next. "
         "Avoid generic messages such as thanks, \"continue\" or \"looks good\".\n"
+        "Answer from the conversation below alone: do not run commands, read files or use any tools.\n"
         "Write in the language the user writes in. "
         + (count == 1 ? QString("Reply with only the message, on one line, without quotes or comments.")
                       : QString("Reply with only the messages, one per line, without numbering, quotes or comments."))
         + "\n\n" + exchange;
     tab->provider()->suggest(tab->workingDirectory(), prompt, tab,
-                             [this, tab, exchange, count](const QString &text, const QString &error) {
+                             [this, tab, exchange, count, request = cache.request](const QString &text,
+                                                                                    const QString &error) {
         ChatTab::Suggestions &cache = tab->suggestions();
-        // Ideas for an exchange that a newer one has replaced are not wanted any more.
-        if (cache.exchange != exchange) return;
+        // Ideas from a request that a newer one replaced, or that ran out of time, are not wanted any more.
+        if (cache.exchange != exchange || cache.request != request) return;
         const bool wanted = cache.wanted;
         cache.pending = false;
         cache.wanted = false;

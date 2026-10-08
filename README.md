@@ -354,7 +354,9 @@ in the language you write in, from the cheapest model: Haiku for Claude,
 `glm-4.7-flash` for GLM (`GLM_SUGGEST_MODEL` changes it), and the smallest model
 Codex lists in an ephemeral, read-only thread. When they arrive and the message field is
 still empty, the first, most useful idea is put in it selected, so typing replaces it
-and Enter sends it; a message you started meanwhile is never replaced.
+and Enter sends it; a message you started meanwhile is never replaced. The model is told
+to answer from the conversation alone, without tools; when no answer comes within 60
+seconds, the asking is given up, and Suggest asks again.
 
 **Suggest** (the light bulb, red while the model thinks of ideas; Ctrl+Space; shown
 while the message field is empty, holds only spaces and line breaks, or holds a

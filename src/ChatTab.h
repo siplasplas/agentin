@@ -97,6 +97,8 @@ public:
         bool wanted = false;
         // The exchange for which asking failed; it is not asked in the background again, only by Suggest.
         QString failedExchange;
+        // Counts the requests, so that the time limit of one does not end a later one.
+        int request = 0;
     };
     Suggestions &suggestions() { return suggestions_; }
     const Suggestions &suggestions() const { return suggestions_; }
