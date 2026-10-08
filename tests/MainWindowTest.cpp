@@ -91,6 +91,7 @@ private slots:
     void tabNamesFollowOptions();
     void changesWindowShowsDiff();
     void recallAllCodexMessages();
+    void suggestionsFillTheMessageField();
 };
 
 void MainWindowTest::foldedOutputScrolling()
@@ -2752,6 +2753,97 @@ for line in sys.stdin:
         startChat(window, "Codex", directory.path());
         QTRY_VERIFY(chat->document()->toPlainText().isEmpty() || !chat->toPlainText().contains("done"));
     }
+}
+
+// The first suggested idea goes into the message field; Suggest again lists all of them without asking the model
+// again, and stays offered while the field holds an idea unchanged.
+void MainWindowTest::suggestionsFillTheMessageField()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    const QString fakeServer = directory.filePath("codex");
+    QFile script(fakeServer);
+    QVERIFY(script.open(QIODevice::WriteOnly));
+    script.write(R"PY(#!/usr/bin/env python3
+import json, os, sys
+folder = os.path.dirname(__file__)
+ephemeral = set()
+def send(message):
+    print(json.dumps(message), flush=True)
+for line in sys.stdin:
+    request = json.loads(line)
+    method = request.get("method")
+    if "id" not in request or not method:
+        continue
+    result = {}
+    if method == "thread/start":
+        thread = "thread-%d" % request["id"]
+        if request["params"].get("ephemeral"):
+            ephemeral.add(thread)
+        result = {"thread": {"id": thread}}
+    elif method == "turn/start":
+        result = {"turn": {"id": "turn-1"}}
+    send({"id": request["id"], "result": result})
+    if method == "turn/start":
+        thread = request["params"]["threadId"]
+        send({"method": "turn/started", "params": {"threadId": thread, "turn": {"id": "turn-1"}}})
+        if thread in ephemeral:
+            with open(os.path.join(folder, "suggestions.log"), "a") as log:
+                log.write("asked\n")
+            send({"method": "item/agentMessage/delta", "params": {"threadId": thread, "itemId": "s",
+                  "delta": "1. First idea\n2. Second idea\n3. Third idea"}})
+        else:
+            send({"method": "item/completed", "params": {"threadId": thread,
+                  "item": {"type": "agentMessage", "id": "m", "text": "The task is done"}}})
+        send({"method": "turn/completed", "params": {"threadId": thread,
+              "turn": {"id": "turn-1", "status": "completed"}}})
+)PY");
+    script.close();
+    QVERIFY(script.setPermissions(QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner));
+    const auto askedTimes = [&directory] {
+        QFile log(directory.filePath("suggestions.log"));
+        return log.open(QIODevice::ReadOnly) ? log.readAll().count('\n') : 0;
+    };
+    MainWindow window(fakeServer, directory.path(), {}, {}, "gemini", nullptr, directory.filePath("index.json"));
+    window.show();
+    auto *input = window.findChild<MessageInput *>("commandInput");
+    auto *chat = window.findChild<QPlainTextEdit *>("chatView");
+    auto *suggest = window.findChild<QPushButton *>("suggestButton");
+    QVERIFY(input && chat && suggest);
+    QTRY_VERIFY(window.findChild<QWidget *>("newChatButton")->isEnabled());
+    input->setFocus();
+    QTest::keyClicks(input, "Do the task");
+    QTest::keyClick(input, Qt::Key_Return);
+    QTRY_VERIFY_WITH_TIMEOUT(chat->toPlainText().contains("The task is done"), 10000);
+    QTRY_VERIFY(suggest->isVisible() && suggest->isEnabled());
+
+    // The first idea is put in the field selected, so that typing replaces it, and Suggest stays offered.
+    suggest->click();
+    QTRY_COMPARE(input->toPlainText(), QString("First idea"));
+    QCOMPARE(input->textCursor().selectedText(), QString("First idea"));
+    QVERIFY(!QApplication::activePopupWidget());
+    QCOMPARE(askedTimes(), 1);
+    QTRY_VERIFY(suggest->isVisible() && suggest->isEnabled());
+
+    // Asking again lists all the ideas from memory; the chosen one replaces the field's text.
+    suggest->click();
+    QTRY_VERIFY(qobject_cast<QMenu *>(QApplication::activePopupWidget()));
+    auto *menu = qobject_cast<QMenu *>(QApplication::activePopupWidget());
+    QStringList listed;
+    for (QAction *action : menu->actions()) listed.append(action->toolTip());
+    QCOMPARE(listed, (QStringList{"First idea", "Second idea", "Third idea"}));
+    menu->actions().at(1)->trigger();
+    menu->close();
+    QCOMPARE(input->toPlainText(), QString("Second idea"));
+    QCOMPARE(input->textCursor().selectedText(), QString("Second idea"));
+    QCOMPARE(askedTimes(), 1);
+    QVERIFY(suggest->isVisible());
+
+    // An edited idea is the user's message: Suggest is no longer offered.
+    QTest::keyClick(input, Qt::Key_End);
+    QTest::keyClicks(input, " now");
+    QCOMPARE(input->toPlainText(), QString("Second idea now"));
+    QVERIFY(!suggest->isVisible());
 }
 
 #include "MainWindowTest.moc"

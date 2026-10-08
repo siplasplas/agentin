@@ -392,8 +392,8 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     suggestButton_->setAccessibleName("Suggest");
     suggestButton_->setShortcut(QKeySequence("Ctrl+Space"));
     suggestButton_->setToolTip("Suggest (Ctrl+Space): ideas for your next message from the agent's cheapest model, "
-                               "based on the latest exchange. They are asked once per exchange and shown again from "
-                               "memory.");
+                               "based on the latest exchange. The first idea goes into the message field; pressing "
+                               "again lists all of them.");
     suggestButton_->setEnabled(false);
     // The messages the arrow keys recall, listed as a combo box lists its items.
     historyButton_ = new QToolButton(central);
@@ -1057,19 +1057,30 @@ QStringList parseSuggestions(const QString &text)
     }
     return items;
 }
+
+// Whether the message field holds, unchanged, one of the ideas suggested for the tab's latest exchange.
+bool shownSuggestion(const ChatTab *tab, const QString &text)
+{
+    const ChatTab::Suggestions &cache = tab->suggestions();
+    return !text.isEmpty() && cache.items.contains(text) && cache.exchange == latestExchange(tab);
+}
 }
 
 void MainWindow::updateSuggestButton()
 {
     const ChatTab *tab = currentTab();
-    // Ideas are offered only for an empty message field; spaces and line breaks alone count as empty.
-    const bool supported = tab && tab->provider()->supportsSuggestions() && input_->toPlainText().trimmed().isEmpty();
+    // Ideas are offered for an empty message field, where spaces and line breaks alone count as empty, and for a
+    // field still holding one of the ideas, so that the others can be chosen instead.
+    const QString text = input_->toPlainText();
+    const bool supported = tab && tab->provider()->supportsSuggestions()
+                           && (text.trimmed().isEmpty() || shownSuggestion(tab, text));
     suggestButton_->setVisible(supported);
     suggestButton_->setEnabled(supported && tab->isLive() && !tab->agent()->isResponding()
                                && !tab->suggestions().pending && !latestExchange(tab).isEmpty());
 }
 
-// Suggestions are asked once per exchange, outside the conversation; asking again shows them from memory.
+// Suggestions are asked once per exchange, outside the conversation; the first idea goes into the message field.
+// Asking again lists all of them from memory.
 void MainWindow::suggestMessage()
 {
     ChatTab *tab = currentTab();
@@ -1105,7 +1116,7 @@ void MainWindow::suggestMessage()
             cache.exchange = exchange;
             cache.items = items;
             // Shown only where the user still waits for them, not over a message typed meanwhile.
-            if (currentTab() == tab && input_->toPlainText() == before) showSuggestions(items);
+            if (currentTab() == tab && input_->toPlainText() == before) input_->showSuggestion(items.first());
         }
         updateStatus();
     });
@@ -1202,7 +1213,7 @@ void MainWindow::suggestConversationName(AgentProvider *owner, const QString &id
     });
 }
 
-// One suggestion goes straight into the message field; several are offered in a list under it first.
+// One suggestion goes straight into the message field; several are offered in a list over it.
 void MainWindow::showSuggestions(const QStringList &items)
 {
     if (items.size() == 1) {
