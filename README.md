@@ -354,7 +354,7 @@ Codex lists in an ephemeral, read-only thread. When they arrive and the message 
 still empty, the first, most useful idea is put in it selected, so typing replaces it
 and Enter sends it; a message you started meanwhile is never replaced.
 
-**Suggest** (the light bulb, Ctrl+Space, shown while the message field is empty, holds
+**Suggest** (the light bulb, red while the model thinks of ideas; Ctrl+Space; shown while the message field is empty, holds
 only spaces and line breaks, or holds a suggested idea unchanged) lists all the ideas
 over the message field, without asking the model again; the chosen one replaces the
 field's text in the same way. In an empty field it puts the first idea back, or, if the

@@ -2776,7 +2776,7 @@ void MainWindowTest::suggestionsFillTheMessageField()
     QFile script(fakeServer);
     QVERIFY(script.open(QIODevice::WriteOnly));
     script.write(R"PY(#!/usr/bin/env python3
-import json, os, sys
+import json, os, sys, time
 folder = os.path.dirname(__file__)
 ephemeral = set()
 def send(message):
@@ -2815,6 +2815,8 @@ for line in sys.stdin:
         if thread in ephemeral:
             with open(os.path.join(folder, "suggestions.log"), "a") as log:
                 log.write("asked\n")
+            # The model thinks for a while, so that the window can be seen waiting.
+            time.sleep(0.3)
             send({"method": "item/agentMessage/delta", "params": {"threadId": thread, "itemId": "s",
                   "delta": "1. First idea\n2. Second idea\n3. Third idea"}})
         else:
@@ -2841,9 +2843,13 @@ for line in sys.stdin:
     QTest::keyClick(input, Qt::Key_Return);
     QTRY_VERIFY_WITH_TIMEOUT(chat->toPlainText().contains("The task is done"), 10000);
 
-    // Ideas are asked when the turn ends, and the first one is put in the field selected, so that typing replaces
-    // it; Suggest stays offered.
+    // Ideas are asked when the turn ends, with the bulb red while the model thinks, and the first one is put in the
+    // field selected, so that typing replaces it; Suggest stays offered, yellow again.
+    const auto thinking = [suggest] { return suggest->property("thinking").toBool(); };
+    QTRY_VERIFY(thinking());
+    QVERIFY(input->toPlainText().isEmpty());
     QTRY_COMPARE(input->toPlainText(), QString("First idea"));
+    QVERIFY(!thinking());
     QCOMPARE(input->textCursor().selectedText(), QString("First idea"));
     QVERIFY(!QApplication::activePopupWidget());
     QCOMPARE(askedTimes(), 1);
@@ -2889,7 +2895,9 @@ for line in sys.stdin:
     QTRY_VERIFY(oldChat());
     doubleClickItem(tree, oldChat());
     QTRY_VERIFY(chat->toPlainText().contains("The bug is fixed"));
+    QTRY_VERIFY(thinking());
     QTRY_COMPARE(input->toPlainText(), QString("First idea"));
+    QVERIFY(!thinking());
     QCOMPARE(askedTimes(), 2);
 }
 

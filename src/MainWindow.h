@@ -196,6 +196,8 @@ private:
     void updateSendToolTip();
     QPushButton *steerButton_;
     QPushButton *suggestButton_;
+    QIcon suggestIcon_;
+    QIcon suggestThinkingIcon_;
     QToolButton *historyButton_;
     QPushButton *stopButton_;
     QPushButton *newChatButton_;

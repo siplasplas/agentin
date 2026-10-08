@@ -151,14 +151,15 @@ QIcon paintedIcon(int size, qreal ratio, const QColor &color, const QString &sym
 }
 
 // A yellow light bulb.
-QIcon bulbIcon(int size, qreal ratio)
+// A yellow light bulb, red while the model thinks of ideas.
+QIcon bulbIcon(int size, qreal ratio, bool thinking = false)
 {
     QPixmap pixmap = iconCanvas(size, ratio);
     QPainter painter(&pixmap);
     painter.setRenderHint(QPainter::Antialiasing);
     const qreal unit = size / 16.0;
-    painter.setPen(QPen(QColor(0xb2, 0x8b, 0x00), unit));
-    painter.setBrush(QColor(0xff, 0xd6, 0x00));
+    painter.setPen(QPen(thinking ? QColor(0xb7, 0x1c, 0x1c) : QColor(0xb2, 0x8b, 0x00), unit));
+    painter.setBrush(thinking ? QColor(0xef, 0x53, 0x50) : QColor(0xff, 0xd6, 0x00));
     painter.drawEllipse(QRectF(3 * unit, 1 * unit, 10 * unit, 10 * unit));
     painter.setPen(Qt::NoPen);
     painter.setBrush(QColor(0x75, 0x75, 0x75));
@@ -386,14 +387,16 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
                              "Send queues it for the next turn");
     steerButton_->setEnabled(false);
     steerButton_->hide();
-    suggestButton_ = new QPushButton(bulbIcon(iconSize, devicePixelRatioF()), {}, central);
+    suggestIcon_ = bulbIcon(iconSize, devicePixelRatioF());
+    suggestThinkingIcon_ = bulbIcon(iconSize, devicePixelRatioF(), true);
+    suggestButton_ = new QPushButton(suggestIcon_, {}, central);
     suggestButton_->setObjectName("suggestButton");
     suggestButton_->setIconSize(QSize(iconSize, iconSize));
     suggestButton_->setAccessibleName("Suggest");
     suggestButton_->setShortcut(QKeySequence("Ctrl+Space"));
     suggestButton_->setToolTip("Suggest (Ctrl+Space): ideas for your next message from the agent's cheapest model, "
-                               "prepared when a turn ends. The first idea goes into the empty message field; Suggest "
-                               "lists all of them.");
+                               "prepared when a turn ends; the bulb is red while the model thinks. The first idea "
+                               "goes into the empty message field; Suggest lists all of them.");
     suggestButton_->setEnabled(false);
     // The messages the arrow keys recall, listed as a combo box lists its items.
     historyButton_ = new QToolButton(central);
@@ -1077,6 +1080,11 @@ void MainWindow::updateSuggestButton()
     suggestButton_->setVisible(supported);
     suggestButton_->setEnabled(supported && tab->isLive() && !tab->agent()->isResponding()
                                && !latestExchange(tab).isEmpty());
+    const bool thinking = tab && tab->suggestions().pending;
+    if (suggestButton_->property("thinking").toBool() != thinking) {
+        suggestButton_->setProperty("thinking", thinking);
+        suggestButton_->setIcon(thinking ? suggestThinkingIcon_ : suggestIcon_);
+    }
 }
 
 // The first idea goes into the message field; pressed again while the field holds an idea, Suggest lists all of
@@ -1112,6 +1120,7 @@ void MainWindow::requestSuggestions(ChatTab *tab, bool show)
     }
     if (!show && cache.failedExchange == exchange) return;
     cache = {exchange, {}, true, show, {}};
+    updateSuggestButton();
     if (show) status_->setText("Asking for suggestions…");
     const QString prompt =
         "Below is a conversation between a user and a coding agent, ending with its latest exchange. Suggest up to "
