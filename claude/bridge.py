@@ -749,7 +749,10 @@ async def suggest(prompt, provider):
     from claude_agent_sdk import query
 
     directory = os.path.realpath(tempfile.mkdtemp(prefix="agentin-suggest-"))
-    settings = {"cwd": directory, "tools": [], "max_turns": 1, "setting_sources": [], "permission_mode": "default"}
+    # Without thinking: Claude Code lets the model think by default, and Haiku could think for a minute, several
+    # thousand tokens, before a one-line answer that takes it two seconds otherwise.
+    settings = {"cwd": directory, "tools": [], "max_turns": 1, "setting_sources": [], "permission_mode": "default",
+                "thinking": {"type": "disabled"}}
     if provider == "glm":
         # The flash model is Z.AI's cheapest, which is enough for a few short suggestions.
         model = os.environ.get("GLM_SUGGEST_MODEL", "glm-4.7-flash")
