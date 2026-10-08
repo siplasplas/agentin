@@ -629,7 +629,10 @@ Select a chat in the conversation tree to show a read-only preview of its
 latest messages in the preview tab, whose title is shown in italics. Selecting
 another chat replaces the preview; a chat that is already open in a tab is shown
 there instead. Only the last 20 entries are loaded at first; use **Show
-earlier messages** to load older ones. Codex history is paged through the App
+earlier messages** to load older ones. In a Codex, Claude or GLM chat whose last entries
+hold no message of yours, as after a long turn with many tools, earlier pages are read
+on their own (up to ten) until one appears, so that ideas for the next message can be
+prepared. Codex history is paged through the App
 Server (`thread/items/list`), Claude and GLM history is read through the Claude
 Agent SDK, and Gemini history is read from the saved CLI session file.
 Antigravity does not expose its history, so no preview is available. Messages

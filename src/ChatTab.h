@@ -229,5 +229,7 @@ private:
     bool holdsDirectory_ = false;
     bool live_ = false;
     bool hasMore_ = false;
+    // Earlier pages read on their own because the latest ones held no message of the user's.
+    int earlierPagesRead_ = 0;
     bool pendingAttach_ = false;
 };

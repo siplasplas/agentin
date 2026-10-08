@@ -318,6 +318,7 @@ void ChatTab::showPreview(AgentProvider *provider, const QString &id, const QStr
     lockNotice_.clear();
     pendingAttach_ = false;
     hasMore_ = false;
+    earlierPagesRead_ = 0;
     liveTranscript_.clear();
     clearReasoning();
     historyRefreshCutoff_ = 0;
@@ -794,6 +795,16 @@ void ChatTab::showHistory(const QList<ChatEntry> &entries, bool hasMore, const Q
         block.setUserData(data);
     }
     hasMore_ = hasMore;
+    // Ideas for the next message need the user's last message. When the latest pages hold only the agent's
+    // messages and tools, as after a long turn, a few earlier pages are read until one of the user's appears.
+    constexpr int kEarlierPagesForSuggestions = 10;
+    if (exchanges_.isEmpty() && hasMore && provider_->supportsSuggestions()
+        && earlierPagesRead_ < kEarlierPagesForSuggestions) {
+        ++earlierPagesRead_;
+        QTimer::singleShot(0, this, [this, id = id_] {
+            if (id == id_) loadEarlier();
+        });
+    }
     // A tab saved as "New chat" before its first message was named takes the conversation's first message,
     // or, while older messages are not loaded, the title the agent's list has for it.
     if (title_ == "New chat" && !id_.isEmpty()) {
