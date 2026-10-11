@@ -638,6 +638,31 @@ QStringList places(const CommandUse &use, const QStringList &writable)
     return reasons;
 }
 
+// Whether a command removes only things inside the temporary directory, such as a build made there, also whole
+// directory trees. Removing the temporary directory itself asks, and so does a glob that takes any name in it,
+// as in rm -rf /tmp/*, which would reach what other programs keep there.
+bool removesOnlyTemporary(const CommandUse &use)
+{
+    if (use.effect != Effect::Remove || use.writes.isEmpty() || !use.problems.isEmpty()) return false;
+    QStringList temporary;
+    for (const QString &directory : {QString("/tmp"), QDir::tempPath()}) {
+        const QString real = realPath(QDir::cleanPath(directory));
+        if (real != "/" && !temporary.contains(real)) temporary.append(real);
+    }
+    return std::all_of(use.writes.cbegin(), use.writes.cend(), [&temporary](const QString &path) {
+        const QString real = realPath(path);
+        return std::any_of(temporary.cbegin(), temporary.cend(), [&real](const QString &directory) {
+            if (!real.startsWith(directory + '/')) return false;
+            const QString first = real.mid(directory.size() + 1).section('/', 0, 0);
+            if (first.isEmpty()) return false;
+            if (hasGlob(first))
+                for (const char *name : {"x", "file.txt", "data.json"})
+                    if (globMatches(first, name)) return false;
+            return true;
+        });
+    });
+}
+
 struct Judged
 {
     CommandDecision decision = CommandDecision::Allow;
@@ -728,7 +753,12 @@ Judged judge(const CommandUse &use, const CommandContext &context, const QString
         if (!use.redirectionWrites.contains(path) && !inside(realPath(path), context.writable) && !named(path))
             implicitPlace = true;
     const GitAsk git = gitAsk(use, words);
-    if (!ask.isEmpty() && allowed <= specificity(ask)) {
+    // A removal inside the temporary directory passes an Ask line for the whole program, such as rm *; a line
+    // that names more, such as rm -rf /tmp/keep*, still asks.
+    const bool temporary = removesOnlyTemporary(use);
+    const bool asked = !ask.isEmpty() && allowed <= specificity(ask)
+        && !(temporary && specificity(ask) <= words.first().size() + 1);
+    if (asked) {
         reasons.prepend("agentin's rule " + ask);
     } else if (!git.reason.isEmpty() && allowed <= QString("git " + use.subcommand + " ").size()) {
         reasons.append(git.reason);
@@ -752,7 +782,7 @@ Judged judge(const CommandUse &use, const CommandContext &context, const QString
         else if (use.effect == Effect::Unknown && problems.isEmpty())
             reasons.append(use.program.isEmpty() ? QString("the program is not known") : use.program + " is not a program agentin knows");
         else if (use.effect == Effect::Network) reasons.append("it uses the network");
-        else if (use.effect == Effect::Remove) reasons.append("it removes files");
+        else if (use.effect == Effect::Remove && !temporary) reasons.append("it removes files");
         reasons += outsidePlaces;
         // A rule for a Git command covers its other files and messages too, and one for a command that asks only
         // as it is not known or uses the network covers the same kind of work with other arguments.

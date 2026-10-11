@@ -72,11 +72,8 @@
       "name": "for-build-and-test-then-rm",
       "command": "for d in build cmake-build-debug cmake-build-release; do echo \"=== $d\"; cmake --build $d -j16 2>&1 | grep -E \"error|Error|FAILED\" | head -20; echo \"build rc=${PIPESTATUS[0]}\"; (cd $d && ctest 2>&1 | tail -3); done; rm -rf /tmp/qce-build",
       "cwd": "P",
-      "expect": "ask",
-      "asks": [
-        "rm -rf /tmp/qce-build"
-      ],
-      "note": "builds in writable directories; rm always asks"
+      "expect": "allow",
+      "note": "builds in writable directories; removing a directory tree inside /tmp passes rm *"
     },
     {
       "name": "stage-and-scan-for-private-data",
@@ -223,6 +220,50 @@
       "expect": "ask",
       "asks": [
         "rm -rf build"
+      ]
+    },
+    {
+      "name": "rm-inside-tmp-allowed",
+      "command": "rm -rf /tmp/agentin-test/ /tmp/qce-*.log && cd /tmp && rm -r build-x",
+      "cwd": "P",
+      "expect": "allow",
+      "note": "only inside the temporary directory, also directory trees and globs below a named prefix"
+    },
+    {
+      "name": "rm-tmp-itself-asks",
+      "command": "rm -rf /tmp",
+      "cwd": "P",
+      "expect": "ask",
+      "asks": [
+        "rm -rf /tmp"
+      ]
+    },
+    {
+      "name": "rm-everything-in-tmp-asks",
+      "command": "rm -rf /tmp/*",
+      "cwd": "P",
+      "expect": "ask",
+      "asks": [
+        "rm -rf /tmp/*"
+      ],
+      "note": "a glob that takes any name in /tmp reaches other programs' files"
+    },
+    {
+      "name": "rm-tmp-and-project-asks",
+      "command": "rm -rf /tmp/x build",
+      "cwd": "P",
+      "expect": "ask",
+      "asks": [
+        "rm -rf /tmp/x build"
+      ]
+    },
+    {
+      "name": "rm-leaving-tmp-asks",
+      "command": "rm -rf /tmp/../home/user/work",
+      "cwd": "P",
+      "expect": "ask",
+      "asks": [
+        "rm -rf /tmp/../home/user/work"
       ]
     },
     {

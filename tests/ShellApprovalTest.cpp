@@ -917,12 +917,15 @@ void ShellApprovalTest::corpusEvaluates()
     for (const QJsonValue &value : corpus.value("writable").toArray()) writable.append(directory(value.toString()));
     const QStringList leftToRules{"status-tag-log", "git-directory-redirect-denied", "redirect-into-git-hooks", "read-ssh-key",
                                   "read-api-key-file", "grep-env-file", "ld-preload", "path-prefix", "reset-hard", "tag-force"};
+    // Removals inside the temporary directory are allowed by the rules, not by the evaluation.
+    const QStringList allowedByRules{"for-build-and-test-then-rm", "rm-inside-tmp-allowed"};
     for (const QJsonValue &value : corpus.value("cases").toArray()) {
         const QJsonObject entry = value.toObject();
         const QString name = entry.value("name").toString();
         const shell::Environment environment{directory(entry.value("cwd").toString()), "/home/user", {}};
         const shell::Evaluation evaluation = shell::evaluate(shell::parseBash(entry.value("command").toString()), environment);
-        const bool expected = entry.value("expect").toString() == "allow" || leftToRules.contains(name);
+        const bool expected = (entry.value("expect").toString() == "allow" && !allowedByRules.contains(name))
+            || leftToRules.contains(name);
         QVERIFY2(catalogAllows(evaluation, writable) == expected, qPrintable(name + ":\n" + shell::dumpEvaluation(evaluation)));
     }
 }

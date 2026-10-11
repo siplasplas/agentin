@@ -883,7 +883,12 @@ where they really write. The decision is taken in this order:
    (`rm -rf .git`, `echo x > .git/hooks/pre-commit`); reading there is allowed.
 2. **Ask lines** — a command that matches an Ask line asks, unless an Allow
    line is more specific, judged by the text before the first wildcard:
-   `rm -rf build *` beside `rm *` lets that one removal pass.
+   `rm -rf build *` beside `rm *` lets that one removal pass. A removal only
+   inside the temporary directory (`/tmp` and the system's temporary directory),
+   also of a whole directory tree such as `rm -rf /tmp/qce-build`, passes an
+   Ask line for the whole program such as `rm *`; removing the temporary
+   directory itself, or a glob that takes any name in it (`rm -rf /tmp/*`),
+   still asks, and so does a line that names more, such as `rm -rf /tmp/keep*`.
 3. **Allow lines** — a command that matches an Allow line passes, as long as
    it changes and runs things only inside the writable directories: a line
    names a kind of command, not the places it may change, so with `git add *`
@@ -905,7 +910,8 @@ where they really write. The decision is taken in this order:
    project given by its path, a redirection to a file there); `pkg-config`, `nm`,
    `objdump`, `readelf` and `size` only read. A compiler option that loads code
    into it or chooses the programs it runs (`-fplugin`, `-B`, `-specs`,
-   `-Xclang`, `@file`) asks. Asking: commands that remove files, use
+   `-Xclang`, `@file`) asks. Asking: commands that remove files (other than
+   inside the temporary directory, as above), use
    the network (`curl`, `git fetch`, `gh pr view`, `podman build` and
    `docker pull`), run or change containers (`podman run`, `docker rmi`), write or run something
    outside the writable directories, install (`make install`), are not known to
@@ -961,8 +967,8 @@ fetch from, `curl *https://invent.kde.org/* *`: such a line allows any options
 and paths on that server, but asks when the command also talks to another
 address, writes outside the writable directories (with `-o` or `-O`), or sends a
 secret file (`-d @~/.ssh/id_rsa`). Any other command gets itself, with numbers
-as `<int>` (`cmake --build /opt/x -j<int> *`, `rm -rf /tmp/qce-nodl *`); edit
-such a line to widen it, for example to `rm -rf /tmp/qce-* *`. A command that
+as `<int>` (`cmake --build /opt/x -j<int> *`, `rm -rf build/qce-nodl *`); edit
+such a line to widen it, for example to `rm -rf build/qce-* *`. A command that
 takes its files from `xargs` gets a line without the trailing ` *`, as in `rm`
 for `ls | xargs rm`, which allows it only as it is, and cannot be trusted for
 the chat. A line that names the whole command also covers what asked about it,

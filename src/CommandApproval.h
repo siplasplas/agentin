@@ -147,6 +147,7 @@ bool pathMatchesList(const QString &path, const QStringList &patterns, const QSt
 //   through git.
 // - Ask when a command matches an Ask rule and no more specific Allow rule (judged by the text before the
 //   first wildcard), or when no rule matches and the command is not harmless by itself: it removes files,
+//   other than only inside the temporary directory, which also passes an Ask rule for the whole program,
 //   uses the network, writes or runs something outside the writable directories, is a Git command that can
 //   lose work, or is not known. A command that reads a file that may hold secrets, a redirection outside the
 //   writable directories, a variable that changes what programs run, and a line that cannot be parsed ask
