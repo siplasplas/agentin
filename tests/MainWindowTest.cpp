@@ -2861,7 +2861,9 @@ for line in sys.stdin:
     QVERIFY(input && chat && suggest);
     QTRY_VERIFY(window.findChild<QWidget *>("newChatButton")->isEnabled());
 
-    // One idea by default; the options ask for up to three, and the number is saved.
+    // Ideas are off by default, without the bulb; once the options turn them on, one idea by default, or up to
+    // three, and both are saved.
+    QVERIFY(suggest->isHidden());
     QAction *options = nullptr;
     for (QAction *action : window.findChildren<QAction *>())
         if (action->text() == "Options…") options = action;
@@ -2871,6 +2873,9 @@ for line in sys.stdin:
         QTimer::singleShot(0, &window, [&] {
             auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
             QVERIFY(dialog);
+            auto *enabled = dialog->findChild<QCheckBox *>("suggestionsEnabled");
+            QVERIFY(enabled);
+            enabled->setChecked(true);
             auto *number = dialog->findChild<QSpinBox *>("suggestionCount");
             QVERIFY(number);
             QCOMPARE(number->value(), expectedBefore);
@@ -2886,7 +2891,9 @@ for line in sys.stdin:
     setSuggestionCount(3, 1);
     QFile settings(directory.filePath("settings.json"));
     QVERIFY(settings.open(QIODevice::ReadOnly));
-    QCOMPARE(QJsonDocument::fromJson(settings.readAll()).object().value("suggestions").toInt(), 3);
+    const QJsonObject saved = QJsonDocument::fromJson(settings.readAll()).object();
+    QCOMPARE(saved.value("suggestions").toInt(), 3);
+    QVERIFY(saved.value("suggestionsEnabled").toBool());
     settings.close();
     input->setFocus();
     QTest::keyClicks(input, "Do the task");

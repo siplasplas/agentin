@@ -1088,7 +1088,7 @@ void MainWindow::updateSuggestButton()
     // Ideas are offered for an empty message field, where spaces and line breaks alone count as empty, and, over
     // any text, while they are on their way or known for the latest exchange, so that they can be looked at.
     const QString text = input_->toPlainText();
-    const bool supported = tab && tab->provider()->supportsSuggestions()
+    const bool supported = suggestionsEnabled_ && tab && tab->provider()->supportsSuggestions()
                            && (text.trimmed().isEmpty() || knownSuggestions(tab));
     suggestButton_->setVisible(supported);
     suggestButton_->setEnabled(supported && tab->isLive() && !tab->agent()->isResponding()
@@ -1127,6 +1127,7 @@ void MainWindow::suggestMessage()
 // Suggest also puts a known first idea there.
 void MainWindow::requestSuggestions(ChatTab *tab, bool show)
 {
+    if (!suggestionsEnabled_) return;
     const QString exchange = latestExchange(tab);
     if (exchange.isEmpty()) return;
     ChatTab::Suggestions &cache = tab->suggestions();
@@ -1480,6 +1481,7 @@ void MainWindow::loadSettings()
     const QString enterKey = settings.value("enterKey").toString();
     input_->setShortMessageLength(settings.value("enterSendsUpTo").toInt(60));
     undoAfterSend_ = settings.value("undoAfterSend").toBool(true);
+    suggestionsEnabled_ = settings.value("suggestionsEnabled").toBool(false);
     suggestionCount_ = qBound(1, settings.value("suggestions").toInt(1), 3);
     const QJsonObject tabNames = settings.value("tabNames").toObject();
     tabShowsAgent_ = tabNames.value("agent").toBool(false);
@@ -1565,6 +1567,7 @@ void MainWindow::saveSettings()
         || file.write(QJsonDocument(QJsonObject{{"version", 1}, {"enterKey", enterKey},
                                                          {"enterSendsUpTo", input_->shortMessageLength()},
                                                          {"undoAfterSend", undoAfterSend_},
+                                                         {"suggestionsEnabled", suggestionsEnabled_},
                                                          {"suggestions", suggestionCount_},
                                                          {"tabNames", QJsonObject{{"agent", tabShowsAgent_},
                                                                                   {"directory", tabShowsDirectory_},
@@ -1619,6 +1622,12 @@ void MainWindow::showOptionsDialog()
     undoAfterSend->setObjectName("undoAfterSend");
     undoAfterSend->setChecked(undoAfterSend_);
     enterForm->addRow(QString(), undoAfterSend);
+    auto *suggestionsEnabled = new QCheckBox("Suggest ideas for the next message (the light bulb)", &dialog);
+    suggestionsEnabled->setObjectName("suggestionsEnabled");
+    suggestionsEnabled->setChecked(suggestionsEnabled_);
+    suggestionsEnabled->setToolTip("Asks the agent's cheapest model for ideas when a turn ends and shows the light "
+                                   "bulb that lists them");
+    enterForm->addRow(QString(), suggestionsEnabled);
     auto *suggestions = new QSpinBox(&dialog);
     suggestions->setObjectName("suggestionCount");
     suggestions->setRange(1, 3);
@@ -1626,6 +1635,8 @@ void MainWindow::showOptionsDialog()
     suggestions->setToolTip("How many ideas for the next message the light bulb asks for; one comes soonest. "
                             "A new number applies the next time ideas are asked.");
     enterForm->addRow("Suggestions:", suggestions);
+    suggestions->setEnabled(suggestionsEnabled_);
+    connect(suggestionsEnabled, &QCheckBox::toggled, suggestions, &QWidget::setEnabled);
     auto *experimental = new QCheckBox("Show experimental agents: GLM, Gemini and Antigravity", &dialog);
     experimental->setObjectName("experimentalAgents");
     experimental->setChecked(experimentalAgents_);
@@ -1727,7 +1738,10 @@ void MainWindow::showOptionsDialog()
     input_->setEnterPolicy(MessageInput::EnterPolicy(enterInput->currentData().toInt()));
     input_->setShortMessageLength(shortLength->value());
     undoAfterSend_ = undoAfterSend->isChecked();
+    suggestionsEnabled_ = suggestionsEnabled->isChecked();
     suggestionCount_ = suggestions->value();
+    updateSuggestButton();
+    if (ChatTab *tab = currentTab()) prepareSuggestions(tab);
     tabShowsAgent_ = nameAgent->isChecked();
     tabShowsDirectory_ = nameDirectory->isChecked();
     tabTitleLength_ = nameTitle->value();

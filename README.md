@@ -349,8 +349,10 @@ the last step is answered right after the turn, as part of the same turn in the
 chat. Claude Code does not report whether a message was used, so `You (steer)`
 means that it was passed to the session.
 
-In a Codex, Claude or GLM chat, agentin prepares a short idea for your next message,
-or two or three when **Settings → Options…** says so (`suggestions` in `settings.json`;
+Ideas for the next message are off by default; **Suggest ideas for the next message**
+in **Settings → Options…** (`suggestionsEnabled` in `settings.json`) turns them on, and
+with them the light bulb. Then, in a Codex, Claude or GLM chat, agentin prepares a short idea for your next message,
+or two or three when the options say so (`suggestions` in `settings.json`;
 one comes soonest, and a new number applies the next time ideas are asked), when the
 agent finishes a turn, unless a queued message starts the next one, and
 for the chat you see when it can take a message after an answer: after agentin starts and

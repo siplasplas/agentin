@@ -236,6 +236,8 @@ private:
     QStringList recentDirectories_;
     // Ctrl+Z in the message field can bring back the message just sent.
     bool undoAfterSend_ = true;
+    // Ideas for the next message are asked, and the light bulb shown, only when the options turn them on.
+    bool suggestionsEnabled_ = false;
     // How many ideas Suggest asks for: one, or two or three.
     int suggestionCount_ = 1;
     // What names a chat on its tab and in spoken announcements: the agent's name, the last part of the
