@@ -27,6 +27,10 @@ The conversation language does not change the English-language requirements for 
 - Hand a turn's work over to the user, and commit it, only when the project builds (`cmake --build build` with no errors, also for the test targets when they are configured). If something out of the ordinary keeps the project from building, such as a missing system package or a broken toolchain, do not present the work as done: tell the user what fails and why.
 - The repository is public. Before every commit, check the staged changes (`git diff --cached`) for anything private: API keys, tokens or passwords, personal paths such as home directories, e-mail addresses, private notes, logs, settings files, or the content of the user's conversations. Leave such things out or replace them with neutral examples, and tell the user what was found.
 
+## Size of a turn
+
+- Split a larger task into several smaller turns. Each turn takes only as much work as makes one coherent commit, then hands it over to the user; the next part follows in the next turn.
+
 ## Building and running
 
 - Qt 6 only (Widgets; Test for the tests) and C++20. Do not add Qt 5 compatibility code.
@@ -47,6 +51,7 @@ The conversation language does not change the English-language requirements for 
 - Fast tests may be committed and run with `ctest --test-dir build --output-on-failure`: they take seconds, use fake agent scripts, and need no network, accounts, API keys or installed agent CLIs. The current suite is `tests/MainWindowTest.cpp` (Qt Test, offscreen), `tests/ShellApprovalTest.cpp` (decisions about shell command lines, table-driven from `tests/data/shell-commands.json`, and the parser and evaluator of `src/shell`) and `tests/ClaudeBridgeTest.py`.
 - Long-running tests (real agent CLIs, network, accounts, or many seconds each) are not part of the committed suite. Run them at most once, when a feature is handed over, not after every change.
 - While working, run only the one or two tests that cover the change, for example `QT_QPA_PLATFORM=offscreen ./build/agentin_test helpAndConversation`, and say which tests were not run.
+- Some tools and especially tests can take long or hang. Run anything that might hang with a moderate time limit (for example `timeout 120 ctest …`, or the tool's own timeout option), not with a long or no limit; when the limit is hit, report it and look for the cause instead of waiting longer.
 - Fake agent scripts in tests must follow the real protocol. For Codex, `codex app-server generate-json-schema --out <dir>` writes the App Server schema; for example, notifications for a thread carry `threadId`.
 
 ## Code structure
