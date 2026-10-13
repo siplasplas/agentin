@@ -101,6 +101,14 @@ private:
     bool chooseApprovals(QList<ApprovalChoice> &choices, bool always);
     void showNotificationsDialog();
     void showMuteState();
+    // YOLO mode: for the chosen minutes, approvals are accepted without asking. Denials still decline, questions
+    // still wait for the user, and read-only chats still ask. It ends when agentin exits.
+    void startYolo(int minutes);
+    void stopYolo();
+    bool yoloActive() const;
+    void showYoloState();
+    // Accepts the tab's waiting approvals while YOLO mode is on; true when one was answered.
+    bool acceptWithoutAsking(ChatTab *tab);
     void loadRecentDirectories();
     void saveRecentDirectories();
     void rememberRecentDirectory(const QString &path);
@@ -156,6 +164,10 @@ private:
     TurnLocks *turnLocks_;
     Notifier *notifier_;
     QToolButton *muteSounds_;
+    QToolButton *yoloButton_;
+    QTimer *yoloTimer_;
+    // When YOLO mode ends, in milliseconds since the epoch; 0 while it is off.
+    qint64 yoloUntil_ = 0;
     MruTabWidget *tabs_;
     // One chat view shared by all tabs; it moves into the current tab's page and shows its document.
     QWidget *chatPanel_;

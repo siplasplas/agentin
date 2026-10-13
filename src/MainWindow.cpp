@@ -520,6 +520,25 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     inputRow->addWidget(stopButton_);
     auto *statusRow = new QHBoxLayout;
     statusRow->addWidget(status_, 1);
+    // Off, the button offers how long YOLO mode should last; on, it shows the minutes left and ends it.
+    yoloButton_ = new QToolButton(central);
+    yoloButton_->setObjectName("yoloButton");
+    yoloButton_->setAutoRaise(true);
+    auto *yoloMenu = new QMenu(yoloButton_);
+    for (const int minutes : {15, 30, 60, 120})
+        yoloMenu->addAction(QString("%1 minutes without approvals").arg(minutes), this, [this, minutes] { startYolo(minutes); });
+    connect(yoloButton_, &QToolButton::clicked, this, [this, yoloMenu] {
+        if (yoloActive()) stopYolo();
+        else yoloMenu->popup(yoloButton_->mapToGlobal(QPoint(0, yoloButton_->height())));
+    });
+    yoloTimer_ = new QTimer(this);
+    yoloTimer_->setInterval(15 * 1000);
+    connect(yoloTimer_, &QTimer::timeout, this, [this] {
+        if (yoloActive()) showYoloState();
+        else stopYolo();
+    });
+    statusRow->addWidget(yoloButton_);
+    showYoloState();
     muteSounds_ = new QToolButton(central);
     muteSounds_->setObjectName("muteSounds");
     muteSounds_->setCheckable(true);
@@ -1775,6 +1794,56 @@ void MainWindow::showMuteState()
                                   : muted ? "Sounds are off; click to turn them on" : "Sounds are on; click to turn them off");
 }
 
+bool MainWindow::yoloActive() const
+{
+    return yoloUntil_ > QDateTime::currentMSecsSinceEpoch();
+}
+
+void MainWindow::startYolo(int minutes)
+{
+    yoloUntil_ = QDateTime::currentMSecsSinceEpoch() + qint64(minutes) * 60 * 1000;
+    yoloTimer_->start();
+    appendLine(QString("[YOLO mode for %1 minutes: approvals are accepted without asking]").arg(minutes));
+    showYoloState();
+    // What waits already is answered too.
+    for (int i = 0; i < tabs_->count(); ++i)
+        if (ChatTab *tab = chatTab(tabs_->widget(i))) acceptWithoutAsking(tab);
+}
+
+void MainWindow::stopYolo()
+{
+    if (yoloUntil_ == 0) return;
+    yoloUntil_ = 0;
+    yoloTimer_->stop();
+    appendLine("[YOLO mode ended: approvals ask again]");
+    showYoloState();
+}
+
+void MainWindow::showYoloState()
+{
+    const bool active = yoloActive();
+    const qint64 left = active ? (yoloUntil_ - QDateTime::currentMSecsSinceEpoch() + 59999) / 60000 : 0;
+    yoloButton_->setText(active ? QString("YOLO %1 min").arg(left) : QString("YOLO"));
+    yoloButton_->setStyleSheet(active ? "QToolButton { background-color: #d32f2f; color: white; border-radius: 3px; }"
+                                      : QString());
+    yoloButton_->setToolTip(active
+        ? QString("YOLO mode: approvals are accepted without asking for %1 more minutes; click to end it now").arg(left)
+        : QString("YOLO mode: accept approvals without asking for a while. Denials still decline, questions still "
+                  "wait for you, and read-only chats still ask"));
+}
+
+bool MainWindow::acceptWithoutAsking(ChatTab *tab)
+{
+    if (!yoloActive() || !tab->agent() || tab->agent()->isReadOnly()) return false;
+    const PendingRequest *request = tab->pendingRequest();
+    if (!request || !request->approval) return false;
+    const QString what = request->description.section('\n', 0, 0).trimmed();
+    appendLine("[Allowed without asking, in YOLO mode: " + (what.isEmpty() ? request->title : what) + "]");
+    // Answering takes the request and reports the change, which answers the next one in turn.
+    tab->answerApproval(ApprovalDecision::Accept);
+    return true;
+}
+
 // Sounds and desktop notifications for long turns and for agents that wait for an answer.
 void MainWindow::showNotificationsDialog()
 {
@@ -2952,6 +3021,7 @@ QWidget *MainWindow::addChatTab(AgentProvider *selected, const QString &workingD
     });
     // A tab in the background that waits for an answer is marked until the user switches to it.
     connect(tab, &ChatTab::requestsChanged, this, [this, page, tab] {
+        if (acceptWithoutAsking(tab)) return;
         // Steering waits while an approval or a question is open, and is possible again once it is answered.
         if (tabs_->currentWidget() == page) {
             updateRequestPanel();

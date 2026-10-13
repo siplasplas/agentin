@@ -962,6 +962,15 @@ the commands that need the question and why, and the panel offers:
   it and usually tries another way or asks you. **Decline and stop** also ends
   its turn.
 
+**YOLO** beside the sound button turns on a mode without approvals for 15, 30,
+60 or 120 minutes: every approval of every chat, also one already waiting, is
+answered as **Allow once**, and the log names what was allowed. The button turns
+red and shows the minutes left; a click ends the mode at once, and it also ends
+with agentin. What is declined stays declined — `git push`, `sudo`, `doas`,
+`su`, removing system packages, the commands that change a remote server,
+writing into `.git` and the Deny lines — the agents' questions still wait for
+you, and read-only chats still ask.
+
 What is trusted or added depends on why the command asked. A Git command gets
 its subcommand (`git fetch *`, `git fetch` for the chat), one that can lose work
 the words up to the risky option (`git tag -f *`). A command that agentin does
