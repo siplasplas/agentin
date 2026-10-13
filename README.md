@@ -329,7 +329,11 @@ how full the context window is, as far as the agent reports them, and each
 finished turn is summarized in the log. Codex reports the whole thread (a turn is
 the difference in the thread's totals), Claude and GLM report input, cache and
 output tokens and the cost but not reasoning separately, and Gemini reports
-input, cached and output tokens. For agents other than Codex, the conversation
+input, cached and output tokens. Claude Code gives the cost as a running total
+for the chat's bridge, from its start; a turn shows what it added, followed by
+that total, as in `$7.1234 (total $285.4538)`. The cost is Claude Code's
+estimate at API prices: tokens read from the cache cost about a tenth of other
+input tokens. For agents other than Codex, the conversation
 figure covers the turns sent from the tab. Antigravity's statistics are read
 where its result event carries them.
 

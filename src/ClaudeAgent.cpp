@@ -505,6 +505,7 @@ void ClaudeAgent::start(const QString &workingDirectory)
 void ClaudeAgent::startBridge()
 {
     if (!provider_) return;
+    reportedCostUsd_ = 0;
     process_->setWorkingDirectory(workingDirectory_);
     QStringList arguments{"-u", provider_->scriptPath(), "--cwd", workingDirectory_, "--provider", kind_};
     if (!model_.isEmpty()) arguments << "--model" << model_;
@@ -1024,7 +1025,14 @@ void ClaudeAgent::handleLine(const QByteArray &line)
         tokens.cached = usage.contains("cache_read_input_tokens") ? cacheRead : -1;
         tokens.output = usage.value("output_tokens").toInteger(-1);
         tokens.total = tokens.input < 0 || tokens.output < 0 ? -1 : tokens.input + tokens.output;
-        tokens.costUsd = event.value("costUsd").isDouble() ? event.value("costUsd").toDouble() : -1;
+        // Claude Code reports the running cost of the bridge's session; the turn's cost is what it added. A
+        // smaller total means that the session's totals started again.
+        if (event.value("costUsd").isDouble()) {
+            const double total = event.value("costUsd").toDouble();
+            tokens.costUsd = total >= reportedCostUsd_ ? total - reportedCostUsd_ : total;
+            tokens.totalCostUsd = total;
+            reportedCostUsd_ = total;
+        }
         emit turnUsage(tokens);
     } else if (type == "steer_accepted" || type == "steer_failed") {
         const QString text = std::exchange(steeringText_, {});

@@ -180,7 +180,11 @@ QString ChatTab::usageDetails(const TokenUsage &usage)
                      + (usage.reasoning >= 0 ? " (" + fullCount(usage.reasoning) + " reasoning)" : QString()));
     }
     if (usage.total >= 0) parts.append(fullCount(usage.total) + " total");
-    if (usage.costUsd >= 0) parts.append(QString("$%1").arg(usage.costUsd, 0, 'f', 4));
+    const QString total = usage.totalCostUsd >= 0 ? QString("total $%1").arg(usage.totalCostUsd, 0, 'f', 4) : QString();
+    if (usage.costUsd >= 0)
+        parts.append(QString("$%1").arg(usage.costUsd, 0, 'f', 4) + (total.isEmpty() ? QString() : " (" + total + ")"));
+    else if (!total.isEmpty())
+        parts.append(total);
     if (usage.contextUsed >= 0 && usage.contextWindow > 0) {
         parts.append(QString("context %1% of %2").arg(qRound(100.0 * usage.contextUsed / usage.contextWindow))
                          .arg(compactCount(usage.contextWindow)));

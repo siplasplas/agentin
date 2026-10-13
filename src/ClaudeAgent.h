@@ -214,6 +214,8 @@ private:
     // The bridge is being ended because the chat was idle; the next message starts it again.
     bool idleDisconnect_ = false;
     bool busy_ = false;
+    // The bridge's running cost at its latest report, so that a turn's cost is the difference.
+    double reportedCostUsd_ = 0;
     bool stopRequested_ = false;
     bool textStarted_ = false;
 };

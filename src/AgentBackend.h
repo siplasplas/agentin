@@ -55,6 +55,8 @@ struct TokenUsage
     qint64 reasoning = -1;
     qint64 total = -1;
     double costUsd = -1;
+    // The running cost the agent reports for its session, such as a Claude bridge's since it started.
+    double totalCostUsd = -1;
     // Tokens in the latest request and the model's context window.
     qint64 contextUsed = -1;
     qint64 contextWindow = -1;
@@ -69,6 +71,7 @@ struct TokenUsage
         reasoning = add(reasoning, other.reasoning);
         total = add(total, other.total);
         costUsd = costUsd < 0 ? other.costUsd : (other.costUsd < 0 ? costUsd : costUsd + other.costUsd);
+        if (other.totalCostUsd >= 0) totalCostUsd = other.totalCostUsd;
         if (other.contextUsed >= 0) contextUsed = other.contextUsed;
         if (other.contextWindow >= 0) contextWindow = other.contextWindow;
         return *this;
