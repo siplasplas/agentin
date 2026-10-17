@@ -76,12 +76,6 @@ QList<qint16> leadInSamples(qsizetype count)
     return samples;
 }
 constexpr int kSampleRate = 44100;
-
-// The chat's name on one line; the window has cut its title to the length chosen in the options.
-QString spokenTitle(const QString &title)
-{
-    return title.simplified();
-}
 }
 
 namespace {
@@ -173,7 +167,7 @@ void Notifier::turnFinished(const QString &agent, const QString &chat, bool succ
               "\"" + chat + "\" after " + length);
     }
     if (!settings_.muted)
-        announce(settings_, succeeded ? Event::Finished : Event::Failed, agent, chat,
+        announce(settings_, succeeded ? Event::Finished : Event::Failed,
                  succeeded ? settings_.finishedSound : settings_.failedSound);
 }
 
@@ -209,46 +203,40 @@ void Notifier::announceWaiting(const QString &key)
         popup((found->agent.isEmpty() ? found->chat : found->agent) + " is waiting for you",
               "\"" + found->chat + "\": " + found->request);
     if (!settings_.muted) {
-        announce(settings_, Event::Waiting, found->agent, found->chat, settings_.waitingSound);
+        announce(settings_, Event::Waiting, settings_.waitingSound);
         if (isPlaying()) announcedWaitingKey_ = key;
     }
     if (settings_.waitingRepeatMinutes > 0) found->timer->start(settings_.waitingRepeatMinutes * 60 * 1000);
 }
 
 // Speech that cannot be produced, because no voice is installed, falls back to a double click.
-bool Notifier::announce(const Settings &settings, Event event, const QString &agent, const QString &chat,
-                        const QString &sound)
+bool Notifier::announce(const Settings &settings, Event event, const QString &sound)
 {
     if (!sound.startsWith("speech:")) return playSound(sound);
     const std::optional<Voice> chosen = voice(settings, settings.voiceLanguage, sound.mid(7));
-    if (chosen && say(settings, *chosen, spokenText(event, settings.voiceLanguage, agent, chat))) return true;
+    if (chosen && say(settings, *chosen, spokenText(event, settings.voiceLanguage))) return true;
     return playSound("double-click");
 }
 
-bool Notifier::preview(const Settings &settings, Event event, const QString &agent, const QString &chat,
-                       const QString &sound)
+bool Notifier::preview(const Settings &settings, Event event, const QString &sound)
 {
     announcedWaitingKey_.clear();
-    return announce(settings, event, agent, chat, sound);
+    return announce(settings, event, sound);
 }
 
-// Polish voices speak Polish sentences; the others speak English ones.
-QString Notifier::spokenText(Event event, const QString &language, const QString &agent, const QString &chat)
+// Polish voices speak Polish words; the others speak English ones.
+QString Notifier::spokenText(Event event, const QString &language)
 {
     const bool polish = language == "pl";
-    QString sentence;
     switch (event) {
-    case Event::Finished: sentence = polish ? "%1 skończył" : "%1 finished"; break;
-    case Event::Failed: sentence = polish ? "%1 zakończył się błędem" : "%1 stopped with an error"; break;
-    case Event::Waiting: sentence = polish ? "%1 czeka na ciebie" : "%1 is waiting for you"; break;
-    case Event::CompactionStarted: sentence = polish ? "%1 kompaktuje" : "%1 is compacting"; break;
-    case Event::CompactionFinished: sentence = polish ? "%1 skończył kompaktowanie" : "%1 finished compacting"; break;
-    case Event::Resumed: sentence = polish ? "%1 wznawia pracę" : "%1 continues on its own"; break;
+    case Event::Finished: return polish ? "koniec tury" : "turn finished";
+    case Event::Failed: return polish ? "błąd tury" : "turn failed";
+    case Event::Waiting: return polish ? "czeka na ciebie" : "waiting for you";
+    case Event::CompactionStarted: return polish ? "kompaktowanie" : "compacting";
+    case Event::CompactionFinished: return polish ? "skompaktowano" : "compacted";
+    case Event::Resumed: return polish ? "start tury" : "turn started";
     }
-    // Without the agent's name, the chat's name is what the sentence is about.
-    if (agent.isEmpty()) return sentence.arg(spokenTitle(chat));
-    sentence = sentence.arg(agent);
-    return chat.trimmed().isEmpty() ? sentence : sentence + ": " + spokenTitle(chat);
+    return {};
 }
 
 QStringList Notifier::voiceLanguages(const Settings &settings)
@@ -475,10 +463,10 @@ bool Notifier::playSound(const QString &file)
     return playSoundOrBuiltIn(file);
 }
 
-void Notifier::compactionChanged(const QString &agent, const QString &chat, bool started)
+void Notifier::compactionChanged(bool started)
 {
     if (settings_.muted || isPlaying()) return;
-    announce(settings_, started ? Event::CompactionStarted : Event::CompactionFinished, agent, chat,
+    announce(settings_, started ? Event::CompactionStarted : Event::CompactionFinished,
              started ? settings_.compactionStartedSound : settings_.compactionFinishedSound);
 }
 
@@ -487,7 +475,7 @@ void Notifier::turnResumed(const QString &agent, const QString &chat, const QStr
     if (settings_.popups)
         popup((agent.isEmpty() ? chat : agent) + " continues on its own",
               "\"" + chat + "\"" + (reason.isEmpty() ? QString() : ": " + reason));
-    if (!settings_.muted) announce(settings_, Event::Resumed, agent, chat, settings_.resumedSound);
+    if (!settings_.muted) announce(settings_, Event::Resumed, settings_.resumedSound);
 }
 
 QList<std::pair<QString, QString>> Notifier::builtInSounds()

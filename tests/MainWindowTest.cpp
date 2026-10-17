@@ -2708,10 +2708,10 @@ for line in sys.stdin:
     });
     QCOMPARE(tabs->tabText(index), "Claude: " + title.left(9) + QChar(0x2026));
 
-    QCOMPARE(Notifier::spokenText(Notifier::Event::Finished, "en", {}, "first, Rename a"),
-             QString("first, Rename a finished"));
-    QCOMPARE(Notifier::spokenText(Notifier::Event::Waiting, "pl", "Claude", "first, Rename a"),
-             QString("Claude czeka na ciebie: first, Rename a"));
+    // Speech says only what happened; the desktop notification names the chat.
+    QCOMPARE(Notifier::spokenText(Notifier::Event::Finished, "en"), QString("turn finished"));
+    QCOMPARE(Notifier::spokenText(Notifier::Event::CompactionFinished, "pl"), QString("skompaktowano"));
+    QCOMPARE(Notifier::spokenText(Notifier::Event::Resumed, "pl"), QString("start tury"));
 }
 
 QTEST_MAIN(MainWindowTest)

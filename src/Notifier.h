@@ -16,8 +16,8 @@ class QTimer;
 // Desktop notifications and sounds for long turns and for agents that wait for the user. Sounds are
 // played by an external player (ffplay, mpv, pw-play or paplay), so WAV, MP3 and OGG work without Qt
 // Multimedia. Instead of a sound, an event can be spoken by an installed Piper voice, or by espeak-ng
-// where no Piper voice speaks the language, such as "Codex finished: fix the build"; the speech is generated when needed,
-// so no audio files are shipped.
+// where no Piper voice speaks the language, as a few words such as "turn finished"; the speech is generated when
+// needed, so no audio files are shipped.
 class Notifier : public QObject
 {
     Q_OBJECT
@@ -74,7 +74,7 @@ public:
     // Also stops the announcement of that chat's request if it is still being played.
     void waitingEnded(const QString &key);
     // A cue does not cut off an announcement that is playing.
-    void compactionChanged(const QString &agent, const QString &chat, bool started);
+    void compactionChanged(bool started);
     // The agent started a turn on its own; reason says why, such as the background task that ended.
     void turnResumed(const QString &agent, const QString &chat, const QString &reason);
 
@@ -84,7 +84,7 @@ public:
     // Plays a sound file or a built-in sound even when sounds are muted, for trying it out in the settings.
     bool playSound(const QString &file);
     // Plays a sound or speaks the event as the settings would, even when muted, for trying it out.
-    bool preview(const Settings &settings, Event event, const QString &agent, const QString &chat, const QString &sound);
+    bool preview(const Settings &settings, Event event, const QString &sound);
     bool isPlaying() const { return !playbackProcess_.isNull(); }
     void stopPlayback();
     // A voice of one language: a Piper model, or espeak-ng with the language as its voice.
@@ -106,8 +106,9 @@ public:
     static QList<Voice> voices(const Settings &settings, const QString &language);
     // The named voice of the language, or another one of it when that is not installed.
     static std::optional<Voice> voice(const Settings &settings, const QString &language, const QString &name);
-    // What is said for the event; without a chat only its beginning, such as "Codex finished".
-    static QString spokenText(Event event, const QString &language, const QString &agent, const QString &chat);
+    // What is said for the event: the event alone, such as "turn finished", without the agent or the chat,
+    // which the desktop notification names.
+    static QString spokenText(Event event, const QString &language);
     // The lead-in before sounds and speech: longer when the default audio output is suspended.
     struct LeadIn
     {
@@ -142,8 +143,7 @@ private:
     void removeTemporaryFile(const QString &file);
     void announceWaiting(const QString &key);
     // Plays the event's sound or speaks it, as its setting says.
-    bool announce(const Settings &settings, Event event, const QString &agent, const QString &chat,
-                  const QString &sound);
+    bool announce(const Settings &settings, Event event, const QString &sound);
     void popup(const QString &title, const QString &text);
 
     QPointer<QProcess> playbackProcess_;

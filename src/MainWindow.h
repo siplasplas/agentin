@@ -252,7 +252,7 @@ private:
     bool suggestionsEnabled_ = false;
     // How many ideas Suggest asks for: one, or two or three.
     int suggestionCount_ = 1;
-    // What names a chat on its tab and in spoken announcements: the agent's name, the last part of the
+    // What names a chat on its tab and in desktop notifications: the agent's name, the last part of the
     // directory, and the title cut to this many characters (0 leaves it out). The directory or the title is
     // always there.
     bool tabShowsAgent_ = false;

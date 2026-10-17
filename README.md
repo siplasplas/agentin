@@ -252,9 +252,7 @@ agent. A tab is named by the last part of its working directory and the chat's
 title cut to 32 characters, for example `agentin · Rename a conversation fr…`;
 **Settings → Options…** chooses whether the agent's name comes first, whether
 the directory is shown and how long the title is (or no title, which keeps the
-directory). Spoken announcements name the chat the same way, and without the
-agent's name the chat is what they speak about ("agentin, Rename a conversation
-finished"). The conversation tree keeps showing the agent and the title. All
+directory). Desktop notifications name the chat the same way. The conversation tree keeps showing the agent and the title. All
 Codex chats share one App Server process. A tab whose agent is
 responding shows a busy marker, and a background tab that receives output is
 marked until you switch to it. Closing a tab while its turn runs names the chat
@@ -535,11 +533,13 @@ unset sounds default to them: freedesktop's `bell.oga` when compaction starts,
 Yaru's `complete.oga` when it ends, and freedesktop's `screen-capture.oga` for an
 agent that waits. Elsewhere compaction uses the rising and falling tones.
 
-Speech names the agent and the chat, for example "Codex finished: fix the build",
-"Claude is waiting for you: …" or "Claude continues on its own: …", so it is clear which chat needs attention.
-Each sound list offers speech by every Piper voice of the chosen language, such
-as "Speech, gosia", with the sentence of that event as an example: for the
-current chat, or only its beginning when no chat is open; **Play** says it. Finished
+Speech says only what happened, in a few words: "turn finished", "turn failed",
+"waiting for you", "compacting", "compacted" and "turn started" for an agent
+that continues on its own, or in Polish "koniec tury", "błąd tury", "czeka na
+ciebie", "kompaktowanie", "skompaktowano" and "start tury"; the desktop
+notification names the agent and the chat. Each sound list offers speech by
+every Piper voice of the chosen language, such as "Speech, gosia", with the
+words of that event; **Play** says them. Finished
 and failed turns are spoken by default. The speech language and pace are set
 once, below the sounds; a slowness above 1 (1.3 by default) speaks slower and
 usually clearer. agentin looks for Piper (on `PATH`, in `~/.venvs/piper/bin` or
@@ -547,11 +547,11 @@ usually clearer. agentin looks for Piper (on `PATH`, in `~/.venvs/piper/bin` or
 in `~/piper` or `~/.local/share/piper`; the file name, such as
 `pl_PL-gosia-medium` from [piper-voices](https://huggingface.co/rhasspy/piper-voices),
 gives the language and the voice's name). espeak-ng's mechanical voice is offered
-only for a language without a Piper voice. Polish is spoken in Polish sentences,
+only for a language without a Piper voice. Polish is spoken in Polish words,
 other languages in English ones. The speech is generated when needed, so the
 repository contains no audio files; when no voice can speak, a double click plays
 instead. Sounds and speech start after a short lead-in, so that an audio output
-waking up does not cut off a short sound or the agent's name. The lead-in is noise
+waking up does not cut off a short sound or the first word. The lead-in is noise
 far too quiet to hear (about −74 dB) rather than silence, because some monitors and
 TVs keep their speakers muted until the signal is more than digital silence.
 Built-in sounds and speech begin with it, and a sound file plays after a separate
@@ -574,9 +574,8 @@ monitor.alsa.rules = [
 ```
 
 followed by `systemctl --user restart wireplumber`; agentin then finds the output
-awake and waits only 0.4 s. A spoken announcement names the chat by the first words of its title,
-about 32 characters. Answering the approval or question it announces, or a new
-request of the same chat, stops it at once.
+awake and waits only 0.4 s. Answering the approval or question a spoken
+announcement is about, or a new request of the same chat, stops it at once.
 
 Incoming Codex messages are processed in short batches, and streamed chat view
 updates are coalesced, allowing the interface to handle input between batches

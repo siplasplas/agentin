@@ -1669,8 +1669,8 @@ void MainWindow::showOptionsDialog()
     updateShortLength();
     layout->addLayout(enterForm);
     layout->addWidget(new QLabel("Shift+Enter always starts a new line and Ctrl+Enter always sends.", &dialog));
-    // The tree keeps showing the agent and the title; these choose what tabs and announcements say.
-    auto *namesBox = new QGroupBox("Tab names and spoken announcements", &dialog);
+    // The tree keeps showing the agent and the title; these choose what tabs and notifications say.
+    auto *namesBox = new QGroupBox("Tab names and desktop notifications", &dialog);
     auto *namesForm = new QFormLayout(namesBox);
     auto *nameAgent = new QCheckBox("Agent name", namesBox);
     nameAgent->setObjectName("tabNameAgent");
@@ -1884,23 +1884,17 @@ void MainWindow::showNotificationsDialog()
         chosen.speechSlowness = slowness->value();
         return chosen;
     };
-    // Spoken examples name the current chat as its announcements will, with the tab name options; without an
-    // open chat, an example agent or directory.
-    const ChatTab *current = currentTab();
-    const QString exampleAgent = current ? announcedAgent(current) : (tabShowsAgent_ ? QString("Codex") : QString());
-    const QString exampleChat = current ? chatName(current, ", ", true) : (tabShowsAgent_ ? QString() : QString("agentin"));
     // Each sound is a built-in one, speech by a voice of the language, a file chosen or typed, or none.
     const auto soundValue = [](const QComboBox *box) {
         const int index = box->findText(box->currentText());
         return (index >= 0 ? box->itemData(index).toString() : box->currentText()).trimmed();
     };
     const int speechStart = 1 + int(Notifier::builtInSounds().size());
-    const auto fillSpeech = [chosenSettings, exampleAgent, exampleChat, speechStart](QComboBox *box, Notifier::Event event,
-                                                                                     const QString &selected) {
+    const auto fillSpeech = [chosenSettings, speechStart](QComboBox *box, Notifier::Event event, const QString &selected) {
         for (int i = box->count() - 1; i >= 0; --i)
             if (box->itemData(i).toString().startsWith("speech:")) box->removeItem(i);
         const Notifier::Settings chosen = chosenSettings();
-        const QString example = Notifier::spokenText(event, chosen.voiceLanguage, exampleAgent, exampleChat);
+        const QString example = Notifier::spokenText(event, chosen.voiceLanguage);
         int at = speechStart;
         for (const Notifier::Voice &voice : Notifier::voices(chosen, chosen.voiceLanguage))
             box->insertItem(at++, "Speech, " + voice.name + ": \u201c" + example + "\u201d", "speech:" + voice.name);
@@ -1913,8 +1907,7 @@ void MainWindow::showNotificationsDialog()
         if (index >= 0) box->setCurrentIndex(index);
     };
     QList<std::pair<QComboBox *, Notifier::Event>> soundBoxes;
-    const auto soundRow = [this, &dialog, form, soundValue, fillSpeech, chosenSettings, exampleAgent, exampleChat,
-                           &soundBoxes](const QString &label, const QString &file, const QString &key, Notifier::Event event) {
+    const auto soundRow = [this, &dialog, form, soundValue, fillSpeech, chosenSettings, &soundBoxes](const QString &label, const QString &file, const QString &key, Notifier::Event event) {
         auto *row = new QHBoxLayout;
         auto *path = new QComboBox(&dialog);
         path->setEditable(true);
@@ -1957,8 +1950,8 @@ void MainWindow::showNotificationsDialog()
             if (path->findData(picker.selectedFile()) < 0) path->addItem(picker.selectedFile(), picker.selectedFile());
             path->setCurrentIndex(path->findData(picker.selectedFile()));
         });
-        connect(play, &QPushButton::clicked, &dialog, [this, path, soundValue, chosenSettings, event, exampleAgent, exampleChat] {
-            if (!notifier_->preview(chosenSettings(), event, exampleAgent, exampleChat, soundValue(path)))
+        connect(play, &QPushButton::clicked, &dialog, [this, path, soundValue, chosenSettings, event] {
+            if (!notifier_->preview(chosenSettings(), event, soundValue(path)))
                 appendLine("[Could not play the sound; install ffplay, mpv, pw-play or paplay, and check the file.]");
         });
         return path;
@@ -2015,7 +2008,7 @@ void MainWindow::showNotificationsDialog()
                                       + QString::number(Notifier::piperModels().size()) + " voices",
                                   Notifier::findEspeak().isEmpty() ? QString() : "espeak-ng"}.filter(QRegularExpression(".")).join(", ")
           + ". Each sound above can be speech by a Piper voice of the language; espeak-ng speaks only a language "
-            "without one. Polish is spoken in Polish sentences, other languages in English ones.");
+            "without one. Polish is spoken in Polish words, other languages in English ones.");
     form->addRow(QString(), voiceStatus);
     auto *note = new QLabel("A waiting agent is announced regardless of how long the turn has run, because its work "
                             "stops until you answer. Compaction sounds play at every compaction. The speaker button turns red during audio playback; click it to stop. "
@@ -3055,9 +3048,7 @@ QWidget *MainWindow::addChatTab(AgentProvider *selected, const QString &workingD
                 requestSuggestions(tab, false);
         });
     });
-    connect(tab, &ChatTab::compactionChanged, this, [this, tab](bool started) {
-        notifier_->compactionChanged(announcedAgent(tab), chatName(tab, ", ", true), started);
-    });
+    connect(tab, &ChatTab::compactionChanged, notifier_, &Notifier::compactionChanged);
     connect(tab, &ChatTab::userMessagesChanged, this, [this, page, tab] {
         if (tabs_->currentWidget() == page) input_->setHistory(tab->userMessages());
     });
