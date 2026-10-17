@@ -239,6 +239,14 @@ allowed for the session in Claude Code, or a command or agent it runs in the
 background. The preview tab is not saved. When a
 directory is given with `-C`, its new chat opens next to the reopened tabs.
 
+When a command or agent that Claude or GLM left running in the background ends,
+Claude Code tells the model and lets it continue on its own. agentin shows that
+as a turn of the chat, after a line such as `[Claude continues on its own: …]`
+with what Claude Code says about the task, and announces it with the **Agent
+continues on its own** sound of the notification settings (spoken by default,
+also as a desktop notification). The log also notes each background task that
+ends. A message you send while such a turn runs waits for it.
+
 Chats in different tabs run independently, also several chats with the same
 agent. A tab is named by the last part of its working directory and the chat's
 title cut to 32 characters, for example `agentin · Rename a conversation fr…`;
@@ -527,8 +535,8 @@ unset sounds default to them: freedesktop's `bell.oga` when compaction starts,
 Yaru's `complete.oga` when it ends, and freedesktop's `screen-capture.oga` for an
 agent that waits. Elsewhere compaction uses the rising and falling tones.
 
-Speech names the agent and the chat, for example "Codex finished: fix the build"
-or "Claude is waiting for you: …", so it is clear which chat needs attention.
+Speech names the agent and the chat, for example "Codex finished: fix the build",
+"Claude is waiting for you: …" or "Claude continues on its own: …", so it is clear which chat needs attention.
 Each sound list offers speech by every Piper voice of the chosen language, such
 as "Speech, gosia", with the sentence of that event as an example: for the
 current chat, or only its beginning when no chat is open; **Play** says it. Finished

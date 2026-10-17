@@ -121,6 +121,7 @@ Notifier::Settings Notifier::Settings::fromJson(const QJsonObject &object)
     settings.waitingSound = object.value("waitingSound").toString(waitingSound);
     settings.compactionStartedSound = object.value("compactionStartedSound").toString(settings.compactionStartedSound);
     settings.compactionFinishedSound = object.value("compactionFinishedSound").toString(settings.compactionFinishedSound);
+    settings.resumedSound = object.value("resumedSound").toString("speech:");
     settings.waitingDelaySeconds = object.value("waitingDelaySeconds").toInt(30);
     settings.waitingRepeatMinutes = object.value("waitingRepeatMinutes").toInt(0);
     settings.announceApprovals = object.value("announceApprovals").toBool(true);
@@ -152,7 +153,7 @@ QJsonObject Notifier::Settings::toJson() const
     return {{"popups", popups}, {"muted", muted}, {"minimumMinutes", minimumMinutes},
             {"finishedSound", finishedSound}, {"failedSound", failedSound}, {"waitingSound", waitingSound},
             {"compactionStartedSound", compactionStartedSound}, {"compactionFinishedSound", compactionFinishedSound},
-            {"waitingDelaySeconds", waitingDelaySeconds}, {"waitingRepeatMinutes", waitingRepeatMinutes},
+            {"resumedSound", resumedSound}, {"waitingDelaySeconds", waitingDelaySeconds}, {"waitingRepeatMinutes", waitingRepeatMinutes},
             {"announceApprovals", announceApprovals}, {"voiceLanguage", voiceLanguage},
             {"piperProgram", piperProgram}, {"speechSlowness", speechSlowness}};
 }
@@ -242,6 +243,7 @@ QString Notifier::spokenText(Event event, const QString &language, const QString
     case Event::Waiting: sentence = polish ? "%1 czeka na ciebie" : "%1 is waiting for you"; break;
     case Event::CompactionStarted: sentence = polish ? "%1 kompaktuje" : "%1 is compacting"; break;
     case Event::CompactionFinished: sentence = polish ? "%1 skończył kompaktowanie" : "%1 finished compacting"; break;
+    case Event::Resumed: sentence = polish ? "%1 wznawia pracę" : "%1 continues on its own"; break;
     }
     // Without the agent's name, the chat's name is what the sentence is about.
     if (agent.isEmpty()) return sentence.arg(spokenTitle(chat));
@@ -478,6 +480,14 @@ void Notifier::compactionChanged(const QString &agent, const QString &chat, bool
     if (settings_.muted || isPlaying()) return;
     announce(settings_, started ? Event::CompactionStarted : Event::CompactionFinished, agent, chat,
              started ? settings_.compactionStartedSound : settings_.compactionFinishedSound);
+}
+
+void Notifier::turnResumed(const QString &agent, const QString &chat, const QString &reason)
+{
+    if (settings_.popups)
+        popup((agent.isEmpty() ? chat : agent) + " continues on its own",
+              "\"" + chat + "\"" + (reason.isEmpty() ? QString() : ": " + reason));
+    if (!settings_.muted) announce(settings_, Event::Resumed, agent, chat, settings_.resumedSound);
 }
 
 QList<std::pair<QString, QString>> Notifier::builtInSounds()

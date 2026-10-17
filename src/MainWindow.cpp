@@ -1971,6 +1971,9 @@ void MainWindow::showNotificationsDialog()
                                             Event::CompactionStarted);
     QComboBox *compactionFinished = soundRow("Compaction ends:", settings.compactionFinishedSound, "compactionFinishedSound",
                                              Event::CompactionFinished);
+    QComboBox *resumed = soundRow("Agent continues on its own:", settings.resumedSound, "resumedSound", Event::Resumed);
+    resumed->setToolTip("An agent starts a turn without a message, as when a task it left running in the background "
+                        "ends; announced whatever the turn's length");
     form->addRow("Speech language:", language);
     form->addRow("Speech slowness:", slowness);
     // Shows the lead-in for the output as it is now, and then the one each sound played with.
@@ -2036,6 +2039,7 @@ void MainWindow::showNotificationsDialog()
     settings.waitingSound = soundValue(waiting);
     settings.compactionStartedSound = soundValue(compactionStarted);
     settings.compactionFinishedSound = soundValue(compactionFinished);
+    settings.resumedSound = soundValue(resumed);
     settings.waitingDelaySeconds = delay->value();
     settings.waitingRepeatMinutes = repeat->value();
     settings.announceApprovals = approvals->isChecked();
@@ -3038,6 +3042,9 @@ QWidget *MainWindow::addChatTab(AgentProvider *selected, const QString &workingD
         const QString what = request->approval ? request->description.section('\n', 0, 0).trimmed()
                                                : request->questions.value(request->current).text;
         notifier_->waitingStarted(key, request->id, announcedAgent(tab), chatName(tab, ", ", true), what);
+    });
+    connect(tab, &ChatTab::turnResumed, this, [this, tab](const QString &reason) {
+        notifier_->turnResumed(announcedAgent(tab), chatName(tab, ", ", true), reason);
     });
     connect(tab, &ChatTab::turnEnded, this, [this, tab](bool succeeded, qint64 durationMs) {
         notifier_->turnFinished(announcedAgent(tab), chatName(tab, ", ", true), succeeded, durationMs);

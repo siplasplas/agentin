@@ -29,6 +29,8 @@ class FakeClient:
         self.interrupted = False
         self.connected = False
         self.responses = []
+        # As in the SDK, the session's messages come in one stream; a prompt adds the responses to it.
+        self.stream = asyncio.Queue()
         self.permission_modes = []
         self.effective_permission_mode = None
         self.__class__.instances.append(self)
@@ -47,10 +49,18 @@ class FakeClient:
 
     async def query(self, text):
         self.prompts.append(text)
+        for response in self.responses:
+            self.stream.put_nowait(response)
+
+    async def receive_messages(self):
+        while True:
+            yield await self.stream.get()
 
     async def receive_response(self):
-        for response in self.responses:
-            yield response
+        async for message in self.receive_messages():
+            yield message
+            if isinstance(message, sdk.ResultMessage):
+                return
 
     async def interrupt(self):
         self.interrupted = True
@@ -91,8 +101,10 @@ class ClaudeBridgeTest(unittest.IsolatedAsyncioTestCase):
                     sdk.ThinkingBlock(thinking="First thought", signature="private-signature"),
                     sdk.TextBlock(text="Answer")]),
                 sdk.AssistantMessage(message_id="msg-2", content=[sdk.ThinkingBlock(thinking="Unstreamed", signature="")]),
+                sdk.ResultMessage(result="Answer", is_error=False, terminal_reason="completed", session_id="session-test"),
             ]
-            await bridge.run_turn("hi")
+            await bridge.handle({"type": "prompt", "text": "hi"})
+            await bridge.turn_task
         reasoning = [event for event in events if event["type"] == "reasoning"]
         self.assertEqual([(event["id"], event["text"]) for event in reasoning], [
             ("msg-1:0", "First "), ("msg-1:0", "First thought"),
@@ -474,18 +486,12 @@ class ClaudeBridgeTest(unittest.IsolatedAsyncioTestCase):
         with patch.object(bridge_module, "send", events.append):
             bridge = bridge_module.Bridge("/tmp/project")
             await bridge.connect()
-            waiting = asyncio.Event()
-
-            async def response():
-                await waiting.wait()
-                yield sdk.ResultMessage(result=None, is_error=False, terminal_reason="aborted")
-
-            bridge.client.receive_response = response
             await bridge.handle({"type": "prompt", "text": "long task"})
             await asyncio.sleep(0)
             await bridge.handle({"type": "stop"})
-            waiting.set()
-            await bridge.turn_task
+            turn = bridge.turn_task
+            bridge.client.stream.put_nowait(sdk.ResultMessage(result=None, is_error=False, terminal_reason="aborted"))
+            await turn
             self.assertTrue(bridge.client.interrupted)
             self.assertEqual(events[-1]["status"], "interrupted")
 

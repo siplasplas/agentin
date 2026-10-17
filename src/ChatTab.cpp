@@ -78,6 +78,19 @@ bool ChatTab::dispatch()
     retry_->stop();
     const bool wasWaiting = isWaiting();
     waitingFor_.clear();
+    beginTurn();
+    if (!agent_->prompt(outgoing_.takeFirst())) {
+        inTurn_ = false;
+        releaseDirectory();
+        emit changed();
+        return false;
+    }
+    if (wasWaiting) emit changed();
+    return true;
+}
+
+void ChatTab::beginTurn()
+{
     inTurn_ = true;
     turnStartedAt_ = QDateTime::currentMSecsSinceEpoch();
     turnUsage_ = {};
@@ -90,14 +103,6 @@ bool ChatTab::dispatch()
     }
     changeTracker_->turnStarted(QStringList{path_} + agent_->writableDirectories());
     changeRefresh_->start();
-    if (!agent_->prompt(outgoing_.takeFirst())) {
-        inTurn_ = false;
-        releaseDirectory();
-        emit changed();
-        return false;
-    }
-    if (wasWaiting) emit changed();
-    return true;
 }
 
 // Write access granted during a turn joins the directories the turn holds, and access withdrawn leaves them.
@@ -536,6 +541,25 @@ void ChatTab::setAgent(AgentBackend *agent)
         if (status != "interrupted" && turnStartedAt_ > 0)
             emit turnEnded(status == "completed", QDateTime::currentMSecsSinceEpoch() - turnStartedAt_);
         turnStartedAt_ = 0;
+    });
+    // A turn the agent starts on its own runs already, so it cannot wait for the directory; when another chat
+    // holds it, that is reported.
+    connect(agent, &AgentBackend::turnStartedByAgent, this, [this, name](const QString &reason) {
+        if (inTurn_) return;
+        if (locks_ && !holdsDirectory_) {
+            const QStringList writable = agent_->writableDirectories();
+            const QString holder = locks_->acquire(lockOwner(), QStringList{path_} + writable, lockLabel());
+            if (holder.isEmpty()) {
+                holdsDirectory_ = true;
+                heldWritable_ = writable;
+            } else {
+                emit logMessage("[" + name + " works in a directory used by " + holder + "]");
+            }
+        }
+        beginTurn();
+        appendText("\n[" + name + " continues on its own" + (reason.isEmpty() ? QString() : ": " + reason) + "]\n");
+        emit turnResumed(reason);
+        emit changed();
     });
     connect(agent, &AgentBackend::approvalRequested, this,
             [this](int id, const QString &title, const QString &description, bool canAcceptForSession,

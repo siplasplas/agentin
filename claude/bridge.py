@@ -147,6 +147,16 @@ class Bridge:
         # A steering message was sent during the turn and may start another CLI turn after its result.
         self.steered = False
         self.connected = False
+        # One task reads everything the session sends into the inbox, also between turns, so that reading can
+        # stop and start again without losing a message.
+        self.inbox = None
+        self.pump_task = None
+        # Between turns, a task watches the inbox for a turn that Claude Code starts on its own.
+        self.idle_task = None
+        # Prompts that came while such a turn ran, sent when it ends.
+        self.queued_prompts = []
+        # What the latest background task notification said, to name the reason of a turn it starts.
+        self.last_notification = ""
 
     def settings_directories(self):
         """Returns the additionalDirectories saved in the Claude Code settings this session reads."""
@@ -195,7 +205,7 @@ class Bridge:
         ok, details = True, ""
         try:
             await self.client.query("/compact")
-            async for message in self.client.receive_response():
+            async for message in self.receive_response():
                 if isinstance(message, ResultMessage):
                     if getattr(message, "session_id", None):
                         self.session_id = message.session_id
@@ -209,6 +219,7 @@ class Bridge:
         finally:
             self.turn_task = None
             send({"type": "compacted", "ok": ok, "details": details})
+            self.start_next()
 
     def report_writable(self):
         """Tells agentin the directories besides the chat's own where this session may write, so that its
@@ -255,6 +266,8 @@ class Bridge:
         self.client = ClaudeSDKClient(options=options)
         self.connected = False
         await self.client.connect()
+        self.inbox = asyncio.Queue()
+        self.pump_task = asyncio.create_task(self.pump(self.client, self.inbox))
         self.report_writable()
         # Reassert the application mode before accepting prompts, including resumed sessions.
         await self.client.set_permission_mode("plan" if self.read_only else "default")
@@ -263,6 +276,102 @@ class Bridge:
         # A resumed conversation shows how full its context is before the first turn.
         if resume:
             await self.report_context()
+        self.start_next()
+
+    async def disconnect(self):
+        """Ends the connection to Claude Code, with the tasks that read from it."""
+        await self.stop_watching()
+        if self.pump_task is not None:
+            self.pump_task.cancel()
+            try:
+                await self.pump_task
+            except asyncio.CancelledError:
+                pass
+            self.pump_task = None
+        self.connected = False
+        if self.client is not None:
+            await self.client.disconnect()
+
+    @staticmethod
+    async def pump(client, inbox):
+        """Moves every message of the session into the inbox; an error or the end of the stream ends it."""
+        try:
+            async for message in client.receive_messages():
+                await inbox.put(message)
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            await inbox.put(exc)
+        await inbox.put(None)
+
+    async def receive_response(self):
+        """Yields the messages of the session up to and including the next result, as the SDK's
+        receive_response does, but from the inbox."""
+        while True:
+            message = await self.inbox.get()
+            if message is None:
+                # The end stays for whoever reads next.
+                await self.inbox.put(None)
+                return
+            if isinstance(message, Exception):
+                raise message
+            yield message
+            if isinstance(message, ResultMessage):
+                return
+
+    def report_notification(self, message):
+        """Tells agentin about a background task that ended, as Claude Code reports it."""
+        data = message.data if isinstance(getattr(message, "data", None), dict) else {}
+        summary = getattr(message, "summary", None) or data.get("summary") or ""
+        status = getattr(message, "status", None) or data.get("status") or ""
+        self.last_notification = summary
+        send({"type": "task_notification", "status": status, "summary": summary})
+
+    def start_next(self):
+        """Between turns: sends a prompt that came during a turn the session started on its own, or watches
+        for such a turn."""
+        if not self.connected or self.turn_task is not None:
+            return
+        if self.queued_prompts:
+            send({"type": "turn_started", "origin": "human"})
+            self.turn_task = asyncio.create_task(self.run_turn(self.queued_prompts.pop(0)))
+        elif self.idle_task is None:
+            self.idle_task = asyncio.create_task(self.watch())
+
+    async def stop_watching(self):
+        task, self.idle_task = self.idle_task, None
+        if task is not None and not task.done():
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
+    async def watch(self):
+        """Waits between turns for a turn that Claude Code starts on its own, as when a task the model left
+        running in the background ends, and runs it as a turn of the chat. Other messages between turns are
+        reported or dropped."""
+        while True:
+            message = await self.inbox.get()
+            if message is None or isinstance(message, Exception):
+                await self.inbox.put(message)
+                self.idle_task = None
+                return
+            if isinstance(message, SystemMessage):
+                if message.subtype == "task_notification":
+                    self.report_notification(message)
+                continue
+            if RateLimitEvent is not None and isinstance(message, RateLimitEvent):
+                for update in rate_limit_updates(message.rate_limit_info):
+                    send(update)
+                continue
+            if isinstance(message, ResultMessage):
+                continue
+            self.idle_task = None
+            send({"type": "turn_started", "origin": "task-notification", "reason": self.last_notification})
+            self.last_notification = ""
+            self.turn_task = asyncio.create_task(self.run_turn(None, first=message))
+            return
 
     async def ask_agentin(self, message):
         """Sends a check to agentin and waits for its answer."""
@@ -374,17 +483,21 @@ class Bridge:
             if not future.done():
                 future.set_result({"allow": False, "accepted": False})
 
-    async def turn_messages(self):
-        """Yields the messages of a turn, including the CLI turns that steering messages started.
+    async def turn_messages(self, first=None):
+        """Yields the messages of a turn, including the CLI turns that steering messages started; first is
+        the message that began a turn the session started on its own.
 
         A steering message that arrives while the model still works joins the running turn. One that arrives
         after its last step makes the CLI answer it in another turn, announced right after the result with a
         "requesting" status; that turn belongs to the same turn of the chat."""
-        async for message in self.client.receive_response():
-            yield message
+        if first is not None:
+            yield first
+        if not isinstance(first, ResultMessage):
+            async for message in self.receive_response():
+                yield message
         while self.steered:
             self.steered = False
-            stream = self.client.receive_response()
+            stream = self.receive_response()
             try:
                 first = await asyncio.wait_for(anext(stream), timeout=2)
             except asyncio.TimeoutError:
@@ -399,7 +512,9 @@ class Bridge:
             async for message in stream:
                 yield message
 
-    async def run_turn(self, text):
+    async def run_turn(self, text, first=None):
+        """Runs a turn for the prompt text, or, without text, the turn the session started on its own with
+        the message first."""
         self.stop_requested = False
         self.streamed_text = False
         self.turn_had_text = False
@@ -409,8 +524,9 @@ class Bridge:
         thinking = {}
         try:
             self.steered = False
-            await self.client.query(text)
-            async for message in self.turn_messages():
+            if text is not None:
+                await self.client.query(text)
+            async for message in self.turn_messages(first):
                 if isinstance(message, StreamEvent):
                     event = message.event
                     if event.get("type") == "message_start":
@@ -449,6 +565,8 @@ class Bridge:
                     self.streamed_text = False
                     thinking_id = str(uuid.uuid4())
                     thinking = {}
+                elif isinstance(message, SystemMessage) and message.subtype == "task_notification":
+                    self.report_notification(message)
                 elif isinstance(message, SystemMessage) and message.subtype == "api_retry":
                     # The CLI retries failed API requests silently for minutes; the server's message is not included.
                     data = message.data or {}
@@ -481,16 +599,29 @@ class Bridge:
             self.resolve_pending()
             self.turn_task = None
             send({"type": "complete", "status": status, "details": details})
+            self.start_next()
 
     async def handle(self, command):
         kind = command.get("type")
+        # Anything but steering and answers stops the watch between turns; what does not start a turn
+        # watches again.
+        if kind not in ("steer", "stop", "approval_response", "question_response", "command_check_response"):
+            await self.stop_watching()
+        try:
+            await self.handle_command(kind, command)
+        finally:
+            self.start_next()
+
+    async def handle_command(self, kind, command):
         if kind == "prompt":
-            if self.turn_task is not None:
-                send({"type": "error", "message": f"{self.provider.upper()} is already responding"})
-                return
             text = command.get("text", "").strip()
-            if text:
-                self.turn_task = asyncio.create_task(self.run_turn(text))
+            if not text:
+                return
+            # A prompt sent while a turn that the session started on its own runs waits for it.
+            if self.turn_task is not None:
+                self.queued_prompts.append(text)
+                return
+            self.turn_task = asyncio.create_task(self.run_turn(text))
         elif kind == "compact":
             if self.turn_task is not None:
                 send({"type": "compacted", "ok": False, "details": "a turn is running"})
@@ -522,8 +653,7 @@ class Bridge:
             if self.turn_task is not None:
                 send({"type": "error", "message": f"Wait for {self.provider.upper()} to finish before starting a new conversation"})
                 return
-            await self.client.disconnect()
-            self.connected = False
+            await self.disconnect()
             self.session_id = None
             requested_cwd = command.get("cwd")
             if requested_cwd:
@@ -547,8 +677,7 @@ class Bridge:
             if not isinstance(requested_cwd, str) or not os.path.isdir(requested_cwd):
                 send({"type": "error", "message": f"Directory does not exist: {requested_cwd}"})
                 return
-            await self.client.disconnect()
-            self.connected = False
+            await self.disconnect()
             self.session_id = session_id
             self.cwd = os.path.realpath(requested_cwd)
             self.additional_dirs = []
@@ -567,8 +696,7 @@ class Bridge:
                 send({"type": "directory_added", "path": path})
                 return
             self.additional_dirs.append(path)
-            await self.client.disconnect()
-            self.connected = False
+            await self.disconnect()
             await self.connect(resume=True)
             send({"type": "directory_added", "path": path})
         elif kind == "reset_permissions":
@@ -576,8 +704,7 @@ class Bridge:
             if self.turn_task is not None:
                 send({"type": "error", "message": f"Wait for {self.provider.upper()} to finish before withdrawing approvals"})
                 return
-            await self.client.disconnect()
-            self.connected = False
+            await self.disconnect()
             await self.connect(resume=self.session_id is not None)
         elif kind == "settings":
             # The model can change within a session; the effort is a connection option, so changing
@@ -596,8 +723,7 @@ class Bridge:
             if effort != self.effort or (self.provider == "glm" and model != self.model):
                 self.model = model
                 self.effort = effort
-                await self.client.disconnect()
-                self.connected = False
+                await self.disconnect()
                 await self.connect(resume=self.session_id is not None)
             elif model != self.model:
                 self.model = model
@@ -646,17 +772,19 @@ async def main(cwd, provider="claude", model=None, effort=None, read_only=False)
         return 1
     finally:
         bridge.resolve_pending()
+        # Nothing starts after the end.
+        bridge.connected = False
+        bridge.queued_prompts = []
         if bridge.turn_task is not None:
             bridge.turn_task.cancel()
             try:
                 await bridge.turn_task
             except asyncio.CancelledError:
                 pass
-        if bridge.client is not None:
-            try:
-                await bridge.client.disconnect()
-            except Exception:
-                pass
+        try:
+            await bridge.disconnect()
+        except Exception:
+            pass
         reader.cancel()
     return 0
 

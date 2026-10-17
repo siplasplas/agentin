@@ -335,6 +335,9 @@ signals:
     void toolOutput(const QString &text);
     void toolFinished(const QString &name, const QString &status);
     void turnCompleted(const QString &status, const QString &details);
+    // The agent started a turn without a message, as when a task it left running in the background ended;
+    // reason says why, when the agent tells.
+    void turnStartedByAgent(const QString &reason);
     // Tokens of the running or just finished turn; may be reported several times during a turn.
     void turnUsage(const TokenUsage &usage);
     // Tokens of the whole conversation, for agents that keep the total themselves (Codex).

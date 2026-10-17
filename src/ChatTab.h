@@ -151,6 +151,8 @@ signals:
     void userMessagesChanged();
     // A turn ended on its own, successfully or not; turns the user stopped are not reported.
     void turnEnded(bool succeeded, qint64 durationMs);
+    // The agent started a turn on its own, without a message; reason says why, when it tells.
+    void turnResumed(const QString &reason);
     void compactionChanged(bool started);
     void requestsChanged();
     void steeringFailed(const QString &text);
@@ -184,6 +186,8 @@ private:
     // Hands the next message to the agent once the previous turn has ended and the directory is free.
     // Returns false when the agent refused the message.
     bool dispatch();
+    // Marks a turn as running: its start time, its usage and the changes it makes.
+    void beginTurn();
     void releaseDirectory();
     // Takes the directories the agent may write now into the lock the turn holds.
     void updateHeldDirectories();

@@ -865,6 +865,20 @@ void ClaudeAgent::handleLine(const QByteArray &line)
         emit turnCompleted(event.value("status").toString(), event.value("details").toString());
         emit stateChanged();
         sendNextPrompt();
+    } else if (type == "turn_started") {
+        // Claude Code starts a turn on its own when a task left running in the background ends; a prompt sent
+        // during it was kept by the bridge, which reports when that one starts.
+        const bool own = event.value("origin").toString() != "human";
+        const bool wasBusy = std::exchange(busy_, true);
+        stopRequested_ = false;
+        textStarted_ = false;
+        retry_.clear();
+        emit stateChanged();
+        if (own && !wasBusy) emit turnStartedByAgent(event.value("reason").toString());
+    } else if (type == "task_notification") {
+        const QString summary = event.value("summary").toString();
+        emit message("[" + name_ + " background task " + event.value("status").toString("ended")
+                     + (summary.isEmpty() ? QString() : ": " + summary) + "]");
     } else if (type == "command_check") {
         // The bridge's hook asks before Claude Code applies its own permission rules, so agentin's rules win.
         const int id = event.value("id").toInt();

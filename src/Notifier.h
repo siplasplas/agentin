@@ -23,7 +23,7 @@ class Notifier : public QObject
     Q_OBJECT
 
 public:
-    enum class Event { Finished, Failed, Waiting, CompactionStarted, CompactionFinished };
+    enum class Event { Finished, Failed, Waiting, CompactionStarted, CompactionFinished, Resumed };
 
     struct Settings
     {
@@ -37,6 +37,9 @@ public:
         // Short cues when compaction starts and ends. They play whatever the turn's length.
         QString compactionStartedSound = "rising";
         QString compactionFinishedSound = "falling";
+        // An agent that starts a turn on its own, as when a task it left running in the background ends. It
+        // plays whatever the turn's length.
+        QString resumedSound = "speech:";
         // A waiting agent is announced after this delay, so an answer given at once stays quiet.
         int waitingDelaySeconds = 30;
         // Repeats the waiting announcement until answered; 0 announces once.
@@ -72,6 +75,8 @@ public:
     void waitingEnded(const QString &key);
     // A cue does not cut off an announcement that is playing.
     void compactionChanged(const QString &agent, const QString &chat, bool started);
+    // The agent started a turn on its own; reason says why, such as the background task that ended.
+    void turnResumed(const QString &agent, const QString &chat, const QString &reason);
 
     // Short sounds generated on demand, as name and label, such as "click" and "Click".
     static QList<std::pair<QString, QString>> builtInSounds();
