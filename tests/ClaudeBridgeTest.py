@@ -495,6 +495,45 @@ class ClaudeBridgeTest(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(bridge.client.interrupted)
             self.assertEqual(events[-1]["status"], "interrupted")
 
+    async def test_turn_started_by_a_background_task(self):
+        # When a task left running in the background ends, Claude Code reports it and continues on its own,
+        # between agentin's turns; a prompt sent meanwhile waits for that turn.
+        events = []
+        with patch.object(bridge_module, "send", events.append):
+            bridge = bridge_module.Bridge("/tmp/project")
+            await bridge.connect()
+            client = bridge.client
+            client.stream.put_nowait(sdk.SystemMessage(subtype="task_notification",
+                                                       data={"summary": "Build finished", "status": "completed"}))
+            client.stream.put_nowait(sdk.StreamEvent(event={"type": "content_block_delta",
+                                                            "delta": {"type": "text_delta", "text": "The build passed."}}))
+            for _ in range(10):
+                await asyncio.sleep(0)
+            self.assertIsNotNone(bridge.turn_task)
+            client.responses = [sdk.ResultMessage(result="Reply", is_error=False, terminal_reason="completed",
+                                                  session_id="session-test")]
+            await bridge.handle({"type": "prompt", "text": "hello"})
+            self.assertEqual(client.prompts, [])
+            client.stream.put_nowait(sdk.ResultMessage(result="The build passed.", is_error=False,
+                                                       terminal_reason="completed", session_id="session-test"))
+            for _ in range(50):
+                if [event["type"] for event in events].count("complete") == 2:
+                    break
+                await asyncio.sleep(0)
+            self.assertIsNone(bridge.turn_task)
+            self.assertEqual(client.prompts, ["hello"])
+            reported = [(event["type"], event.get("origin") or event.get("text") or event.get("summary") or event.get("status"))
+                        for event in events
+                        if event["type"] in ("task_notification", "turn_started", "delta", "complete")]
+            self.assertEqual(reported, [
+                ("task_notification", "Build finished"), ("turn_started", "task-notification"),
+                ("delta", "The build passed."), ("complete", "completed"),
+                ("turn_started", "human"), ("delta", "Reply"), ("complete", "completed")])
+            self.assertEqual(next(event for event in events if event["type"] == "turn_started")["reason"], "Build finished")
+            # Between turns the bridge watches again.
+            self.assertIsNotNone(bridge.idle_task)
+            await bridge.disconnect()
+
 
     async def test_compact_and_context_reports(self):
         events = []
