@@ -332,7 +332,7 @@ for line in sys.stdin:
     auto *connection = window.findChild<CodexConnection *>();
     QVERIFY(connection);
     QTRY_VERIFY(connection->isConnected());
-    auto *input = window.findChild<QPlainTextEdit *>("commandInput");
+    auto *input = window.findChild<MessageInput *>("commandInput");
     QVERIFY(input);
     input->setPlainText("Question test");
     window.findChild<QPushButton *>("sendButton")->click();
@@ -1005,7 +1005,8 @@ void MainWindowTest::messageInputKeepsCursorVisible()
         QTest::keyClicks(&input, QString("line %1").arg(line));
         QTest::keyClick(&input, Qt::Key_Return, line % 2 ? Qt::ShiftModifier : Qt::NoModifier);
         QCoreApplication::processEvents();
-        QVERIFY2(input.viewport()->rect().contains(input.cursorRect()), qPrintable(QString("after line %1").arg(line)));
+        const QRect caret = input.inputMethodQuery(Qt::ImCursorRectangle).toRect().translated(-input.viewport()->pos());
+        QVERIFY2(input.viewport()->rect().contains(caret), qPrintable(QString("after line %1").arg(line)));
     }
 }
 
@@ -1034,7 +1035,7 @@ for line in sys.stdin:
     script.close();
     MainWindow window("/nonexistent/codex", directory.path(), python, fakeBridge);
     window.show();
-    auto *input = window.findChild<QPlainTextEdit *>("commandInput");
+    auto *input = window.findChild<MessageInput *>("commandInput");
     auto *output = window.findChild<QPlainTextEdit *>("log");
     auto *chat = window.findChild<QPlainTextEdit *>("chatView");
     startChat(window, "Claude", directory.path());
@@ -1079,7 +1080,7 @@ for line in sys.stdin:
     script.close();
     MainWindow window("/nonexistent/codex", directory.path(), python, fakeBridge);
     window.show();
-    auto *input = window.findChild<QPlainTextEdit *>("commandInput");
+    auto *input = window.findChild<MessageInput *>("commandInput");
     auto *output = window.findChild<QPlainTextEdit *>("log");
     auto *chat = window.findChild<QPlainTextEdit *>("chatView");
     auto *compact = window.findChild<QPushButton *>("compactButton");
@@ -1268,7 +1269,7 @@ for line in sys.stdin:
 
     MainWindow window(fakeServer, directory.path());
     window.show();
-    auto *input = window.findChild<QPlainTextEdit *>("commandInput");
+    auto *input = window.findChild<MessageInput *>("commandInput");
     auto *output = window.findChild<QPlainTextEdit *>("log");
     auto *chat = window.findChild<QPlainTextEdit *>("chatView");
     QVERIFY(chat);
@@ -1349,7 +1350,7 @@ for line in sys.stdin:
 
     MainWindow window("/nonexistent/codex", directory.path(), python, fakeBridge);
     window.show();
-    auto *input = window.findChild<QPlainTextEdit *>("commandInput");
+    auto *input = window.findChild<MessageInput *>("commandInput");
     auto *output = window.findChild<QPlainTextEdit *>("log");
     auto *chat = window.findChild<QPlainTextEdit *>("chatView");
     QVERIFY(chat);
@@ -1431,7 +1432,7 @@ for line in sys.stdin:
     MainWindow window("/nonexistent/codex", directory.path(), python, fakeBridge);
     window.setExperimentalAgentsEnabled(true);
     window.show();
-    auto *input = window.findChild<QPlainTextEdit *>("commandInput");
+    auto *input = window.findChild<MessageInput *>("commandInput");
     auto *output = window.findChild<QPlainTextEdit *>("log");
     auto *chat = window.findChild<QPlainTextEdit *>("chatView");
     QVERIFY(chat);
@@ -1479,7 +1480,7 @@ print(json.dumps({"event": "result", "result": {
     const QString indexPath = directory.filePath("codex-conversations.json");
     MainWindow window("/nonexistent/codex", directory.path(), {}, {}, "gemini", nullptr, indexPath, fakeAgy);
     window.setExperimentalAgentsEnabled(true);
-    auto *input = window.findChild<QPlainTextEdit *>("commandInput");
+    auto *input = window.findChild<MessageInput *>("commandInput");
     auto *output = window.findChild<QPlainTextEdit *>("log");
     auto *chat = window.findChild<QPlainTextEdit *>("chatView");
     QVERIFY(chat);
@@ -1537,7 +1538,7 @@ else:
     MainWindow window("/nonexistent/codex", directory.path(), {}, {}, fakeGemini);
     window.setExperimentalAgentsEnabled(true);
     window.show();
-    auto *input = window.findChild<QPlainTextEdit *>("commandInput");
+    auto *input = window.findChild<MessageInput *>("commandInput");
     auto *output = window.findChild<QPlainTextEdit *>("log");
     auto *chat = window.findChild<QPlainTextEdit *>("chatView");
     QVERIFY(chat);
@@ -1703,7 +1704,7 @@ for line in sys.stdin:
         auto *chat = window.findChild<QPlainTextEdit *>("chatView");
         auto *header = window.findChild<QLabel *>("chatHeader");
         auto *loadEarlier = window.findChild<QPushButton *>("loadEarlierButton");
-        auto *input = window.findChild<QPlainTextEdit *>("commandInput");
+        auto *input = window.findChild<MessageInput *>("commandInput");
         auto *sendButton = window.findChild<QPushButton *>("sendButton");
         QVERIFY(chat && header && loadEarlier && input && sendButton);
         QTest::mouseClick(tree->viewport(), Qt::LeftButton, {}, tree->visualItemRect(chatItem).center());
@@ -2081,7 +2082,7 @@ for line in sys.stdin:
     auto *chat = window.findChild<QPlainTextEdit *>("chatView");
     auto *output = window.findChild<QPlainTextEdit *>("log");
     auto *header = window.findChild<QLabel *>("chatHeader");
-    auto *input = window.findChild<QPlainTextEdit *>("commandInput");
+    auto *input = window.findChild<MessageInput *>("commandInput");
     auto *sendButton = window.findChild<QPushButton *>("sendButton");
     QVERIFY(tree && chat && output && header && input && sendButton);
     tree->topLevelItem(1)->setExpanded(true);
@@ -2770,7 +2771,7 @@ for line in sys.stdin:
     QVERIFY(script.setPermissions(QFile::ReadOwner | QFile::WriteOwner | QFile::ExeOwner));
     MainWindow window(fakeServer, directory.path(), {}, {}, "gemini", nullptr, directory.filePath("index.json"));
     window.show();
-    auto *input = window.findChild<QPlainTextEdit *>("commandInput");
+    auto *input = window.findChild<MessageInput *>("commandInput");
     auto *chat = window.findChild<QPlainTextEdit *>("chatView");
     QVERIFY(input && chat);
     QTRY_VERIFY(window.findChild<QWidget *>("newChatButton")->isEnabled());
@@ -2919,7 +2920,7 @@ for line in sys.stdin:
     QVERIFY(input->toPlainText().isEmpty());
     QTRY_COMPARE(input->toPlainText(), QString("First idea"));
     QVERIFY(!thinking());
-    QCOMPARE(input->textCursor().selectedText(), QString("First idea"));
+    QCOMPARE(input->selectedText(), QString("First idea"));
     QVERIFY(!QApplication::activePopupWidget());
     QCOMPARE(askedTimes(), 1);
     QVERIFY(prompts().first().contains("Suggest up to three short messages"));
@@ -2935,7 +2936,7 @@ for line in sys.stdin:
     menu->actions().at(1)->trigger();
     menu->close();
     QCOMPARE(input->toPlainText(), QString("Second idea"));
-    QCOMPARE(input->textCursor().selectedText(), QString("Second idea"));
+    QCOMPARE(input->selectedText(), QString("Second idea"));
     QCOMPARE(askedTimes(), 1);
     QVERIFY(suggest->isVisible());
 
@@ -3087,7 +3088,7 @@ for line in sys.stdin:
     window.restoreSession(false);
     auto *chat = window.findChild<QPlainTextEdit *>("chatView");
     auto *output = window.findChild<QPlainTextEdit *>("log");
-    auto *input = window.findChild<QPlainTextEdit *>("commandInput");
+    auto *input = window.findChild<MessageInput *>("commandInput");
     auto *sendButton = window.findChild<QPushButton *>("sendButton");
     QVERIFY(chat && output && input && sendButton);
     QTRY_VERIFY(chat->toPlainText().contains("Claude: Saved answer"));

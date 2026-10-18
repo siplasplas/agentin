@@ -1,14 +1,19 @@
 #pragma once
 
-#include <QPlainTextEdit>
+#include <qce/CodeEditArea.h>
+
 #include <QStringList>
 
-// Message field that grows with its text. Shift+Enter always starts a new line, Ctrl+Enter always
-// sends, and Enter follows the EnterPolicy. Up and Down move between lines and, on the first or last
+namespace qce {
+class SimpleTextDocument;
+}
+
+// Message field on qcodeedit's editor that grows with its text. Shift+Enter always starts a new line, Ctrl+Enter
+// always sends, and Enter follows the EnterPolicy. Up and Down move between lines and, on the first or last
 // line, recall the previous or next message of the conversation; Page Up and Page Down always recall
 // messages. Past the newest message the text typed before browsing comes back. Alt+Down shows the messages in
 // a list, as a combo box does.
-class MessageInput : public QPlainTextEdit
+class MessageInput : public qce::CodeEditArea
 {
     Q_OBJECT
 
@@ -23,7 +28,11 @@ public:
     };
 
     explicit MessageInput(QWidget *parent = nullptr);
-    void setPlaceholderText(const QString &text);
+
+    QString toPlainText() const;
+    // Replaces the text and the undo history, as a new message does.
+    void setPlainText(const QString &text);
+    void clear() { setPlainText({}); }
 
     EnterPolicy enterPolicy() const { return enterPolicy_; }
     void setEnterPolicy(EnterPolicy policy);
@@ -52,12 +61,15 @@ signals:
 protected:
     void keyPressEvent(QKeyEvent *event) override;
     void mousePressEvent(QMouseEvent *event) override;
-    void insertFromMimeData(const QMimeData *source) override;
+    void contextMenuEvent(QContextMenuEvent *event) override;
     void resizeEvent(QResizeEvent *event) override;
+    void changeEvent(QEvent *event) override;
 
 private:
     bool onFirstLine() const;
     bool onLastLine() const;
+    void moveToEnd();
+    void ensureCursorVisible();
     void recall(int step);
     void recallAt(qsizetype position);
     // The beginning of a message as the field would show it: up to its first line break or the end of its
@@ -65,9 +77,11 @@ private:
     QString beginning(const QString &message) const;
     void updateEnterAction();
     void insertLineBreak();
+    void pasteTrimmed();
     void submit();
     void fitHeight();
 
+    qce::SimpleTextDocument *document_;
     QStringList history_;
     // history_.size() while editing the draft rather than a recalled message.
     qsizetype position_ = 0;
@@ -79,6 +93,8 @@ private:
     // A message recalled from the history that has been neither edited nor entered with the cursor.
     bool recalledUntouched_ = false;
     bool recalling_ = false;
+    // Counts changes of the text, to tell whether a key changed it.
+    int revision_ = 0;
     int shortMessageLength_ = 60;
     bool enterSendsNow_ = true;
 };

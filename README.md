@@ -17,11 +17,13 @@ saved tabs are not reopened at startup.
 Requires Qt 6 Widgets, CMake 3.24 or newer, a C++20 compiler, libgit2 (`libgit2-dev`),
 and an installed `codex` CLI for Codex. The `qt-extra` library (the chat tabs and the
 directory chooser) and the widgets of [DiffMerge](https://github.com/siplasplas/diffmerge)
-(the diffs of the changes window, with the Kate syntax reader of `qcodeedit`) need
-no installing: an installed qt-extra 2.4, DiffMerge 1.3 or qcodeedit 1.6 or newer
+(the diffs of the changes window) need
+no installing: an installed qt-extra 2.7 or DiffMerge 1.6 or newer
 is used, and otherwise CMake fetches them from GitHub when it configures the build
 and builds them into agentin, as it does with backward-cpp; that first
-configuration needs a network connection. Claude requires Python 3, `claude-agent-sdk`, and a configured API
+configuration needs a network connection. The editor library
+[qcodeedit](https://github.com/siplasplas/qcodeedit) 1.17 or newer (the message
+field, and the Kate syntax reader of the diffs) must be installed. Claude requires Python 3, `claude-agent-sdk`, and a configured API
 key. GLM uses the same Python SDK with a Z.AI API key. Gemini requires an
 installed and authenticated Gemini CLI. Antigravity requires an installed and
 authenticated `agy` CLI. The optional test also requires Qt 6
@@ -742,10 +744,12 @@ recalled message; after sending, Ctrl+Z brings the sent message back for
 editing, unless **Settings → Options…** turns that off (`undoAfterSend`). The **Send** button's icon shows what Enter
 does now: a green arrow when it sends and a gray return sign when it starts a new
 line; its tooltip names the key for the other action. **Stop** is the red square
-beside it.
+beside it. The field is qcodeedit's editor, without syntax colours; its context
+menu has Undo, Redo, Cut, Copy, Paste, Delete and Select All.
 
 Up and Down move between lines and, on the first or last line, recall the
-previous or next message you wrote in the current tab's conversation; Page Up
+previous or next message you wrote in the current tab's conversation (a long
+line wrapped in the field counts as one line); Page Up
 and Page Down always recall messages. A recalled message of several lines that
 you have not edited, clicked or moved through with Left, Right, Home or End is
 skipped as a whole, so Up and Down go straight to the previous or next message. After the newest message, the text you

@@ -1,43 +1,54 @@
 #include "MessageInput.h"
 
+#include <qce/SimpleTextDocument.h>
+
 #include <QSet>
 #include <QKeyEvent>
 #include <QApplication>
+#include <QClipboard>
+#include <QContextMenuEvent>
 #include <QListWidget>
+#include <QMenu>
 #include <QWindow>
 #include <QMouseEvent>
 #include <QScreen>
 #include <QScrollBar>
-#include <QMimeData>
-#include <QTextBlock>
-#include <QTextLayout>
-#include <QTextOption>
+
+#include <climits>
 
 namespace {
 constexpr int kMaximumVisibleLines = 8;
 }
 
 MessageInput::MessageInput(QWidget *parent)
-    : QPlainTextEdit(parent)
+    : qce::CodeEditArea(parent)
+    , document_(new qce::SimpleTextDocument(this))
 {
-    setTabChangesFocus(true);
-    setLineWrapMode(QPlainTextEdit::WidgetWidth);
-    connect(this, &QPlainTextEdit::textChanged, this, [this] {
+    setDocument(document_);
+    // Tab moves to the next control, as in other input fields.
+    setTabCaptured(false);
+    setWordWrap(true);
+    setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    connect(this, &qce::CodeEditArea::textChanged, this, [this] {
+        ++revision_;
         if (!recalling_) recalledUntouched_ = false;
-        if (document()->isEmpty()) typed_ = false;
-        if (!toPlainText().contains('\n')) typedLineBreak_ = false;
+        const QString text = toPlainText();
+        if (text.isEmpty()) typed_ = false;
+        if (!text.contains('\n')) typedLineBreak_ = false;
         fitHeight();
         updateEnterAction();
     });
     fitHeight();
 }
 
-void MessageInput::setPlaceholderText(const QString &text)
+QString MessageInput::toPlainText() const
 {
-    if (placeholderText() == text) return;
-    QPlainTextEdit::setPlaceholderText(text);
-    // Qt does not repaint when one visible placeholder replaces another.
-    viewport()->update();
+    return document_->toPlainText();
+}
+
+void MessageInput::setPlainText(const QString &text)
+{
+    document_->setText(text);
 }
 
 // Each message is recalled once, at the place of its latest use, so repeated messages do not alternate.
@@ -169,11 +180,8 @@ void MessageInput::showHistoryList()
 
 void MessageInput::replaceText(const QString &text)
 {
-    QTextCursor cursor(document());
-    cursor.beginEditBlock();
-    cursor.select(QTextCursor::Document);
-    cursor.insertText(text);
-    cursor.endEditBlock();
+    selectAll();
+    insertText(text);
 }
 
 void MessageInput::showSuggestion(const QString &text)
@@ -219,14 +227,18 @@ void MessageInput::keyPressEvent(QKeyEvent *event)
             return;
         }
     }
+    if (event->matches(QKeySequence::Paste)) {
+        pasteTrimmed();
+        return;
+    }
     if (event->key() == Qt::Key_Left || event->key() == Qt::Key_Right || event->key() == Qt::Key_Home
         || event->key() == Qt::Key_End)
         recalledUntouched_ = false;
     // Any change made from the keyboard counts as typing, except pasting.
-    const int revision = document()->revision();
-    QPlainTextEdit::keyPressEvent(event);
+    const int revision = revision_;
+    qce::CodeEditArea::keyPressEvent(event);
     // Clearing the field by keyboard leaves nothing typed.
-    if (document()->revision() != revision && !event->matches(QKeySequence::Paste)) typed_ = !document()->isEmpty();
+    if (revision_ != revision) typed_ = !toPlainText().isEmpty();
     updateEnterAction();
 }
 
@@ -259,9 +271,7 @@ bool MessageInput::enterSends() const
 
 void MessageInput::insertLineBreak()
 {
-    // insertPlainText() does not scroll as typing does, so the new line could stay below the visible ones.
-    insertPlainText("\n");
-    ensureCursorVisible();
+    insertText("\n");
     typed_ = true;
     typedLineBreak_ = true;
     updateEnterAction();
@@ -274,21 +284,28 @@ void MessageInput::submit()
     emit submitted();
 }
 
-// Lines are visual lines, so a long wrapped message is also walked line by line.
+// Lines are the message's own lines; a long wrapped line is passed over as a whole.
 bool MessageInput::onFirstLine() const
 {
-    const QTextCursor cursor = textCursor();
-    const QTextLayout *layout = cursor.block().layout();
-    return cursor.block() == document()->firstBlock()
-        && (!layout || layout->lineForTextPosition(cursor.positionInBlock()).lineNumber() <= 0);
+    return cursorPosition().line == 0;
 }
 
 bool MessageInput::onLastLine() const
 {
-    const QTextCursor cursor = textCursor();
-    const QTextLayout *layout = cursor.block().layout();
-    return cursor.block() == document()->lastBlock()
-        && (!layout || layout->lineForTextPosition(cursor.positionInBlock()).lineNumber() >= layout->lineCount() - 1);
+    return cursorPosition().line == document_->lineCount() - 1;
+}
+
+void MessageInput::moveToEnd()
+{
+    setCursorPosition({document_->lineCount() - 1, INT_MAX});
+}
+
+// Scrolls the cursor into view and keeps the selection.
+void MessageInput::ensureCursorVisible()
+{
+    const qce::TextCursor cursor = cursorPosition();
+    const qce::TextCursor anchor = cursor == selectionEnd() ? selectionStart() : selectionEnd();
+    setSelection(anchor, cursor);
 }
 
 // Going back puts the cursor at the end of the message and going forward at its start, so the arrow
@@ -298,21 +315,23 @@ void MessageInput::recall(int step)
     const qsizetype target = position_ + step;
     if (target < 0 || target > history_.size()) return;
     recallAt(target);
-    moveCursor(step < 0 ? QTextCursor::End : QTextCursor::Start);
+    if (step < 0) moveToEnd();
+    else setCursorPosition({0, 0});
 }
 
+// The field shows whole character cells of the editor's grid; a line wraps at the last space that fits.
 QString MessageInput::beginning(const QString &message) const
 {
     const QString paragraph = message.section('\n', 0, 0);
-    QTextLayout layout(paragraph, font());
-    QTextOption option = document()->defaultTextOption();
-    option.setWrapMode(wordWrapMode());
-    layout.setTextOption(option);
-    layout.beginLayout();
-    QTextLine line = layout.createLine();
-    if (line.isValid()) line.setLineWidth(qMax(1.0, viewport()->width() - 2 * document()->documentMargin()));
-    layout.endLayout();
-    const int length = line.isValid() ? line.textLength() : int(paragraph.size());
+    const int cell = viewportState().charWidth > 0 ? viewportState().charWidth
+                                                   : QFontMetrics(font()).horizontalAdvance('M');
+    // The editor leaves a few pixels before the text.
+    const int columns = qMax(1, (viewport()->width() - 4) / qMax(1, cell));
+    int length = int(paragraph.size());
+    if (length > columns) {
+        const int space = int(paragraph.lastIndexOf(' ', columns));
+        length = space > 0 ? space : columns;
+    }
     QString first = paragraph.left(length);
     while (!first.isEmpty() && first.back().isSpace()) first.chop(1);
     const bool more = length < paragraph.size() || !message.mid(paragraph.size()).trimmed().isEmpty();
@@ -331,44 +350,68 @@ void MessageInput::recallAt(qsizetype target)
     recalledUntouched_ = position_ < history_.size();
     typed_ = false;
     updateEnterAction();
-    moveCursor(QTextCursor::End);
+    moveToEnd();
 }
 
 // Line breaks, spaces and tabs around pasted text are dropped: a trailing line break would make Enter
 // start a new line instead of sending.
 // Pasted text that replaces the whole field counts as unchanged, so Enter sends it whatever its length.
-void MessageInput::insertFromMimeData(const QMimeData *source)
+void MessageInput::pasteTrimmed()
 {
-    const QTextCursor cursor = textCursor();
-    const bool replacesAll = document()->isEmpty()
-        || (cursor.selectionStart() == 0 && cursor.selectionEnd() == document()->characterCount() - 1);
-    if (source->hasText()) insertPlainText(source->text().trimmed());
-    else QPlainTextEdit::insertFromMimeData(source);
+    const QString text = QApplication::clipboard()->text().trimmed();
+    if (text.isEmpty()) return;
+    const qce::TextCursor end{document_->lineCount() - 1, int(document_->lineAt(document_->lineCount() - 1).size())};
+    const bool replacesAll = toPlainText().isEmpty()
+        || (selectionStart() == qce::TextCursor{0, 0} && selectionEnd() == end);
+    insertText(text);
     if (replacesAll) {
         typed_ = false;
         typedLineBreak_ = false;
-        updateEnterAction();
     }
+    updateEnterAction();
+}
+
+void MessageInput::contextMenuEvent(QContextMenuEvent *event)
+{
+    QMenu *menu = createStandardContextMenu(this);
+    // Paste trims the text as Ctrl+V does here.
+    for (QAction *action : menu->actions()) {
+        if (action->shortcut() == QKeySequence(QKeySequence::Paste)) {
+            disconnect(action, &QAction::triggered, nullptr, nullptr);
+            connect(action, &QAction::triggered, this, &MessageInput::pasteTrimmed);
+        }
+    }
+    menu->exec(event->globalPos());
+    delete menu;
 }
 
 // The field grows after its text has changed, when the scrolling has already been decided for the smaller
-// height; the cursor is brought into view again at the new size.
+// height; the cursor is brought into view again at the new size. A new width wraps the text anew.
 void MessageInput::resizeEvent(QResizeEvent *event)
 {
-    QPlainTextEdit::resizeEvent(event);
+    qce::CodeEditArea::resizeEvent(event);
+    fitHeight();
     if (hasFocus()) ensureCursorVisible();
+}
+
+void MessageInput::changeEvent(QEvent *event)
+{
+    qce::CodeEditArea::changeEvent(event);
+    if (event->type() == QEvent::FontChange) fitHeight();
 }
 
 void MessageInput::mousePressEvent(QMouseEvent *event)
 {
     recalledUntouched_ = false;
-    QPlainTextEdit::mousePressEvent(event);
+    qce::CodeEditArea::mousePressEvent(event);
 }
 
 void MessageInput::fitHeight()
 {
-    const int lines = qBound(1, qRound(document()->documentLayout()->documentSize().height()), kMaximumVisibleLines);
+    const int lines = qBound(1, visualRowCount(), kMaximumVisibleLines);
+    const int lineHeight = viewportState().lineHeight > 0 ? viewportState().lineHeight : fontMetrics().lineSpacing();
+    // The margins include the frame. With any spare pixels a partly shown row would count as visible, and the
+    // editor would not scroll to the cursor in it.
     const QMargins margins = contentsMargins();
-    setFixedHeight(lines * fontMetrics().lineSpacing() + 2 * qRound(document()->documentMargin())
-                   + margins.top() + margins.bottom() + 2 * frameWidth());
+    setFixedHeight(lines * lineHeight + margins.top() + margins.bottom());
 }

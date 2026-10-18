@@ -787,8 +787,8 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     connect(sendButton_, &QPushButton::clicked, this, &MainWindow::submitCommand);
     connect(steerButton_, &QPushButton::clicked, this, &MainWindow::submitSteer);
     connect(suggestButton_, &QPushButton::clicked, this, &MainWindow::suggestMessage);
-    connect(input_, &QPlainTextEdit::textChanged, this, &MainWindow::updateSteerButton);
-    connect(input_, &QPlainTextEdit::textChanged, this, &MainWindow::updateSuggestButton);
+    connect(input_, &MessageInput::textChanged, this, &MainWindow::updateSteerButton);
+    connect(input_, &MessageInput::textChanged, this, &MainWindow::updateSuggestButton);
     connect(stopButton_, &QPushButton::clicked, this, &MainWindow::requestStop);
     connect(newChatButton_, &QPushButton::clicked, this, &MainWindow::showNewConversationDialog);
     auto *newChatShortcut = new QShortcut(QKeySequence("Ctrl+T"), this);
