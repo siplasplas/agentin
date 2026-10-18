@@ -55,7 +55,7 @@ The first CMake configuration downloads
 [backward-cpp](https://github.com/bombela/backward-cpp), which writes a stack
 trace with files and line numbers when the application crashes. After the
 command line is read, diagnostics go to `agentin-crash.log` in the application
-data directory (for example `~/.local/share/agentin/agentin-crash.log`) instead
+data directory (for example `~/.local/share/siplasplas/agentin/agentin-crash.log`) instead
 of the terminal; each start adds a header with the version and time, and a
 crash appends its stack trace.
 
@@ -132,6 +132,25 @@ Without `-C`, the conversation uses the terminal's current directory. If
 `codex` is not in `PATH`, the client also checks the Codex desktop installation
 and `CODEX_BIN`. You can select an executable explicitly with
 `--codex /path/to/codex`.
+
+### Where agentin keeps its files
+
+Like the other siplasplas programs, agentin keeps its configuration, what you
+choose (`settings.json`, and `approvals.json` with the command rules, secret files
+and protected paths), in `~/.config/siplasplas/agentin/`, and its data, what it
+produces (the `*-conversations.json` indexes, `recent-directories.json`,
+`open-tabs.json`, `turn-locks.json`, `agentin-crash.log` and the managed
+`claude-venv`), in `~/.local/share/siplasplas/agentin/`.
+
+Older versions kept everything in `~/.local/share/agentin`. At start-up these
+files are moved to their new places (qt-extra's `qxMigrateToSiplasplas()`; files
+agentin does not recognize are moved only when you agree), and what was moved is
+written to `agentin-crash.log`. While another agentin runs, the files stay where
+they are for that run and the next start moves them. The old `claude-venv` is not
+moved, since its scripts hold absolute paths: a new one is created when Claude is
+first used, and once it works the old one and the then empty old directory are
+removed. Kate data kept by qcodeedit 1.12 and older in
+`~/.local/share/qcodeedit/kate-<version>/` is moved to `~/.local/share/kate-data/`.
 
 ## Conversations
 
@@ -324,7 +343,8 @@ For ordinary work, where the agent is meant to change files, leave it off.
 
 **Settings → Options…** sets the model and effort that new chats start with, for
 each agent that offers a choice. The effort is `medium` unless changed there.
-The options are saved in `settings.json` in the application data directory.
+The options are saved in `settings.json` in the configuration directory
+(`~/.config/siplasplas/agentin`, see "Where agentin keeps its files").
 A continued Codex conversation keeps the model and effort it used; Claude and
 Gemini sessions do not record them, so continued chats start with the defaults.
 
@@ -411,7 +431,7 @@ line numbers. A changed line shows which words and characters changed. With
 change and longer unchanged stretches are folded into one line that opens with a
 click; the arrow buttons (or Alt+Up and Alt+Down) move between changes. The code
 is coloured by its syntax with the Kate syntax definitions that qcodeedit keeps in
-`~/.local/share/qcodeedit/kate-<version>/syntax` (shared with other editors built
+`~/.local/share/kate-data/<version>/syntax` (shared with other editors built
 on qcodeedit, such as qceditor and the DiffMerge application), chosen by the
 file's name; without them the diff is shown without syntax colours. agentin does
 not download the definitions. The list starts
@@ -872,7 +892,7 @@ running. A message sent meanwhile waits for the conversation. Nothing changes
 before **OK**.
 
 The rules and the lists are kept in `approvals.json` (version 2) in agentin's
-data directory, apart from `settings.json`, together with the Codex rules agentin
+configuration directory, apart from `settings.json`, together with the Codex rules agentin
 has seen and kept. A file of version 1, without the lists, loads with the default
 lists and is written as version 2 at the next change.
 agentin watches the file while it runs: an outside edit takes effect at once,

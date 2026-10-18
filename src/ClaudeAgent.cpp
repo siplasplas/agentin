@@ -96,6 +96,7 @@ void ClaudeEnvironment::finish(bool ready)
     const auto waiters = std::exchange(waiters_, {});
     for (const auto &[context, done] : waiters)
         if (context) done();
+    if (ready) emit this->ready();
 }
 
 void ClaudeEnvironment::run(const QString &program, const QStringList &arguments,

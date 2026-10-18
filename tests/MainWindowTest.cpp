@@ -57,6 +57,9 @@ class MainWindowTest : public QObject
     Q_OBJECT
 
 private slots:
+    // As in agentin: configuration in ~/.config/siplasplas/agentin_test, data in
+    // ~/.local/share/siplasplas/agentin_test, for tests that pass no paths of their own.
+    void initTestCase() { QCoreApplication::setOrganizationName("siplasplas"); }
     void foldedOutputScrolling();
     void codexFastMode();
     void reasoningPanelAndStreaming();

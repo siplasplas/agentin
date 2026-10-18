@@ -29,6 +29,8 @@ public:
 
 signals:
     void message(const QString &text);
+    // The environment exists and has the SDK.
+    void ready();
 
 private:
     void install();

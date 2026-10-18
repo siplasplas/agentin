@@ -1,4 +1,5 @@
 #include "AntigravityAgent.h"
+#include "AppPaths.h"
 #include "ApprovalRules.h"
 #include "ChatTab.h"
 #include "ChatView.h"
@@ -117,9 +118,7 @@ QList<AgentModel> modelChoices(const QList<AgentModel> &models)
 
 QString codexIndexFile(const QString &path)
 {
-    return path.isEmpty()
-        ? QDir(QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation)).filePath("codex-conversations.json")
-        : path;
+    return path.isEmpty() ? QDir(appDataDirectory()).filePath("codex-conversations.json") : path;
 }
 }
 
@@ -230,6 +229,7 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
                        const QString &antigravityProgram, const QString &geminiDataDirectory)
     : QMainWindow(parent), workingDirectory_(workingDirectory),
       dataDirectory_(QFileInfo(codexIndexFile(codexIndexPath)).absolutePath()),
+      configDirectory_(codexIndexPath.isEmpty() ? appConfigDirectory() : dataDirectory_),
       codex_(new CodexConnection(codexProgram, workingDirectory, codexIndexFile(codexIndexPath), this)),
       claude_(new ClaudeProvider(claudePython, claudeScript, workingDirectory, "claude",
                                  QDir(dataDirectory_).filePath("claude-conversations.json"), this)),
@@ -926,8 +926,16 @@ void MainWindow::useManagedClaudeEnvironment()
 {
     auto *environment = new ClaudeEnvironment(QDir(dataDirectory_).filePath("claude-venv"), this);
     connect(environment, &ClaudeEnvironment::message, this, &MainWindow::appendLine);
+    connect(environment, &ClaudeEnvironment::ready, this, [this] {
+        if (const auto callback = std::exchange(whenClaudeEnvironmentReady_, {})) callback();
+    });
     claude_->setEnvironment(environment);
     glm_->setEnvironment(environment);
+}
+
+void MainWindow::setWhenClaudeEnvironmentReady(std::function<void()> callback)
+{
+    whenClaudeEnvironmentReady_ = std::move(callback);
 }
 
 void MainWindow::restoreSession(bool keepStartChat)
@@ -1485,7 +1493,7 @@ void MainWindow::setDirectoryExpanded(const QString &key, bool expanded)
 // medium; agents without an effort setting ignore it.
 void MainWindow::loadSettings()
 {
-    QFile file(QDir(dataDirectory_).filePath("settings.json"));
+    QFile file(QDir(configDirectory_).filePath("settings.json"));
     const QJsonObject settings = file.open(QIODevice::ReadOnly) ? QJsonDocument::fromJson(file.readAll()).object()
                                                                 : QJsonObject();
     QFont chatFont("Monospace", 10);
@@ -1580,8 +1588,8 @@ void MainWindow::saveSettings()
     QJsonObject agents;
     for (const AgentProvider *listed : providers_)
         agents.insert(listed->name(), QJsonObject{{"model", listed->defaultModel()}, {"effort", listed->defaultEffort()}});
-    if (!QDir().mkpath(dataDirectory_)) return;
-    QSaveFile file(QDir(dataDirectory_).filePath("settings.json"));
+    if (!QDir().mkpath(configDirectory_)) return;
+    QSaveFile file(QDir(configDirectory_).filePath("settings.json"));
     if (!file.open(QIODevice::WriteOnly)
         || file.write(QJsonDocument(QJsonObject{{"version", 1}, {"enterKey", enterKey},
                                                          {"enterSendsUpTo", input_->shortMessageLength()},
@@ -2128,7 +2136,7 @@ QList<CommandRule> rulesFromJson(const QJsonArray &array)
 
 QString MainWindow::approvalsPath() const
 {
-    return QDir(dataDirectory_).filePath("approvals.json");
+    return QDir(configDirectory_).filePath("approvals.json");
 }
 
 // The rules live in approvals.json; without it, as on the first start, it is written with the default rules,
@@ -2181,7 +2189,7 @@ void MainWindow::saveApprovals()
                           {"keptCodexRules", QJsonArray::fromStringList(keptCodexRules_)}};
     if (codexRulesKnown_) approvals.insert("knownCodexRules", QJsonArray::fromStringList(knownCodexRules_));
     const QByteArray content = QJsonDocument(approvals).toJson(QJsonDocument::Indented);
-    if (!QDir().mkpath(dataDirectory_)) return;
+    if (!QDir().mkpath(configDirectory_)) return;
     QSaveFile file(approvalsPath());
     if (!file.open(QIODevice::WriteOnly) || file.write(content) < 0 || !file.commit()) {
         appendLine("[Could not save approvals.json: " + file.errorString() + "]");
@@ -2226,7 +2234,7 @@ void MainWindow::watchApprovals()
     }
     if (QFileInfo::exists(approvalsPath()) && !approvalsWatcher_->files().contains(approvalsPath()))
         approvalsWatcher_->addPath(approvalsPath());
-    if (!approvalsWatcher_->directories().contains(dataDirectory_)) approvalsWatcher_->addPath(dataDirectory_);
+    if (!approvalsWatcher_->directories().contains(configDirectory_)) approvalsWatcher_->addPath(configDirectory_);
 }
 
 QList<std::pair<ApprovalRule, QString>> MainWindow::codexRuleConflicts(const QList<CommandRule> &rules) const

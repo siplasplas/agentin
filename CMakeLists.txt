@@ -26,34 +26,39 @@ set(backward_exclude)
 if(CMAKE_VERSION VERSION_GREATER_EQUAL 3.28)
     set(backward_exclude EXCLUDE_FROM_ALL)
 endif()
-# QxFileDialog and MruTabWidget come from qt-extra (github.com/siplasplas/qt-extra). An installed qt-extra 2.4
+# QxFileDialog and MruTabWidget come from qt-extra (github.com/siplasplas/qt-extra). An installed qt-extra 2.7
 # or later is used; otherwise CMake fetches the tag below and builds it into agentin, so nothing has to be
-# installed first. Version 2.4 reads a typed path starting with "~" as the home directory.
+# installed first. Version 2.7 moves older versions' files to ~/.config/siplasplas (qxMigrateToSiplasplas).
 FetchContent_Declare(
     qt-extra
     GIT_REPOSITORY https://github.com/siplasplas/qt-extra.git
-    GIT_TAG v2.4.0
+    GIT_TAG v2.7.0
     GIT_SHALLOW TRUE
     # Only built into agentin; its own install rules would add its library, headers and CMake package.
     ${backward_exclude}
     # The rest of the line goes to find_package(), so this comes last.
-    FIND_PACKAGE_ARGS 2.4
+    FIND_PACKAGE_ARGS 2.7
 )
 FetchContent_MakeAvailable(qt-extra)
 # The changes window shows a file's differences with DiffMerge's widgets (github.com/siplasplas/diffmerge,
 # LGPL-3.0-only): line, word and character differences, unified or side by side, with syntax colours from
 # Kate definitions read by qcodeedit, and the bounded line counting of the changed files list. An installed
-# DiffMerge 1.3 or later is used; otherwise the tag below is fetched and built into agentin, only its libraries. It
-# finds an installed qcodeedit 1.6 itself, or fetches it.
+# DiffMerge 1.6 or later is used; otherwise the tag below is fetched and built into agentin, only its libraries. It
+# finds an installed qcodeedit 1.13 itself (Kate data in ~/.local/share/kate-data), or fetches it.
 FetchContent_Declare(
     DiffMerge
     GIT_REPOSITORY https://github.com/siplasplas/diffmerge.git
-    GIT_TAG v1.3.0
+    GIT_TAG v1.6.0
     GIT_SHALLOW TRUE
     ${backward_exclude}
-    FIND_PACKAGE_ARGS 1.3 CONFIG COMPONENTS Widgets
+    FIND_PACKAGE_ARGS 1.6 CONFIG COMPONENTS Widgets
 )
 FetchContent_MakeAvailable(DiffMerge)
+# main() moves the Kate data of qcodeedit 1.12 and older (qce::kate::migrateDataRoot). Installed targets
+# imported by DiffMerge are scoped to its directory.
+if(NOT TARGET qcodeedit::kate)
+    find_package(qcodeedit-kate 1.13.0 CONFIG REQUIRED)
+endif()
 FetchContent_Declare(
     backward
     GIT_REPOSITORY https://github.com/bombela/backward-cpp.git
@@ -66,6 +71,8 @@ FetchContent_MakeAvailable(backward)
 
 add_executable(agentin
     src/main.cpp
+    src/AppPaths.cpp
+    src/AppPaths.h
     src/CodexLocator.cpp
     src/CodexLocator.h
     src/AgentBackend.h
@@ -119,7 +126,7 @@ add_executable(agentin
     src/FileOpener.h
 )
 target_link_libraries(agentin PRIVATE Qt6::Widgets qt-extra Backward::Object DiffMerge::Widgets PkgConfig::LIBGIT2
-                      qtermwidget6)
+                      qtermwidget6 qcodeedit::kate)
 # The window icon; Qt draws it with its SVG image format plugin.
 qt_add_resources(agentin icons PREFIX "/" FILES icons/agentin.svg)
 target_include_directories(agentin PRIVATE src)
@@ -148,6 +155,8 @@ if(BUILD_TESTING)
     find_package(Python3 COMPONENTS Interpreter)
     add_executable(agentin_test
         tests/MainWindowTest.cpp
+        src/AppPaths.cpp
+        src/AppPaths.h
         src/CodexLocator.cpp
         src/CodexLocator.h
         src/AgentBackend.h

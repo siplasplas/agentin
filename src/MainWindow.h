@@ -1,5 +1,6 @@
 #pragma once
 
+#include <functional>
 #include <optional>
 
 #include "FileOpener.h"
@@ -65,6 +66,8 @@ public:
     // Claude and GLM run their bridge in a virtual environment in the application data directory,
     // created with claude-agent-sdk when one of them is first used.
     void useManagedClaudeEnvironment();
+    // Called once the managed Claude environment is ready, e.g. to remove an older version's one.
+    void setWhenClaudeEnvironmentReady(std::function<void()> callback);
     // GLM, Gemini and Antigravity are offered only when experimental agents are enabled in the options.
     void setExperimentalAgentsEnabled(bool enabled);
 
@@ -152,7 +155,11 @@ private:
     void chooseModel();
 
     QString workingDirectory_;
+    // Data (indexes, open tabs, locks, the managed Claude environment) and configuration (settings.json,
+    // approvals.json); the same directory when a test passes its own index path.
     QString dataDirectory_;
+    QString configDirectory_;
+    std::function<void()> whenClaudeEnvironmentReady_;
     QString lastAudioDirectory_;
     CodexConnection *codex_;
     ClaudeProvider *claude_;
