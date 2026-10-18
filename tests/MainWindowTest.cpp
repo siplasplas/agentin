@@ -2667,7 +2667,13 @@ for line in sys.stdin:
     const QString title = "Rename a conversation from the tree by hand";
     tab->setTitle(title);
     const int index = tabs->indexOf(qobject_cast<QWidget *>(tab->parent()));
-    QCOMPARE(tabs->tabText(index), "first · " + title.left(31) + QChar(0x2026));
+    // The directory is the tab's title; the chat's title, at most 32 characters, its shortenable extension.
+    auto *mruTabs = qobject_cast<MruTabWidget *>(tabs);
+    QVERIFY(mruTabs);
+    QCOMPARE(tabs->tabText(index), QString("first"));
+    QCOMPARE(mruTabs->tabExtension(tabs->widget(index)), title.left(31) + QChar(0x2026));
+    QCOMPARE(mruTabs->tabPopupText(index), "first · " + title.left(31) + QChar(0x2026));
+    QVERIFY(mruTabs->sharedTabWidths());
 
     QAction *options = nullptr;
     for (QAction *action : window.findChildren<QAction *>())
@@ -2702,14 +2708,17 @@ for line in sys.stdin:
         QVERIFY(!folder->isEnabled());
     });
     QCOMPARE(tabs->tabText(index), QString("Claude: first"));
-    QCOMPARE(qobject_cast<MruTabWidget *>(tabs)->tabPopupText(index), QString("Claude: first"));
+    QVERIFY(mruTabs->tabExtension(tabs->widget(index)).isEmpty());
+    QCOMPARE(mruTabs->tabPopupText(index), QString("Claude: first"));
     setOptions([](QDialog *dialog) {
         auto *folder = dialog->findChild<QCheckBox *>("tabNameDirectory");
         dialog->findChild<QSpinBox *>("tabNameTitleLength")->setValue(10);
         QVERIFY(folder->isEnabled());
         folder->setChecked(false);
     });
+    // Without the directory the chat's title is the tab's title.
     QCOMPARE(tabs->tabText(index), "Claude: " + title.left(9) + QChar(0x2026));
+    QVERIFY(mruTabs->tabExtension(tabs->widget(index)).isEmpty());
 
     // Speech says only what happened; the desktop notification names the chat.
     QCOMPARE(Notifier::spokenText(Notifier::Event::Finished, "en"), QString("turn finished"));

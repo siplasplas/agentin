@@ -268,10 +268,15 @@ ends. A message you send while such a turn runs waits for it.
 
 Chats in different tabs run independently, also several chats with the same
 agent. A tab is named by the last part of its working directory and the chat's
-title cut to 32 characters, for example `agentin · Rename a conversation fr…`;
+title cut to at most 32 characters, for example `agentin · Rename a conversation fr…`.
+The tabs share the tab bar: when the names do not fit, the tabs get equal widths
+and the chat titles are shortened further (the directory never is), so that several
+chats stay readable; only when even the directories do not fit do the scroll
+arrows appear. Ctrl+Tab shows the whole names.
 **Settings → Options…** chooses whether the agent's name comes first, whether
-the directory is shown and how long the title is (or no title, which keeps the
-directory). Desktop notifications name the chat the same way. The conversation tree keeps showing the agent and the title. All
+the directory is shown and the title's greatest length (or no title, which keeps the
+directory; without the directory the title names the tab and is not shortened
+further). Desktop notifications name the chat the same way. The conversation tree keeps showing the agent and the title. All
 Codex chats share one App Server process. A tab whose agent is
 responding shows a busy marker, and a background tab that receives output is
 marked until you switch to it. Closing a tab while its turn runs names the chat

@@ -355,6 +355,10 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     tabs_->setTabsClosable(true);
     tabs_->setMovable(true);
     tabs_->setUsesScrollButtons(true);
+    // The tabs share the bar: when the names do not fit, the chat titles are shortened first, so that
+    // several chats stay readable before the scroll arrows appear.
+    tabs_->setSharedTabWidths(true);
+    tabs_->setTabExtensionSeparator(" · ");
     new CtrlTabForwarder(tabs_, this);
     modelInput_ = new QComboBox(this);
     modelInput_->setObjectName("modelSelect");
@@ -1692,7 +1696,8 @@ void MainWindow::showOptionsDialog()
     nameTitle->setSuffix(" characters");
     nameTitle->setSpecialValueText("No title");
     nameTitle->setValue(tabTitleLength_);
-    nameTitle->setToolTip("The chat's title cut to this length; without it the directory is always shown");
+    nameTitle->setToolTip("The chat's title cut to at most this length; tabs short of room shorten it further. "
+                          "Without it the directory is always shown");
     namesForm->addRow(nameAgent);
     namesForm->addRow(nameDirectory);
     namesForm->addRow("Title:", nameTitle);
@@ -3319,11 +3324,24 @@ void MainWindow::updateTab(QWidget *page)
     ChatTab *tab = chatTab(page);
     const int index = tabs_->indexOf(page);
     if (!tab || index < 0) return;
-    const QString name = chatName(tab, " · ", false);
-    tabs_->setTabText(index, tabShowsAgent_ ? tab->provider()->name() + ": " + name : name);
+    // The tab's title is the agent and the directory, never shortened; the chat's title (at most the chosen
+    // length) is its extension, shortened by the tab bar when the tabs share too little room. Without the
+    // directory the chat's title is the tab's title.
+    const QString agent = tabShowsAgent_ ? tab->provider()->name() + ": " : QString();
+    const bool directory = tabShowsDirectory_ || tabTitleLength_ <= 0;
+    const QString chatTitle = tabTitleLength_ > 0 ? shortPreview(tab->title().simplified(), tabTitleLength_)
+                                                  : QString();
+    if (directory) {
+        const QString folder = QFileInfo(tab->workingDirectory()).fileName();
+        tabs_->setTabText(index, agent + (folder.isEmpty() ? QDir::toNativeSeparators(tab->workingDirectory()) : folder));
+        tabs_->setTabExtension(page, chatTitle);
+    } else {
+        tabs_->setTabText(index, agent + chatTitle);
+        tabs_->setTabExtension(page, QString());
+    }
     tabs_->setTabToolTip(index, tab->headerText());
-    // The Ctrl+Tab list names a tab as the tab does.
-    tabs_->setTabPopupText(index, tabs_->tabText(index));
+    // The Ctrl+Tab list shows the whole name, title and extension.
+    tabs_->setTabPopupText(index, QString());
     tabs_->setTabKey(page, tab->key());
     tabs_->setTabBusy(page, tab->agent()->isResponding() || tab->isWaiting());
     if (page == tabs_->currentWidget()) {
