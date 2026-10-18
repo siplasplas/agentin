@@ -55,17 +55,17 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(DiffMerge)
 # The message field is qcodeedit's editor (1.17: insertText, textChanged, the standard context menu), spell
-# checked with qcodeedit-spell (hunspell) in the language qcodeedit-encoding detects. main() moves the Kate data
-# of qcodeedit 1.12 and older (qce::kate::migrateDataRoot). Installed targets imported by DiffMerge are scoped
-# to its directory.
+# checked with qcodeedit-spell (hunspell; 1.17.1 deletes it safely with the field) in the language
+# qcodeedit-encoding detects. main() moves the Kate data of qcodeedit 1.12 and older
+# (qce::kate::migrateDataRoot). Installed targets imported by DiffMerge are scoped to its directory.
 if(NOT TARGET qcodeedit::qcodeedit)
-    find_package(qcodeedit 1.17.0 CONFIG REQUIRED)
+    find_package(qcodeedit 1.17.1 CONFIG REQUIRED)
 endif()
 if(NOT TARGET qcodeedit::spell)
-    find_package(qcodeedit-spell 1.17.0 CONFIG REQUIRED)
+    find_package(qcodeedit-spell 1.17.1 CONFIG REQUIRED)
 endif()
 if(NOT TARGET qcodeedit::encoding)
-    find_package(qcodeedit-encoding 1.17.0 CONFIG REQUIRED)
+    find_package(qcodeedit-encoding 1.17.1 CONFIG REQUIRED)
 endif()
 if(NOT TARGET qcodeedit::kate)
     find_package(qcodeedit-kate 1.13.0 CONFIG REQUIRED)

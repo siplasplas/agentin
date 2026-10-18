@@ -34,7 +34,6 @@ public:
     };
 
     explicit MessageInput(QWidget *parent = nullptr);
-    ~MessageInput() override;
 
     QString toPlainText() const;
     // Replaces the text and the undo history, as a new message does.

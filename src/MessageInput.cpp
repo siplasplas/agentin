@@ -62,13 +62,6 @@ MessageInput::MessageInput(QWidget *parent)
     spelling_->setLanguages({detectedLanguage_});
 }
 
-// The spelling removes its underlines when deleted, so it goes while the editor is still whole; as a child it
-// would be deleted only after the editor's part of this object.
-MessageInput::~MessageInput()
-{
-    delete spelling_;
-}
-
 bool MessageInput::spellCheckingEnabled() const
 {
     return spelling_->isEnabled();

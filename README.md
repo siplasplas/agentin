@@ -22,7 +22,7 @@ no installing: an installed qt-extra 2.7 or DiffMerge 1.6 or newer
 is used, and otherwise CMake fetches them from GitHub when it configures the build
 and builds them into agentin, as it does with backward-cpp; that first
 configuration needs a network connection. The editor library
-[qcodeedit](https://github.com/siplasplas/qcodeedit) 1.17 or newer (the message
+[qcodeedit](https://github.com/siplasplas/qcodeedit) 1.17.1 or newer (the message
 field, its spell checking with hunspell and language detection, and the Kate
 syntax reader of the diffs) must be installed, built with hunspell
 (`libhunspell-dev`). Claude requires Python 3, `claude-agent-sdk`, and a configured API
