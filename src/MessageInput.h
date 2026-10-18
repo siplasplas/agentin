@@ -4,8 +4,14 @@
 
 #include <QStringList>
 
+class QMenu;
+class QTimer;
+
 namespace qce {
 class SimpleTextDocument;
+namespace spell {
+class CodeEditSpelling;
+}
 }
 
 // Message field on qcodeedit's editor that grows with its text. Shift+Enter always starts a new line, Ctrl+Enter
@@ -28,6 +34,7 @@ public:
     };
 
     explicit MessageInput(QWidget *parent = nullptr);
+    ~MessageInput() override;
 
     QString toPlainText() const;
     // Replaces the text and the undo history, as a new message does.
@@ -53,10 +60,25 @@ public:
     // recalled as Page Up would recall it.
     void showHistoryList();
 
+    // Misspelled words get a wavy underline; the context menu offers corrections. On by default.
+    bool spellCheckingEnabled() const;
+    void setSpellCheckingEnabled(bool enabled);
+    // The dictionaries chosen in the context menu (e.g. "en_US", "pl_PL"); empty means the language detected
+    // from the message.
+    QStringList spellLanguages() const { return spellLanguages_; }
+    void setSpellLanguages(const QStringList &dictionaries);
+    // Recently chosen dictionaries, newest first, offered in the context menu.
+    QStringList recentSpellLanguages() const { return recentSpellLanguages_; }
+    void setRecentSpellLanguages(const QStringList &dictionaries) { recentSpellLanguages_ = dictionaries; }
+
 signals:
     void submitted();
     void enterActionChanged(bool sends);
     void historyChanged();
+    // The user chose spelling languages in the context menu.
+    void spellLanguagesChosen();
+    // No dictionary is installed for the language; the text says which package adds one.
+    void spellingDictionaryMissing(const QString &text);
 
 protected:
     void keyPressEvent(QKeyEvent *event) override;
@@ -80,8 +102,23 @@ private:
     void pasteTrimmed();
     void submit();
     void fitHeight();
+    void detectLanguage();
+    void applySpellLanguages();
+    void chooseSpellLanguages(const QStringList &dictionaries);
+    void addSpellingCorrections(QMenu &menu, const QPoint &position);
+    void addSpellingLanguageMenu(QMenu &menu);
 
     qce::SimpleTextDocument *document_;
+    qce::spell::CodeEditSpelling *spelling_;
+    // Detects the message's language a moment after typing stops.
+    QTimer *languageTimer_;
+    int languageRequest_ = 0;
+    // The language detected from the message (a cpg code such as "pl"), kept while the text is too short to tell.
+    QString detectedLanguage_;
+    QStringList spellLanguages_;
+    QStringList recentSpellLanguages_;
+    // The languages last reported without a dictionary, so that each is reported once.
+    QString missingDictionary_;
     QStringList history_;
     // history_.size() while editing the draft rather than a recalled message.
     qsizetype position_ = 0;

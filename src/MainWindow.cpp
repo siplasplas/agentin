@@ -784,6 +784,9 @@ MainWindow::MainWindow(const QString &codexProgram, const QString &workingDirect
     });
     showMuteState();
     connect(input_, &MessageInput::enterActionChanged, this, &MainWindow::showEnterAction);
+    connect(input_, &MessageInput::spellLanguagesChosen, this, &MainWindow::saveSettings);
+    connect(input_, &MessageInput::spellingDictionaryMissing, this,
+            [this](const QString &text) { appendLine("[" + text + "]"); });
     connect(sendButton_, &QPushButton::clicked, this, &MainWindow::submitCommand);
     connect(steerButton_, &QPushButton::clicked, this, &MainWindow::submitSteer);
     connect(suggestButton_, &QPushButton::clicked, this, &MainWindow::suggestMessage);
@@ -1512,6 +1515,10 @@ void MainWindow::loadSettings()
     const QString enterKey = settings.value("enterKey").toString();
     input_->setShortMessageLength(settings.value("enterSendsUpTo").toInt(60));
     undoAfterSend_ = settings.value("undoAfterSend").toBool(true);
+    const QJsonObject spelling = settings.value("spelling").toObject();
+    input_->setSpellCheckingEnabled(spelling.value("enabled").toBool(true));
+    input_->setRecentSpellLanguages(spelling.value("recent").toVariant().toStringList());
+    input_->setSpellLanguages(spelling.value("languages").toVariant().toStringList());
     suggestionsEnabled_ = settings.value("suggestionsEnabled").toBool(false);
     suggestionCount_ = qBound(1, settings.value("suggestions").toInt(1), 3);
     const QJsonObject tabNames = settings.value("tabNames").toObject();
@@ -1598,6 +1605,10 @@ void MainWindow::saveSettings()
         || file.write(QJsonDocument(QJsonObject{{"version", 1}, {"enterKey", enterKey},
                                                          {"enterSendsUpTo", input_->shortMessageLength()},
                                                          {"undoAfterSend", undoAfterSend_},
+                                                         {"spelling", QJsonObject{
+                                                             {"enabled", input_->spellCheckingEnabled()},
+                                                             {"languages", QJsonArray::fromStringList(input_->spellLanguages())},
+                                                             {"recent", QJsonArray::fromStringList(input_->recentSpellLanguages())}}},
                                                          {"suggestionsEnabled", suggestionsEnabled_},
                                                          {"suggestions", suggestionCount_},
                                                          {"tabNames", QJsonObject{{"agent", tabShowsAgent_},
@@ -1653,6 +1664,12 @@ void MainWindow::showOptionsDialog()
     undoAfterSend->setObjectName("undoAfterSend");
     undoAfterSend->setChecked(undoAfterSend_);
     enterForm->addRow(QString(), undoAfterSend);
+    auto *spellChecking = new QCheckBox("Check spelling in the message field", &dialog);
+    spellChecking->setObjectName("spellChecking");
+    spellChecking->setChecked(input_->spellCheckingEnabled());
+    spellChecking->setToolTip("Underlines misspelled words with hunspell's dictionaries; the field's context menu "
+                              "offers corrections and the language");
+    enterForm->addRow(QString(), spellChecking);
     auto *suggestionsEnabled = new QCheckBox("Suggest ideas for the next message (the light bulb)", &dialog);
     suggestionsEnabled->setObjectName("suggestionsEnabled");
     suggestionsEnabled->setChecked(suggestionsEnabled_);
@@ -1770,6 +1787,7 @@ void MainWindow::showOptionsDialog()
     input_->setEnterPolicy(MessageInput::EnterPolicy(enterInput->currentData().toInt()));
     input_->setShortMessageLength(shortLength->value());
     undoAfterSend_ = undoAfterSend->isChecked();
+    input_->setSpellCheckingEnabled(spellChecking->isChecked());
     suggestionsEnabled_ = suggestionsEnabled->isChecked();
     suggestionCount_ = suggestions->value();
     updateSuggestButton();

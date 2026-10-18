@@ -1,6 +1,9 @@
 #include "MessageInput.h"
+#include "SpellLanguageDialog.h"
 
 #include <qce/SimpleTextDocument.h>
+#include <qce/encoding/Encoding.h>
+#include <qce/spell/CodeEditSpelling.h>
 
 #include <QSet>
 #include <QKeyEvent>
@@ -8,21 +11,31 @@
 #include <QClipboard>
 #include <QContextMenuEvent>
 #include <QListWidget>
+#include <QLocale>
 #include <QMenu>
+#include <QTimer>
 #include <QWindow>
 #include <QMouseEvent>
 #include <QScreen>
 #include <QScrollBar>
 
 #include <climits>
+#include <memory>
 
 namespace {
 constexpr int kMaximumVisibleLines = 8;
+constexpr int kRecentSpellLanguages = 6;
+// Fewer words than this do not show the language reliably; the language found before stays.
+constexpr int kLanguageWords = 3;
+constexpr double kLanguageConfidence = 0.5;
 }
 
 MessageInput::MessageInput(QWidget *parent)
     : qce::CodeEditArea(parent)
     , document_(new qce::SimpleTextDocument(this))
+    , spelling_(nullptr)
+    , languageTimer_(new QTimer(this))
+    , detectedLanguage_(QLocale::system().name().section('_', 0, 0))
 {
     setDocument(document_);
     // Tab moves to the next control, as in other input fields.
@@ -37,8 +50,137 @@ MessageInput::MessageInput(QWidget *parent)
         if (!text.contains('\n')) typedLineBreak_ = false;
         fitHeight();
         updateEnterAction();
+        if (spelling_ && spellLanguages_.isEmpty() && spelling_->isEnabled()) languageTimer_->start();
     });
     fitHeight();
+    // Wavy underlines under misspelled words; the language follows the message until the user chooses one.
+    spelling_ = new qce::spell::CodeEditSpelling(this, this);
+    languageTimer_->setSingleShot(true);
+    languageTimer_->setInterval(600);
+    connect(languageTimer_, &QTimer::timeout, this, &MessageInput::detectLanguage);
+    // A missing dictionary is reported once the owner can hear it, when it sets the languages.
+    spelling_->setLanguages({detectedLanguage_});
+}
+
+// The spelling removes its underlines when deleted, so it goes while the editor is still whole; as a child it
+// would be deleted only after the editor's part of this object.
+MessageInput::~MessageInput()
+{
+    delete spelling_;
+}
+
+bool MessageInput::spellCheckingEnabled() const
+{
+    return spelling_->isEnabled();
+}
+
+void MessageInput::setSpellCheckingEnabled(bool enabled)
+{
+    spelling_->setEnabled(enabled);
+    if (enabled) applySpellLanguages();
+}
+
+void MessageInput::setSpellLanguages(const QStringList &dictionaries)
+{
+    spellLanguages_ = dictionaries;
+    applySpellLanguages();
+}
+
+// The chosen ones become the most recent in the Spelling Language menu.
+void MessageInput::chooseSpellLanguages(const QStringList &dictionaries)
+{
+    for (auto it = dictionaries.crbegin(); it != dictionaries.crend(); ++it) {
+        recentSpellLanguages_.removeAll(*it);
+        recentSpellLanguages_.prepend(*it);
+    }
+    recentSpellLanguages_ = recentSpellLanguages_.mid(0, kRecentSpellLanguages);
+    setSpellLanguages(dictionaries);
+    emit spellLanguagesChosen();
+}
+
+// The language of a few words is a guess; only a likely one replaces the language found before.
+void MessageInput::detectLanguage()
+{
+    const QString text = toPlainText().simplified();
+    if (text.count(' ') + 1 < kLanguageWords) return;
+    const int request = ++languageRequest_;
+    qce::encoding::detectLanguageAsync(text.toUtf8(), this, [this, request](const qce::encoding::Language &language) {
+        if (request != languageRequest_ || language.code.isEmpty() || language.confidence < kLanguageConfidence
+            || language.code == detectedLanguage_)
+            return;
+        detectedLanguage_ = language.code;
+        applySpellLanguages();
+    });
+}
+
+void MessageInput::applySpellLanguages()
+{
+    const QStringList languages = spellLanguages_.isEmpty() ? QStringList{detectedLanguage_} : spellLanguages_;
+    spelling_->setLanguages(languages);
+    if (spelling_->isReady() || !spelling_->isEnabled()) return;
+    // Said once per language: which dictionary package would add it.
+    const QString missing = languages.join(',');
+    if (missing == missingDictionary_) return;
+    missingDictionary_ = missing;
+    const QString name = qce::encoding::languageName(languages.front());
+    emit spellingDictionaryMissing(QString("No spelling dictionary for %1; install one with hunspell, e.g. "
+                                           "sudo apt install %2")
+                                       .arg(name.isEmpty() ? languages.front() : name,
+                                            qce::spell::packageHint(languages.front())));
+}
+
+void MessageInput::addSpellingCorrections(QMenu &menu, const QPoint &position)
+{
+    if (!spelling_->isEnabled()) return;
+    const auto word = spelling_->misspelledWordAt(cursorAt(viewport()->mapFrom(this, position)));
+    if (!word) return;
+    const QStringList suggestions = spelling_->suggestions(word->word, 8);
+    if (suggestions.isEmpty()) menu.addAction("No suggestions")->setEnabled(false);
+    for (const QString &suggestion : suggestions) {
+        connect(menu.addAction(QString(suggestion).replace("&", "&&")), &QAction::triggered, this,
+                [this, misspelling = *word, suggestion] { spelling_->replaceWord(misspelling, suggestion); });
+    }
+    menu.addSeparator();
+    connect(menu.addAction("Add to Dictionary"), &QAction::triggered, this,
+            [this, text = word->word] { spelling_->addToDictionary(text); });
+    connect(menu.addAction("Ignore"), &QAction::triggered, this, [this, text = word->word] { spelling_->ignore(text); });
+    menu.addSeparator();
+}
+
+// Automatic, the recent dictionaries and the ones in use, up to two at once, and all installed ones in a window.
+void MessageInput::addSpellingLanguageMenu(QMenu &menu)
+{
+    QMenu *languageMenu = menu.addMenu("Spelling Language");
+    languageMenu->setEnabled(spelling_->isEnabled());
+    QHash<QString, QString> names;
+    for (const auto &dictionary : qce::spell::installedDictionaries()) names.insert(dictionary.name, dictionary.displayName);
+    const QString detected = qce::encoding::languageName(detectedLanguage_);
+    QAction *automatic = languageMenu->addAction(detected.isEmpty() ? "Automatic" : QString("Automatic (%1)").arg(detected));
+    automatic->setCheckable(true);
+    automatic->setChecked(spellLanguages_.isEmpty());
+    connect(automatic, &QAction::triggered, this, [this] { chooseSpellLanguages({}); });
+    languageMenu->addSeparator();
+    QStringList candidates = recentSpellLanguages_;
+    for (const QString &name : spelling_->dictionaries())
+        if (!candidates.contains(name)) candidates << name;
+    for (const QString &name : candidates) {
+        if (!names.contains(name)) continue;
+        QAction *action = languageMenu->addAction(QString(names.value(name)).replace("&", "&&"));
+        action->setCheckable(true);
+        action->setChecked(spellLanguages_.contains(name));
+        connect(action, &QAction::triggered, this, [this, name](bool checked) {
+            QStringList chosen = spellLanguages_;
+            chosen.removeAll(name);
+            if (checked) chosen << name;
+            while (chosen.size() > SpellLanguageDialog::MaxLanguages) chosen.removeFirst();
+            chooseSpellLanguages(chosen);
+        });
+    }
+    languageMenu->addSeparator();
+    connect(languageMenu->addAction("More..."), &QAction::triggered, this, [this] {
+        SpellLanguageDialog dialog(spellLanguages_.isEmpty() ? spelling_->dictionaries() : spellLanguages_, this);
+        if (dialog.exec() == QDialog::Accepted) chooseSpellLanguages(dialog.chosenDictionaries());
+    });
 }
 
 QString MessageInput::toPlainText() const
@@ -371,18 +513,24 @@ void MessageInput::pasteTrimmed()
     updateEnterAction();
 }
 
+// Corrections of the misspelled word under the mouse come first, then the editing actions and the spelling
+// language.
 void MessageInput::contextMenuEvent(QContextMenuEvent *event)
 {
-    QMenu *menu = createStandardContextMenu(this);
+    QMenu menu(this);
+    addSpellingCorrections(menu, event->pos());
+    const std::unique_ptr<QMenu> standard(createStandardContextMenu(this));
     // Paste trims the text as Ctrl+V does here.
-    for (QAction *action : menu->actions()) {
+    for (QAction *action : standard->actions()) {
         if (action->shortcut() == QKeySequence(QKeySequence::Paste)) {
             disconnect(action, &QAction::triggered, nullptr, nullptr);
             connect(action, &QAction::triggered, this, &MessageInput::pasteTrimmed);
         }
     }
-    menu->exec(event->globalPos());
-    delete menu;
+    menu.addActions(standard->actions());
+    menu.addSeparator();
+    addSpellingLanguageMenu(menu);
+    menu.exec(event->globalPos());
 }
 
 // The field grows after its text has changed, when the scrolling has already been decided for the smaller

@@ -23,7 +23,9 @@ is used, and otherwise CMake fetches them from GitHub when it configures the bui
 and builds them into agentin, as it does with backward-cpp; that first
 configuration needs a network connection. The editor library
 [qcodeedit](https://github.com/siplasplas/qcodeedit) 1.17 or newer (the message
-field, and the Kate syntax reader of the diffs) must be installed. Claude requires Python 3, `claude-agent-sdk`, and a configured API
+field, its spell checking with hunspell and language detection, and the Kate
+syntax reader of the diffs) must be installed, built with hunspell
+(`libhunspell-dev`). Claude requires Python 3, `claude-agent-sdk`, and a configured API
 key. GLM uses the same Python SDK with a Z.AI API key. Gemini requires an
 installed and authenticated Gemini CLI. Antigravity requires an installed and
 authenticated `agy` CLI. The optional test also requires Qt 6
@@ -746,6 +748,20 @@ does now: a green arrow when it sends and a gray return sign when it starts a ne
 line; its tooltip names the key for the other action. **Stop** is the red square
 beside it. The field is qcodeedit's editor, without syntax colours; its context
 menu has Undo, Redo, Cut, Copy, Paste, Delete and Select All.
+
+Misspelled words in the message field get a red wavy underline, checked with
+the hunspell dictionaries installed in the system. The language follows the
+message: a moment after you stop typing it is detected from the text (a message
+of one or two words keeps the language found before; at first the desktop's).
+Right-clicking a misspelled word offers up to 8 corrections, **Add to
+Dictionary** (the user dictionary in `~/.local/share/siplasplas/spell/`, shared
+with qceditor and Gemini Commander) and **Ignore** (until agentin closes). The
+context menu's **Spelling Language** goes back to **Automatic** or chooses
+recent languages, up to two at once (e.g. English and Polish); **More...** lists
+all installed dictionaries. Without a dictionary for the language nothing is
+underlined and the log names the package to install, e.g. `hunspell-de`.
+**Settings → Options…** turns the checking off. The choices are saved under
+`spelling` in `settings.json`.
 
 Up and Down move between lines and, on the first or last line, recall the
 previous or next message you wrote in the current tab's conversation (a long

@@ -54,11 +54,18 @@ FetchContent_Declare(
     FIND_PACKAGE_ARGS 1.6 CONFIG COMPONENTS Widgets
 )
 FetchContent_MakeAvailable(DiffMerge)
-# The message field is qcodeedit's editor (1.17: insertText, textChanged, the standard context menu). main()
-# moves the Kate data of qcodeedit 1.12 and older (qce::kate::migrateDataRoot). Installed targets imported by
-# DiffMerge are scoped to its directory.
+# The message field is qcodeedit's editor (1.17: insertText, textChanged, the standard context menu), spell
+# checked with qcodeedit-spell (hunspell) in the language qcodeedit-encoding detects. main() moves the Kate data
+# of qcodeedit 1.12 and older (qce::kate::migrateDataRoot). Installed targets imported by DiffMerge are scoped
+# to its directory.
 if(NOT TARGET qcodeedit::qcodeedit)
     find_package(qcodeedit 1.17.0 CONFIG REQUIRED)
+endif()
+if(NOT TARGET qcodeedit::spell)
+    find_package(qcodeedit-spell 1.17.0 CONFIG REQUIRED)
+endif()
+if(NOT TARGET qcodeedit::encoding)
+    find_package(qcodeedit-encoding 1.17.0 CONFIG REQUIRED)
 endif()
 if(NOT TARGET qcodeedit::kate)
     find_package(qcodeedit-kate 1.13.0 CONFIG REQUIRED)
@@ -114,6 +121,8 @@ add_executable(agentin
     src/MainWindow.h
     src/MessageInput.cpp
     src/MessageInput.h
+    src/SpellLanguageDialog.cpp
+    src/SpellLanguageDialog.h
     src/UsageLimitsPanel.cpp
     src/UsageLimitsPanel.h
     src/Notifier.cpp
@@ -130,7 +139,7 @@ add_executable(agentin
     src/FileOpener.h
 )
 target_link_libraries(agentin PRIVATE Qt6::Widgets qt-extra Backward::Object DiffMerge::Widgets PkgConfig::LIBGIT2
-                      qtermwidget6 qcodeedit::qcodeedit qcodeedit::kate)
+                      qtermwidget6 qcodeedit::qcodeedit qcodeedit::kate qcodeedit::spell qcodeedit::encoding)
 # The window icon; Qt draws it with its SVG image format plugin.
 qt_add_resources(agentin icons PREFIX "/" FILES icons/agentin.svg)
 target_include_directories(agentin PRIVATE src)
@@ -198,6 +207,8 @@ if(BUILD_TESTING)
         src/MainWindow.h
         src/MessageInput.cpp
         src/MessageInput.h
+        src/SpellLanguageDialog.cpp
+        src/SpellLanguageDialog.h
         src/UsageLimitsPanel.cpp
         src/UsageLimitsPanel.h
         src/Notifier.cpp
@@ -214,7 +225,7 @@ if(BUILD_TESTING)
         src/FileOpener.h
     )
     target_link_libraries(agentin_test PRIVATE Qt6::Widgets Qt6::Test qt-extra DiffMerge::Widgets PkgConfig::LIBGIT2
-                          qtermwidget6 qcodeedit::qcodeedit)
+                          qtermwidget6 qcodeedit::qcodeedit qcodeedit::spell qcodeedit::encoding)
     target_include_directories(agentin_test PRIVATE src)
     add_test(NAME agentin_test COMMAND agentin_test)
     # Decisions about shell command lines, against a corpus of real commands; no window, milliseconds.
