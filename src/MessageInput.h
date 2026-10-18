@@ -70,6 +70,8 @@ public:
     // Recently chosen dictionaries, newest first, offered in the context menu.
     QStringList recentSpellLanguages() const { return recentSpellLanguages_; }
     void setRecentSpellLanguages(const QStringList &dictionaries) { recentSpellLanguages_ = dictionaries; }
+    // The language detected from the message, a cpg code such as "pl"; at first the desktop's.
+    QString detectedLanguage() const { return detectedLanguage_; }
 
 signals:
     void submitted();
@@ -105,6 +107,7 @@ private:
     void detectLanguage();
     void applySpellLanguages();
     void chooseSpellLanguages(const QStringList &dictionaries);
+    // `position` in the viewport's coordinates.
     void addSpellingCorrections(QMenu &menu, const QPoint &position);
     void addSpellingLanguageMenu(QMenu &menu);
 

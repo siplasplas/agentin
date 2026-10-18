@@ -132,7 +132,7 @@ void MessageInput::applySpellLanguages()
 void MessageInput::addSpellingCorrections(QMenu &menu, const QPoint &position)
 {
     if (!spelling_->isEnabled()) return;
-    const auto word = spelling_->misspelledWordAt(cursorAt(viewport()->mapFrom(this, position)));
+    const auto word = spelling_->misspelledWordAt(cursorAt(position));
     if (!word) return;
     const QStringList suggestions = spelling_->suggestions(word->word, 8);
     if (suggestions.isEmpty()) menu.addAction("No suggestions")->setEnabled(false);
@@ -518,7 +518,9 @@ void MessageInput::pasteTrimmed()
 void MessageInput::contextMenuEvent(QContextMenuEvent *event)
 {
     QMenu menu(this);
-    addSpellingCorrections(menu, event->pos());
+    // A click's position comes in the viewport's coordinates, the menu key's in this widget's.
+    addSpellingCorrections(menu, event->reason() == QContextMenuEvent::Keyboard ? viewport()->mapFrom(this, event->pos())
+                                                                                 : event->pos());
     const std::unique_ptr<QMenu> standard(createStandardContextMenu(this));
     // Paste trims the text as Ctrl+V does here.
     for (QAction *action : standard->actions()) {

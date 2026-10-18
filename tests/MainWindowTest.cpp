@@ -48,6 +48,9 @@
 #include <QtTest>
 
 #include <diffmerge/FileDiffWidget.h>
+#include <qce/spell/SpellChecker.h>
+#include <QContextMenuEvent>
+#include <QJsonArray>
 
 
 static void startChat(MainWindow &window, const QString &provider, const QString &path);
@@ -88,6 +91,9 @@ private slots:
     void claudeToolsBetweenText();
     void claudeCompaction();
     void messageInputKeepsCursorVisible();
+    void messageInputSpellingCorrections();
+    void messageInputDetectsLanguage();
+    void spellingFollowsOptions();
     void codexSessionApprovalsWithdrawn();
     void conversationRenaming();
     void tabsKeepTheirScrollPosition();
@@ -1008,6 +1014,118 @@ void MainWindowTest::messageInputKeepsCursorVisible()
         const QRect caret = input.inputMethodQuery(Qt::ImCursorRectangle).toRect().translated(-input.viewport()->pos());
         QVERIFY2(input.viewport()->rect().contains(caret), qPrintable(QString("after line %1").arg(line)));
     }
+}
+
+// A misspelled word is underlined; right-clicking it offers corrections, and the chosen one replaces it as one
+// edit that Ctrl+Z undoes. Needs hunspell's Polish dictionary.
+void MainWindowTest::messageInputSpellingCorrections()
+{
+    const QString polish = qce::spell::dictionaryFor("pl");
+    if (polish.isEmpty()) QSKIP("No Polish hunspell dictionary is installed (e.g. hunspell-pl).");
+    MessageInput input;
+    input.resize(400, 40);
+    input.show();
+    QVERIFY(QTest::qWaitForWindowExposed(&input));
+    input.setSpellLanguages({polish});
+    input.setPlainText("To jest wiadomość z błendem");
+    const auto underlined = [&input] { return input.extraSelections(qce::CodeEditArea::SpellingLayer); };
+    QTRY_COMPARE(underlined().size(), 1);
+    QCOMPARE(underlined().first().start.column, 20);
+    QCOMPARE(underlined().first().end.column, 27);
+
+    // The middle of the word, as the editor draws it.
+    input.setCursorPosition({0, 23});
+    const QPoint point = input.inputMethodQuery(Qt::ImCursorRectangle).toRect().center() - input.viewport()->pos();
+    QStringList offered;
+    bool chosen = false;
+    QTimer::singleShot(50, &input, [&] {
+        auto *menu = qobject_cast<QMenu *>(QApplication::activePopupWidget());
+        QVERIFY(menu);
+        const auto closeMenu = qScopeGuard([menu] { menu->close(); });
+        for (QAction *action : menu->actions()) offered << action->text();
+        for (QAction *action : menu->actions()) {
+            if (action->text() == "błędem") {
+                action->trigger();
+                chosen = true;
+                break;
+            }
+        }
+    });
+    QContextMenuEvent event(QContextMenuEvent::Mouse, point, input.viewport()->mapToGlobal(point));
+    QCoreApplication::sendEvent(input.viewport(), &event);
+    QVERIFY2(chosen, qPrintable(offered.join(", ")));
+    QVERIFY(offered.contains("Add to Dictionary"));
+    QVERIFY(offered.contains("Ignore"));
+    QVERIFY(offered.contains("&Paste"));
+    QVERIFY(offered.contains("Spelling Language"));
+    QCOMPARE(input.toPlainText(), QString("To jest wiadomość z błędem"));
+    QTRY_VERIFY(underlined().isEmpty());
+    input.undo();
+    QCOMPARE(input.toPlainText(), QString("To jest wiadomość z błendem"));
+}
+
+// The language follows the message once it has a few words; a message of one or two words keeps the language
+// found before, as such a short text does not show it.
+void MainWindowTest::messageInputDetectsLanguage()
+{
+    MessageInput input;
+    input.setPlainText("This is a message written in English about the weather and the garden");
+    QTRY_COMPARE(input.detectedLanguage(), QString("en"));
+    input.setPlainText("Dzięki wielkie");
+    QTest::qWait(1000);
+    QCOMPARE(input.detectedLanguage(), QString("en"));
+    input.setPlainText("To jest wiadomość napisana po polsku o pogodzie i ogrodzie za domem");
+    QTRY_COMPARE(input.detectedLanguage(), QString("pl"));
+    // Chosen languages are used as they are, without detecting.
+    input.setSpellLanguages({"en_US"});
+    input.setPlainText("This is a message written in English about the weather and the garden");
+    QTest::qWait(1000);
+    QCOMPARE(input.detectedLanguage(), QString("pl"));
+}
+
+// The chosen languages come from settings.json, the options turn the checking off, and both are saved there.
+void MainWindowTest::spellingFollowsOptions()
+{
+    QTemporaryDir directory;
+    QVERIFY(directory.isValid());
+    QFile settings(directory.filePath("settings.json"));
+    QVERIFY(settings.open(QIODevice::WriteOnly));
+    settings.write(QJsonDocument(QJsonObject{{"spelling", QJsonObject{
+        {"languages", QJsonArray{"en_US", "pl_PL"}}, {"recent", QJsonArray{"pl_PL", "en_US", "de_DE"}}}}}).toJson());
+    settings.close();
+    MainWindow window("/nonexistent/codex", directory.path(), "/nonexistent/python", "/nonexistent/bridge",
+                      "/nonexistent/gemini", nullptr, directory.filePath("index.json"), "/nonexistent/agy",
+                      directory.filePath("gemini"));
+    window.show();
+    auto *input = window.findChild<MessageInput *>("commandInput");
+    QVERIFY(input);
+    QVERIFY(input->spellCheckingEnabled());
+    QCOMPARE(input->spellLanguages(), QStringList({"en_US", "pl_PL"}));
+    QCOMPARE(input->recentSpellLanguages(), QStringList({"pl_PL", "en_US", "de_DE"}));
+
+    QAction *options = nullptr;
+    for (QAction *action : window.findChildren<QAction *>())
+        if (action->text() == "Options…") options = action;
+    QVERIFY(options);
+    bool changed = false;
+    QTimer::singleShot(0, &window, [&] {
+        auto *dialog = qobject_cast<QDialog *>(QApplication::activeModalWidget());
+        QVERIFY(dialog);
+        auto *spellChecking = dialog->findChild<QCheckBox *>("spellChecking");
+        QVERIFY(spellChecking);
+        QVERIFY(spellChecking->isChecked());
+        spellChecking->setChecked(false);
+        dialog->findChild<QDialogButtonBox *>()->button(QDialogButtonBox::Ok)->click();
+        changed = true;
+    });
+    options->trigger();
+    QVERIFY(changed);
+    QVERIFY(!input->spellCheckingEnabled());
+    QVERIFY(settings.open(QIODevice::ReadOnly));
+    const QJsonObject saved = QJsonDocument::fromJson(settings.readAll()).object().value("spelling").toObject();
+    QCOMPARE(saved.value("enabled").toBool(true), false);
+    QCOMPARE(saved.value("languages").toVariant().toStringList(), QStringList({"en_US", "pl_PL"}));
+    QCOMPARE(saved.value("recent").toVariant().toStringList(), QStringList({"pl_PL", "en_US", "de_DE"}));
 }
 
 // Claude's bridge streams a whole turn as one text; a tool ends the text before it, so that the tool line
